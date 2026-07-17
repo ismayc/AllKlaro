@@ -39,6 +39,17 @@ def test_focus_mode_centers_latest_text():
     assert JS.count("clearPartial()") >= 4
 
 
+def test_conversation_can_be_cleared():
+    assert 'id="clearBtn"' in HTML
+    # Confirmation guards against an accidental mid-call tap wiping everything.
+    assert re.search(r"clearBtn\.onclick[^}]*confirm\(", JS, re.S)
+    assert "cards.clear()" in JS            # card state resets, not just the DOM
+    assert re.search(r'lastSummary = ""', JS)  # stale summary won't leak into export
+    assert "replaceChildren(hint)" in JS    # the initial hint returns to the feed
+    # Queued auto-speech from the old conversation stops too.
+    assert re.search(r"clearBtn\.onclick[^}]*speechSynthesis\?\.cancel", JS, re.S)
+
+
 def test_phrases_speak_on_tap_in_their_own_language():
     # Original speaks in the source language, each translation row in its
     # target language; both stop propagation so the big-text view isn't

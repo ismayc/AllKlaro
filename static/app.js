@@ -11,6 +11,7 @@ const focusChk = document.getElementById("focusChk");
 const pauseSlider = document.getElementById("pause");
 const pauseVal = document.getElementById("pauseVal");
 const exportBtn = document.getElementById("exportBtn");
+const clearBtn = document.getElementById("clearBtn");
 const summarizeBtn = document.getElementById("summarizeBtn");
 const statusDot = document.getElementById("statusDot");
 const statusText = document.getElementById("statusText");
@@ -316,6 +317,16 @@ exportBtn.onclick = async () => {
   a.download = `allklaro-${new Date().toISOString().slice(0, 16).replace(":", "")}.md`;
   a.click();
   URL.revokeObjectURL(a.href);
+};
+
+clearBtn.onclick = () => {
+  if (!feed.querySelector(".card, .error-banner")) return; // nothing to clear
+  if (!confirm("Clear the conversation? This cannot be undone.")) return;
+  window.speechSynthesis?.cancel();
+  cards.clear();
+  lastSummary = ""; // a stale summary must not leak into the next export
+  clearPartial();
+  feed.replaceChildren(hint);
 };
 
 summarizeBtn.onclick = async () => {
