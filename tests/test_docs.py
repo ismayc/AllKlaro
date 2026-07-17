@@ -27,6 +27,27 @@ def test_docs_quickstart_matches_readme():
     assert "8710" in DOCS  # the port users will open
 
 
+def _png_size(path):
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", f"{path.name} is not a PNG"
+    return (int.from_bytes(data[16:20], "big"),
+            int.from_bytes(data[20:24], "big"))
+
+
+def test_docs_link_preview_card():
+    # iMessage/Slack previews come from Open Graph tags + a hosted image.
+    m = re.search(r'property="og:image" content="([^"]+)"', DOCS)
+    assert m, "og:image tag missing"
+    name = m.group(1).rsplit("/", 1)[-1]
+    img = ROOT / "docs" / name
+    assert img.exists(), f"og:image points at missing file {name}"
+    assert _png_size(img) == (1200, 630)
+    for tag in ('property="og:title"', 'property="og:description"',
+                'name="twitter:card" content="summary_large_image"'):
+        assert tag in DOCS, f"missing {tag}"
+    assert _png_size(ROOT / "docs" / "apple-touch-icon.png") == (180, 180)
+
+
 def test_docs_links_point_at_this_repo():
     repos = set(re.findall(r"github\.com/([\w-]+/[\w-]+)", DOCS))
     assert "ismayc/AllKlaro" in repos
