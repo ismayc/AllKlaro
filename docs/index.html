@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AllKlaro — live, fully-local speech translation</title>
+  <meta name="description" content="Live, fully-local speech translation between German, English, and Spanish. Runs entirely on your Mac — nothing leaves your machine." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗣️</text></svg>" />
+  <style>
+    * { box-sizing: border-box; margin: 0; }
+    :root {
+      --bg: #10141a; --panel: #1a2029; --border: #2b3442;
+      --text: #e8edf4; --muted: #8b98ab;
+      --de: #4fa3ff; --en: #3ecf8e; --es: #f5a623; --err: #ff6b6b;
+      --accent: #2563eb;
+    }
+    html { scroll-behavior: smooth; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: -apple-system, "SF Pro Text", Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+    a { color: var(--en); }
+
+    /* ------------------------------------------------------------- hero */
+    .hero { text-align: center; padding: 72px 0 48px; }
+    .logo {
+      font-size: clamp(44px, 9vw, 72px); font-weight: 800; letter-spacing: -.03em;
+      background: linear-gradient(90deg, var(--de), var(--en), var(--es));
+      -webkit-background-clip: text; background-clip: text; color: transparent;
+    }
+    .tagline { font-size: clamp(19px, 3.5vw, 26px); font-weight: 600; margin-top: 10px; }
+    .word-play { color: var(--muted); margin-top: 12px; font-style: italic; }
+    .word-play b.de { color: var(--de); } .word-play b.en { color: var(--en); }
+    .word-play b.es { color: var(--es); }
+    .sub { color: var(--muted); max-width: 640px; margin: 18px auto 0; font-size: 17px; }
+    .cta-row { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; margin-top: 30px; }
+    .btn {
+      display: inline-block; padding: 12px 26px; border-radius: 10px;
+      font-size: 16px; font-weight: 600; text-decoration: none;
+    }
+    .btn.primary { background: var(--accent); color: #fff; }
+    .btn.primary:hover { filter: brightness(1.15); }
+    .btn.ghost { border: 1px solid var(--border); color: var(--text); }
+    .btn.ghost:hover { border-color: var(--muted); }
+    .chips { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 28px; }
+    .chip {
+      font-size: 12.5px; font-weight: 600; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 20px; padding: 4px 12px;
+    }
+    .chip b.en { color: var(--en); } .chip b.de { color: var(--de); } .chip b.es { color: var(--es); }
+
+    /* ------------------------------------------------------------- demo */
+    .demo { margin: 30px auto 0; max-width: 660px; text-align: left; display: grid; gap: 12px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 14px 18px;
+    }
+    .card.de { border-left: 4px solid var(--de); }
+    .card.en { border-left: 4px solid var(--en); }
+    .card.es { border-left: 4px solid var(--es); }
+    .orig { color: var(--muted); font-size: 14px; }
+    .trans { font-size: 17px; margin-top: 6px; }
+    .lang {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .06em;
+      padding: 1px 7px; border-radius: 20px; margin-right: 8px; vertical-align: 2px;
+    }
+    .lang.de { background: rgba(79,163,255,.15); color: var(--de); }
+    .lang.en { background: rgba(62,207,142,.15); color: var(--en); }
+    .lang.es { background: rgba(245,166,35,.15); color: var(--es); }
+    .speaker {
+      font-size: 10.5px; font-weight: 700; letter-spacing: .05em; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 20px; padding: 1px 7px; margin-right: 8px;
+      vertical-align: 2px;
+    }
+    .cursor { color: var(--muted); animation: blink 1s infinite; }
+    @keyframes blink { 50% { opacity: .35; } }
+
+    /* --------------------------------------------------------- sections */
+    section { padding: 56px 0; border-top: 1px solid var(--border); }
+    h2 { font-size: 28px; letter-spacing: -.02em; margin-bottom: 24px; }
+    .pipeline {
+      color: var(--muted); background: var(--panel); border: 1px solid var(--border);
+      border-radius: 12px; padding: 14px 18px; text-align: center; overflow-x: auto;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14px;
+      white-space: nowrap; margin-top: 26px;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .feature { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
+    .feature h3 { font-size: 16.5px; margin-bottom: 6px; }
+    .feature p { color: var(--muted); font-size: 14.5px; }
+
+    pre {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px; overflow-x: auto; font-size: 14px; line-height: 1.7;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    pre .c { color: var(--muted); }
+    .note { color: var(--muted); font-size: 14.5px; margin-top: 14px; }
+
+    footer {
+      border-top: 1px solid var(--border); padding: 34px 0 46px;
+      color: var(--muted); font-size: 14px; text-align: center;
+    }
+    @media (max-width: 640px) {
+      .hero { padding: 48px 0 36px; }
+      section { padding: 40px 0; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="wrap hero">
+    <div class="logo">🗣️ AllKlaro</div>
+    <div class="tagline">Live, fully-local speech translation<br />between German, English, and Spanish.</div>
+    <p class="word-play"><b class="en">All</b> (EN) + <b class="de">Klaro!</b> (DE) +
+      <b class="es">claro</b> (ES) — everything understood, in all three languages.</p>
+    <p class="sub">Someone speaks German or Spanish on your call — two seconds later the
+      English translation is streaming onto your screen, color-coded by speaker and
+      language. You answer in English; they get German or Spanish back.
+      Nothing ever leaves your machine.</p>
+    <div class="cta-row">
+      <a class="btn primary" href="#quickstart">Get started</a>
+      <a class="btn ghost" href="https://github.com/ismayc/AllKlaro">View on GitHub</a>
+    </div>
+    <div class="chips">
+      <span class="chip">🔒 <b class="en">100% local</b> — no cloud, no accounts</span>
+      <span class="chip">🍎 Apple Silicon GPU</span>
+      <span class="chip">🧪 100+ tests</span>
+    </div>
+
+    <div class="demo" aria-hidden="true">
+      <div class="card de">
+        <div class="orig"><span class="speaker">Them</span><span class="lang de">DE</span>Könnten wir den Termin auf nächste Woche verschieben?</div>
+        <div class="trans"><span class="lang en">EN</span>Could we move the appointment to next week?</div>
+      </div>
+      <div class="card en">
+        <div class="orig"><span class="speaker">You</span><span class="lang en">EN</span>Sure — does Tuesday morning work for you?</div>
+        <div class="trans"><span class="lang de">DE</span>Klar — passt Dienstagvormittag für Sie?</div>
+      </div>
+      <div class="card es">
+        <div class="orig"><span class="speaker">Them</span><span class="lang es">ES</span>Perfecto, nos vemos el martes entonces.</div>
+        <div class="trans"><span class="lang en">EN</span>Perfect, see you on Tuesday then<span class="cursor">▍</span></div>
+      </div>
+    </div>
+
+    <div class="pipeline">🎙️ mic / 🔊 call audio ─► VAD ─► Whisper (Apple GPU) ─► Ollama ─► 🖥️ streaming cards</div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>✨ What it does</h2>
+      <div class="grid">
+        <div class="feature"><h3>🔄 Auto direction</h3>
+          <p>Detects each utterance's language and translates to the other —
+          DE↔EN, ES↔EN, ES↔DE — or force a direction, including
+          German&nbsp;→&nbsp;English&nbsp;+&nbsp;Spanish at once.</p></div>
+        <div class="feature"><h3>📞 Call mode</h3>
+          <p>Captures your mic and the meeting as separate <em>You / Them</em>
+          channels via BlackHole; echoes picked up twice are dropped automatically.</p></div>
+        <div class="feature"><h3>🗣️ Tap to hear</h3>
+          <p>Tap any phrase to hear it spoken in its own language — great for
+          pronunciation practice.</p></div>
+        <div class="feature"><h3>🧠 Context-aware</h3>
+          <p>Translations see the recent conversation, so pronouns and topics
+          resolve correctly.</p></div>
+        <div class="feature"><h3>🧩 German-aware pausing</h3>
+          <p>Verb-final sentences chopped by a short pause are re-joined and
+          re-translated whole.</p></div>
+        <div class="feature"><h3>📖 Learner tools</h3>
+          <p>One-click summary with a vocabulary list, and Markdown export for
+          later review.</p></div>
+        <div class="feature"><h3>📱 Phone mode</h3>
+          <p>Serve over LAN HTTPS and use your iPhone's mic for in-person
+          conversations.</p></div>
+        <div class="feature"><h3>🎯 Focus mode</h3>
+          <p>Keep the newest text mid-screen ("Center latest") instead of at the
+          bottom edge.</p></div>
+        <div class="feature"><h3>📚 Glossary</h3>
+          <p>Pin names and terms in <code>glossary.txt</code> — biases both
+          recognition and translation.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart">
+    <div class="wrap">
+      <h2>🚀 Quick start</h2>
+      <p class="note" style="margin: 0 0 16px">You need an Apple Silicon Mac (M1+),
+        16&nbsp;GB+ RAM recommended, ~12&nbsp;GB free disk, and
+        <a href="https://brew.sh">Homebrew</a>.</p>
+      <pre><span class="c"># 1. Install uv (Python manager) and Ollama (runs the translation model)</span>
+brew install uv ollama
+
+<span class="c"># 2. Start Ollama and pull the translation model (~8 GB download)</span>
+brew services start ollama
+ollama pull gemma3:12b
+
+<span class="c"># 3. Get the code and install Python dependencies</span>
+git clone https://github.com/ismayc/AllKlaro.git
+cd AllKlaro
+uv sync
+
+<span class="c"># 4. Run it, then open http://127.0.0.1:8710</span>
+uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
+      <p class="note">Or skip step 4 and double-click <strong>Start AllKlaro.command</strong>
+        in Finder — it starts Ollama if needed, starts the server, and opens the page.
+        The first launch downloads the Whisper weights (~1.6&nbsp;GB) once; after that
+        everything runs offline. To translate the <em>other</em> side of a call, add the
+        free <a href="https://existential.audio/blackhole/">BlackHole</a> loopback driver —
+        the README walks through the one-time setup.</p>
+    </div>
+  </section>
+
+  <section id="how">
+    <div class="wrap">
+      <h2>⚙️ Under the hood</h2>
+      <div class="grid">
+        <div class="feature"><h3>Speculative transcription</h3>
+          <p>Whisper starts ~320 ms into a pause and the result is discarded if
+          speech resumes — partials never block real work.</p></div>
+        <div class="feature"><h3>Prompt caching</h3>
+          <p>Static system prompt + history as chat turns means Ollama
+          re-processes only the new sentence.</p></div>
+        <div class="feature"><h3>Continuous-speech splitting</h3>
+          <p>No pauses (videos, fast talkers)? Utterances split at natural
+          micro-pauses after ~8 s instead of stalling.</p></div>
+        <div class="feature"><h3>Pair-constrained detection</h3>
+          <p>"Dutch" detected in a German↔English conversation triggers a
+          re-decode pinned to German.</p></div>
+        <div class="feature"><h3>Junk defense in depth</h3>
+          <p>Temperature-fallback ladder, compression-ratio and no-speech
+          signals, a repetition-loop detector, and a blocklist of stock
+          Whisper hallucinations.</p></div>
+        <div class="feature"><h3>VAD hysteresis</h3>
+          <p>Starting speech needs Silero probability &gt; 0.5, continuing only
+          &gt; 0.35, so quiet word-endings don't chop sentences.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <a href="https://github.com/ismayc/AllKlaro">GitHub</a> ·
+      <a href="https://github.com/ismayc/AllKlaro#-troubleshooting">Troubleshooting</a> ·
+      Built with <a href="https://github.com/ml-explore/mlx-examples">mlx-whisper</a>,
+      <a href="https://github.com/snakers4/silero-vad">Silero VAD</a>, and
+      <a href="https://ollama.com">Ollama</a>.
+    </div>
+  </footer>
+
+</body>
+</html>
