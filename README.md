@@ -9,9 +9,10 @@
 ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-4fa3ff)
 ![tests](https://img.shields.io/badge/tests-100%2B%20passing-f5a623)
 
-Someone speaks German on your call — two seconds later the English translation
-is streaming onto your screen, color-coded by speaker and language. You answer
-in English; they get German. Nothing ever leaves your machine: speech
+Someone speaks German or Spanish on your call — two seconds later the English
+translation is streaming onto your screen, color-coded by speaker and language.
+You answer in English; they get German or Spanish back. Nothing ever leaves
+your machine: speech
 recognition runs on the Mac's GPU ([mlx-whisper](https://github.com/ml-explore/mlx-examples)
 `large-v3-turbo`), voice detection is neural ([Silero VAD](https://github.com/snakers4/silero-vad)),
 and translation is a local [Ollama](https://ollama.com) model (`gemma3:12b`
