@@ -21,6 +21,9 @@ const partialText = document.getElementById("partialText");
 const bigText = document.getElementById("bigText");
 const controls = document.getElementById("controls");
 const controlsBtn = document.getElementById("controlsBtn");
+const aboutBtn = document.getElementById("aboutBtn");
+const aboutBox = document.getElementById("about");
+const aboutClose = document.getElementById("aboutClose");
 
 let ws = null, audioCtx = null;
 let streams = [], workletNodes = [];
@@ -72,6 +75,12 @@ setControlsHidden(saved.controlsHidden ??
 controlsBtn.onclick = () => {
   setControlsHidden(!controls.classList.contains("hidden"));
   saveSettings();
+};
+
+aboutBtn.onclick = () => aboutBox.classList.remove("hidden");
+aboutClose.onclick = () => aboutBox.classList.add("hidden");
+aboutBox.onclick = (e) => { // tap the backdrop (not the card) to dismiss
+  if (e.target === aboutBox) aboutBox.classList.add("hidden");
 };
 
 function setStatus(cls, text) {
@@ -200,7 +209,7 @@ function newCard(msg) {
   feed.appendChild(card);
   feed.scrollTop = feed.scrollHeight;
   cards.set(msg.id, {
-    card, rows, source: msg.source, targets: msg.targets,
+    id: msg.id, card, rows, source: msg.source, targets: msg.targets,
     text: msg.text, speaker: msg.speaker,
     time: new Date().toLocaleTimeString(),
   });
@@ -211,6 +220,72 @@ function renderRow(c, target) {
   row.el.innerHTML = langChip(target);
   row.el.append(document.createTextNode(row.text));
   row.el.insertAdjacentHTML("beforeend", '<span class="cursor">▍</span>');
+}
+
+// -------------------------------------------------------- editing corrections
+
+function renderFinalRow(c, target) {
+  const row = c.rows[target];
+  row.el.innerHTML = langChip(target);
+  row.el.append(document.createTextNode(row.text));
+  const btn = document.createElement("button");
+  btn.className = "edit-btn";
+  btn.title = "Edit this translation";
+  btn.textContent = "✏️";
+  btn.onclick = (e) => { e.stopPropagation(); startEdit(c, target); };
+  row.el.append(btn);
+  if (row.edited) {
+    row.el.insertAdjacentHTML("beforeend", '<span class="edited">edited</span>');
+  }
+}
+
+function startEdit(c, target) {
+  const row = c.rows[target];
+  if (row.el.querySelector(".edit-box")) return; // already editing this row
+  const original = row.text;
+  row.el.innerHTML = langChip(target);
+  const box = document.createElement("textarea");
+  box.className = "edit-box";
+  box.rows = 2;
+  box.value = original;
+  box.onclick = (e) => e.stopPropagation(); // don't speak / open big-text
+  const finish = (save) => {
+    box.onblur = null;
+    const value = box.value.trim();
+    if (save && value && value !== original) {
+      row.text = value;
+      row.edited = true;
+      sendCorrection(c, target, original, value);
+    }
+    renderFinalRow(c, target);
+  };
+  box.onblur = () => finish(true); // tapping elsewhere (or mobile Done) saves
+  box.onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); finish(true); }
+    else if (e.key === "Escape") finish(false);
+  };
+  row.el.append(box);
+  box.focus();
+  box.setSelectionRange(original.length, original.length);
+}
+
+async function sendCorrection(c, target, was, corrected) {
+  // Fix the live conversation context too, so follow-up translations
+  // build on the corrected phrasing.
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "correction", id: c.id, target, corrected }));
+  }
+  try {
+    const r = await fetch("/api/correction", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: c.source, target, text: c.text,
+                             model_translation: was, corrected }),
+    });
+    const { error } = await r.json();
+    if (error) showError(error);
+  } catch {
+    showError("Could not save the correction.");
+  }
 }
 
 function showBig(id) {
@@ -278,7 +353,8 @@ function handleMessage(msg) {
   } else if (msg.type === "translation_done") {
     const c = cards.get(msg.id);
     if (!c) return;
-    c.card.querySelectorAll(".cursor").forEach((el) => el.remove());
+    // Re-render each row without the cursor and with its edit button.
+    for (const t of c.targets) renderFinalRow(c, t);
     const secs = ((msg.transcribe_ms + msg.translate_ms) / 1000).toFixed(1);
     c.card.insertAdjacentHTML("beforeend",
       `<div class="latency">${secs}s</div>`);

@@ -84,6 +84,22 @@ async def test_real_ollama_translates_german():
     assert "morning" in text.lower()
 
 
+async def test_real_ollama_correction_steers_translation(corrections_file):
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    # The user once corrected "Meeting" -> "stand-up"; a later sentence about
+    # the Meeting should pick up that preferred wording via retrieval.
+    server.save_correction({
+        "source": "de", "target": "en",
+        "text": "Das Meeting wurde auf Donnerstag verschoben.",
+        "corrected": "The stand-up was moved to Thursday.",
+        "model_translation": "The meeting was moved to Thursday."})
+    text = await server.stream_translation(
+        FakeWS(), 1, "Wann beginnt das Meeting?", "de", "en",
+        server.DEFAULT_MODEL)
+    assert "stand-up" in text.lower()
+
+
 async def test_real_ollama_context_resolves_pronoun():
     if not ollama_up():
         pytest.skip("Ollama not running")

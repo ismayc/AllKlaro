@@ -59,6 +59,8 @@ WHISPER_REPO = "mlx-community/whisper-large-v3-turbo"
 OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "gemma3:12b"
 GLOSSARY_PATH = Path(__file__).parent / "glossary.txt"
+CORRECTIONS_PATH = Path(__file__).parent / "corrections.jsonl"
+CORRECTION_EXAMPLES = 3            # retrieved corrections shown to the model
 
 VAD_BACKEND = os.environ.get("VAD_BACKEND", "silero")  # "silero" | "energy"
 SILERO_URL = ("https://github.com/snakers4/silero-vad/raw/master/"
@@ -102,6 +104,67 @@ def load_glossary() -> list[str]:
 def glossary_whisper_terms() -> str:
     """Source-side spellings only, to bias Whisper toward proper nouns."""
     return ", ".join(ln.split("=")[0].strip() for ln in load_glossary())
+
+
+# ------------------------------------------------------------------ corrections
+
+_corrections_cache = {"mtime": None, "items": []}
+
+
+def load_corrections() -> list[dict]:
+    """User-corrected translations from corrections.jsonl, mtime-cached.
+
+    Repeated corrections of the same utterance keep only the newest one, so
+    a re-edit supersedes rather than contradicts the earlier attempt.
+    """
+    try:
+        mtime = CORRECTIONS_PATH.stat().st_mtime
+    except OSError:
+        _corrections_cache.update(mtime=None, items=[])
+        return []
+    if mtime != _corrections_cache["mtime"]:
+        latest: dict[tuple, dict] = {}
+        for line in CORRECTIONS_PATH.read_text().splitlines():
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not (isinstance(item, dict) and item.get("text")
+                    and item.get("corrected")):
+                continue
+            key = (item.get("source"), item.get("target"),
+                   item["text"].strip())
+            latest.pop(key, None)          # re-insert so newest is last
+            latest[key] = item
+        _corrections_cache.update(mtime=mtime, items=list(latest.values()))
+    return _corrections_cache["items"]
+
+
+def save_correction(item: dict) -> None:
+    with CORRECTIONS_PATH.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(item, ensure_ascii=False) + "\n")
+
+
+def content_words(text: str) -> set[str]:
+    return {w for w in re.findall(r"\w+", text.lower(), re.UNICODE)
+            if len(w) >= 3}
+
+
+def relevant_corrections(text: str, source: str, target: str,
+                         k: int = CORRECTION_EXAMPLES) -> list[dict]:
+    """The k stored corrections most lexically similar to `text`, same
+    direction only. Word-overlap retrieval — no embeddings needed at this
+    scale, and a loosely related example is harmless as a few-shot pair."""
+    words = content_words(text)
+    scored = []
+    for idx, c in enumerate(load_corrections()):
+        if c.get("source") != source or c.get("target") != target:
+            continue
+        overlap = len(words & content_words(c["text"]))
+        if overlap:
+            scored.append((overlap, idx, c))
+    scored.sort()                          # score, then file order (oldest first)
+    return [c for _, _, c in scored[-k:]]
 
 
 def is_degenerate(text: str) -> bool:
@@ -418,6 +481,27 @@ async def export(payload: dict):
     return {"markdown": build_markdown(items, summary)}
 
 
+@app.post("/api/correction")
+async def correction(payload: dict):
+    """Persist a user-edited translation for future few-shot retrieval."""
+    source, target = payload.get("source"), payload.get("target")
+    text = payload.get("text")
+    corrected = payload.get("corrected")
+    if (source not in LANG_NAMES or target not in LANG_NAMES
+            or source == target
+            or not isinstance(text, str) or not text.strip()
+            or not isinstance(corrected, str) or not corrected.strip()):
+        return {"error": "Invalid correction."}
+    model_translation = payload.get("model_translation")
+    save_correction({
+        "source": source, "target": target, "text": text.strip(),
+        "corrected": corrected.strip(),
+        "model_translation": model_translation.strip()
+        if isinstance(model_translation, str) else "",
+    })
+    return {"ok": True, "count": len(load_corrections())}
+
+
 SUMMARY_PROMPT = (
     "You summarize bilingual spoken conversations for a language learner. "
     "The user message is a conversation transcript, one utterance per line, "
@@ -489,7 +573,22 @@ def translation_messages(text: str, source: str, target: str,
     if glossary:
         system += ("\n\nGlossary — use these exact translations where "
                    "relevant:\n" + "\n".join(glossary))
+    # User-corrected translations similar to this sentence are shown as
+    # few-shot pairs. The system prompt must mark them as authoritative:
+    # unlabeled example turns read as mere history and gemma3 ignores their
+    # word choices (verified against the real model).
+    examples = relevant_corrections(text, source, target)
+    if examples:
+        system += (
+            f"\n\nThe first {len(examples)} exchange(s) below are "
+            f"translations the user has manually corrected. They are "
+            f"authoritative: when the same words or expressions come up "
+            f"again, reuse the corrected terminology and phrasing exactly."
+        )
     msgs = [{"role": "system", "content": system}]
+    for ex in examples:
+        msgs.append({"role": "user", "content": ex["text"]})
+        msgs.append({"role": "assistant", "content": ex["corrected"]})
     for h in history or []:
         if h.get("source") == source and h.get("target") == target:
             pair = (h["text"], h["translation"])
@@ -805,6 +904,15 @@ async def ws_endpoint(ws: WebSocket):
                         c["vad"].end_silence = pause_frames
                     log.info("config: mode=%s model=%s pause=%dms",
                              mode, model, pause_frames * FRAME_MS)
+                elif isinstance(cfg, dict) and cfg.get("type") == "correction":
+                    # An edited translation also fixes the live context, so
+                    # follow-up utterances build on the corrected phrasing.
+                    corrected = cfg.get("corrected")
+                    if isinstance(corrected, str) and corrected.strip():
+                        for h in history:
+                            if (h.get("uid") == cfg.get("id")
+                                    and h.get("target") == cfg.get("target")):
+                                h["translation"] = corrected.strip()
                 continue
             data = message.get("bytes")
             if data is None:

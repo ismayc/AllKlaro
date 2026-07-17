@@ -10,5 +10,8 @@ certs/
 # Personal conversation transcripts used for local testing
 testing/
 
+# Saved translation corrections (personal conversation content)
+corrections.jsonl
+
 # macOS
 .DS_Store

@@ -110,6 +110,30 @@ main {
 #partialBar.hidden { display: none; }
 .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--err);
   animation: blink 1s infinite; flex-shrink: 0; }
+.edit-btn { background: none; border: none; cursor: pointer;
+  font-size: 12px; margin-left: 8px; padding: 2px 4px; opacity: .45; }
+.edit-btn:hover { opacity: 1; }
+.edit-box {
+  display: block; width: 100%; margin-top: 4px; resize: vertical;
+  background: var(--bg); color: var(--text); font: inherit; line-height: 1.45;
+  border: 1px solid var(--muted); border-radius: 7px; padding: 6px 8px;
+}
+.edited { font-size: 10.5px; font-weight: 700; letter-spacing: .05em;
+  color: var(--muted); border: 1px solid var(--border); border-radius: 20px;
+  padding: 1px 7px; margin-left: 8px; vertical-align: 2px; }
+#about {
+  position: fixed; inset: 0; z-index: 20; background: rgba(10, 13, 18, .75);
+  display: flex; align-items: center; justify-content: center; padding: 20px;
+}
+#about.hidden { display: none; }
+.about-card {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: 14px; padding: 26px 30px; max-width: 440px;
+  text-align: center; display: grid; gap: 14px; justify-items: center;
+}
+.about-card .brand { font-size: 27px; }
+.about-card p { color: var(--muted); font-size: 14.5px; line-height: 1.55; }
+.about-links a { color: var(--en); margin: 0 10px; font-weight: 600; }
 .error-banner {
   background: rgba(255,107,107,.12); border: 1px solid var(--err);
   color: var(--err); border-radius: 10px; padding: 10px 16px; max-width: 980px;

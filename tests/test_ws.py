@@ -339,3 +339,31 @@ def test_pure_silence_produces_nothing(client, stub_transcribe):
         ws.send_text(json.dumps({"type": "config", "mode": "auto"}))
     srv.whisper_executor.submit(lambda: None).result()
     assert stub_transcribe.calls == []
+
+
+def test_correction_message_patches_history(client, stub_transcribe,
+                                            fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        msgs = collect_until(ws)
+        uid = next(m["id"] for m in msgs if m["type"] == "final")
+        ws.send_text(json.dumps({"type": "correction", "id": uid,
+                                 "target": "en", "corrected": "How's it going?"}))
+        stub_transcribe.result = {"text": "Und morgen?", "language": "de"}
+        speak(ws)
+        collect_until(ws)
+    assistants = [m["content"] for m in fake_ollama["chat"]["messages"]
+                  if m["role"] == "assistant"]
+    # The edited translation, not the model's original, is the context now.
+    assert "How's it going?" in assistants
+    assert "How are you?" not in assistants
+
+
+def test_malformed_correction_message_survives(client, stub_transcribe):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "correction", "id": 99,
+                                 "target": "en", "corrected": None}))
+        ws.send_text(json.dumps({"type": "correction"}))
+        speak(ws)
+        msgs = collect_until(ws)
+    assert any(m["type"] == "final" for m in msgs)  # still fully functional

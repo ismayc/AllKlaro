@@ -124,3 +124,29 @@ def test_summarize_ollama_down(stub_transcribe, dead_ollama):
     data = TestClient(server.app).post(
         "/api/summarize", json={"items": [{"source": "de", "text": "Hallo"}]}).json()
     assert "Cannot reach Ollama" in data["error"]
+
+
+# ------------------------------------------------------------- corrections
+
+
+def test_correction_endpoint_saves_and_counts(client, corrections_file):
+    payload = {"source": "de", "target": "en", "text": "Guten Morgen.",
+               "model_translation": "Good morning.", "corrected": "Morning!"}
+    data = client.post("/api/correction", json=payload).json()
+    assert data == {"ok": True, "count": 1}
+    saved = server.load_corrections()[0]
+    assert saved["corrected"] == "Morning!"
+    assert saved["model_translation"] == "Good morning."
+
+
+def test_correction_endpoint_rejects_garbage(client, corrections_file):
+    bad = [
+        {"source": "fr", "target": "en", "text": "x", "corrected": "y"},
+        {"source": "de", "target": "de", "text": "x", "corrected": "y"},
+        {"source": "de", "target": "en", "text": "  ", "corrected": "y"},
+        {"source": "de", "target": "en", "text": "x", "corrected": ""},
+        {"source": "de", "target": "en", "text": "x", "corrected": 3},
+    ]
+    for payload in bad:
+        assert "error" in client.post("/api/correction", json=payload).json()
+    assert not corrections_file.exists()      # nothing was written

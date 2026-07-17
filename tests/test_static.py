@@ -50,6 +50,30 @@ def test_conversation_can_be_cleared():
     assert re.search(r"clearBtn\.onclick[^}]*speechSynthesis\?\.cancel", JS, re.S)
 
 
+def test_translations_are_editable():
+    css = (STATIC / "style.css").read_text()
+    assert "edit-btn" in JS and ".edit-btn" in css
+    assert "edit-box" in JS and ".edit-box" in css
+    # The editor must not trigger tap-to-speak or the big-text overlay.
+    assert re.search(r"box\.onclick[^;]*stopPropagation", JS)
+    # Saved edits go to the server (persisted) and over the socket (context).
+    assert "/api/correction" in JS
+    assert re.search(r'type:\s*"correction"', JS)
+    # Escape cancels; Enter saves; an edited row is visibly marked.
+    assert "Escape" in JS
+    assert 'class="edited"' in JS
+
+
+def test_about_panel_links_to_site_and_repo():
+    assert 'id="aboutBtn"' in HTML and 'id="about"' in HTML
+    assert "https://ismayc.github.io/AllKlaro/" in HTML
+    assert "https://github.com/ismayc/AllKlaro" in HTML
+    assert "#about.hidden" in (STATIC / "style.css").read_text()
+    # Both the Close button and a backdrop tap dismiss it.
+    assert "aboutClose" in JS
+    assert re.search(r"e\.target === aboutBox", JS)
+
+
 def test_phrases_speak_on_tap_in_their_own_language():
     # Original speaks in the source language, each translation row in its
     # target language; both stop propagation so the big-text view isn't

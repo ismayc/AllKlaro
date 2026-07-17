@@ -31,6 +31,7 @@ by default) that sees the conversation's recent context.
 | 🗣️ **Tap to hear** | Tap any phrase to hear it spoken in its own language (great for pronunciation) |
 | 🧠 **Context-aware** | Translations see the recent conversation, so pronouns and topics resolve correctly |
 | 🧩 **German-aware pausing** | Verb-final sentences chopped by a short pause are re-joined and re-translated whole |
+| ✏️ **Correctable** | Edit any translation in place — corrections are saved locally and steer future translations of similar sentences (few-shot retrieval) |
 | 📖 **Learner tools** | One-click **Summarize** (summary + vocabulary list) and Markdown **Export** for later review |
 | 📱 **Phone mode** | Serve over LAN HTTPS and use your iPhone's mic for in-person conversations |
 | 🎯 **Focus mode** | Keep the newest text mid-screen ("Center latest") instead of at the bottom edge |

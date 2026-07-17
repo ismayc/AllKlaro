@@ -37,6 +37,16 @@ def stub_transcribe(monkeypatch):
 
 
 @pytest.fixture
+def corrections_file(tmp_path, monkeypatch):
+    """Point the corrections store at a scratch file with a clean cache."""
+    path = tmp_path / "corrections.jsonl"
+    monkeypatch.setattr(server, "CORRECTIONS_PATH", path)
+    server._corrections_cache.update(mtime=None, items=[])
+    yield path
+    server._corrections_cache.update(mtime=None, items=[])
+
+
+@pytest.fixture
 def fake_ollama(monkeypatch):
     """In-process Ollama double; returns a dict recording the last /api/chat body."""
     record = {}
