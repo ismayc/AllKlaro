@@ -54,6 +54,13 @@ main {
   flex: 1; overflow-y: auto; padding: 20px;
   display: flex; flex-direction: column; gap: 14px;
 }
+/* Focus mode: bottom padding pushes the newest card up to ~mid-screen when
+   auto-scrolled, so incoming text and its translation sit where eyes rest. */
+#feed.focus { padding-bottom: 42vh; }
+.card.partial {
+  color: var(--muted); font-style: italic; border-style: dashed;
+  font-size: .85em; line-height: 1.45;
+}
 #hint { color: var(--muted); text-align: center; margin-top: 8vh; font-size: 16px; line-height: 1.6; }
 
 .card {

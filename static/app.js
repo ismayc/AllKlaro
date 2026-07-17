@@ -7,6 +7,7 @@ const deviceSel = document.getElementById("device");
 const modelSel = document.getElementById("model");
 const fontSize = document.getElementById("fontSize");
 const speakChk = document.getElementById("speakChk");
+const focusChk = document.getElementById("focusChk");
 const pauseSlider = document.getElementById("pause");
 const pauseVal = document.getElementById("pauseVal");
 const exportBtn = document.getElementById("exportBtn");
@@ -42,6 +43,7 @@ function saveSettings() {
     deviceLabel: deviceSel.selectedOptions[0]?.textContent || "",
     fontSize: fontSize.value,
     speak: speakChk.checked,
+    focus: focusChk.checked,
     pause: pauseSlider.value,
     controlsHidden: controls.classList.contains("hidden"),
   }));
@@ -49,6 +51,7 @@ function saveSettings() {
 const saved = loadSettings();
 if (saved.fontSize) fontSize.value = saved.fontSize;
 if (saved.speak) speakChk.checked = true;
+if (saved.focus) { focusChk.checked = true; feed.classList.add("focus"); }
 if (saved.mode && [...modeSel.options].some((o) => o.value === saved.mode)) {
   modeSel.value = saved.mode;
 }
@@ -78,6 +81,12 @@ function setStatus(cls, text) {
 fontSize.oninput = () => { feed.style.fontSize = fontSize.value + "px"; saveSettings(); };
 feed.style.fontSize = fontSize.value + "px";
 speakChk.onchange = saveSettings;
+focusChk.onchange = () => {
+  feed.classList.toggle("focus", focusChk.checked);
+  clearPartial();
+  saveSettings();
+  feed.scrollTop = feed.scrollHeight;
+};
 
 // ----------------------------------------------------------- models & devices
 
@@ -227,12 +236,37 @@ function speakText(text, lang, interrupt = false) {
   speechSynthesis.speak(u);
 }
 
+// Live partial text: bottom bar normally; in focus mode an in-feed card so
+// the incoming speech sits near mid-screen with the translations.
+let partialCard = null;
+
+function showPartial(text) {
+  if (focusChk.checked) {
+    partialBar.classList.add("hidden");
+    hint?.remove();
+    if (!partialCard) {
+      partialCard = document.createElement("div");
+      partialCard.className = "card partial";
+    }
+    partialCard.textContent = text;
+    feed.appendChild(partialCard); // re-append keeps it below the newest card
+    feed.scrollTop = feed.scrollHeight;
+  } else {
+    partialText.textContent = text;
+    partialBar.classList.remove("hidden");
+  }
+}
+
+function clearPartial() {
+  partialBar.classList.add("hidden");
+  partialCard?.remove();
+}
+
 function handleMessage(msg) {
   if (msg.type === "partial") {
-    partialText.textContent = msg.text;
-    partialBar.classList.remove("hidden");
+    showPartial(msg.text);
   } else if (msg.type === "final") {
-    partialBar.classList.add("hidden");
+    clearPartial();
     newCard(msg);
   } else if (msg.type === "translation_delta") {
     const c = cards.get(msg.id);
@@ -249,7 +283,7 @@ function handleMessage(msg) {
       `<div class="latency">${secs}s</div>`);
     if (speakChk.checked) speakText(c.rows[c.targets[0]].text, c.targets[0]);
   } else if (msg.type === "discard") {
-    partialBar.classList.add("hidden");
+    clearPartial();
   } else if (msg.type === "error") {
     showError(msg.message);
   }
@@ -442,7 +476,7 @@ function stop() {
   wakeLock = null;
   micBtn.classList.remove("live");
   micLabel.textContent = "Start";
-  partialBar.classList.add("hidden");
+  clearPartial();
   meterFill.style.width = "0%";
   setStatus("ok", "ready");
 }

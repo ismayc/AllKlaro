@@ -29,6 +29,16 @@ def test_controls_are_collapsible():
     assert "controlsHidden" in JS  # collapsed state persists across reloads
 
 
+def test_focus_mode_centers_latest_text():
+    assert 'id="focusChk"' in HTML
+    css = (STATIC / "style.css").read_text()
+    assert "#feed.focus" in css          # bottom padding pushes newest to middle
+    assert "card partial" in JS          # incoming text becomes an in-feed card
+    assert re.search(r'focus:\s*focusChk\.checked', JS)  # persisted setting
+    # Every partial/discard path uses the shared clear so no stale live text.
+    assert JS.count("clearPartial()") >= 4
+
+
 def test_phrases_speak_on_tap_in_their_own_language():
     # Original speaks in the source language, each translation row in its
     # target language; both stop propagation so the big-text view isn't
