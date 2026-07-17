@@ -138,6 +138,47 @@ def test_clean_transcript_without_segments_falls_back_to_text():
         {"text": " x", "no_speech_prob": 0.99, "avg_logprob": -2.0}]}) == ""
 
 
+# Real repetition-loop artifacts captured from a live session (music in a
+# YouTube video drove Whisper's decoder into degenerate loops).
+NIN_LOOP = "Möhnnydin" + "nin" * 200
+DASH_LOOP = "Niiiim" + "-n" * 110
+L_LOOP_MIXED = ("M-A-Z-Z-Z So, hallo, tschüss sagen ist nicht so oft am "
+                "Start, auch wenn man so ein " + "L-" * 100)
+PHRASE_LOOP = "Ich bin ein Berliner. " * 30
+
+
+def test_repetition_loops_are_dropped():
+    for junk in (NIN_LOOP, DASH_LOOP, PHRASE_LOOP):
+        assert clean_transcript({"text": junk}) == "", junk[:40]
+
+
+def test_mixed_segment_keeps_speech_drops_loop_tail():
+    text = clean_transcript({"text": L_LOOP_MIXED})
+    assert "hallo, tschüss sagen" in text
+    assert "L-L-L-L" not in text
+
+
+def test_whisper_compression_ratio_signal_is_honored():
+    result = {"segments": [
+        {"text": " Guten Tag.", "no_speech_prob": 0.1, "avg_logprob": -0.3,
+         "compression_ratio": 1.4},
+        {"text": " irgendwas", "no_speech_prob": 0.1, "avg_logprob": -0.5,
+         "compression_ratio": 5.2},
+    ]}
+    assert clean_transcript(result) == "Guten Tag."
+
+
+def test_normal_speech_is_never_flagged_degenerate():
+    for real in (
+        "Das ist wahrscheinlich ein soziales Ding. Ja, na voll sozial. Die "
+        "suchen Kumpels, beziehungsweise die Kumpels suchen Mädchen. Ja.",
+        "Machen mich glücklich, wenn so Leute nett zueinander sind.",
+        "Und die Kumpels tanzen wie die Blöden mit ihrem Arsch und drehen "
+        "in drei Nase mal.",
+    ):
+        assert clean_transcript({"text": real}) == real
+
+
 # ---------------------------------------------------------------- echo dedupe
 
 

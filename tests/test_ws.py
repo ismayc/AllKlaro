@@ -71,6 +71,16 @@ def test_empty_transcript_is_discarded(client, stub_transcribe):
     assert msgs[-1]["type"] == "discard"
 
 
+def test_repetition_loop_transcript_is_discarded(client, stub_transcribe):
+    stub_transcribe.result = {"text": "Möhnnydin" + "nin" * 200,
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        msgs = collect_until(ws)
+    assert msgs[-1]["type"] == "discard"
+    assert not any(m["type"] == "final" for m in msgs)
+
+
 def test_malformed_control_message_survives(client, stub_transcribe):
     with client.websocket_connect("/ws") as ws:
         ws.send_text("{{{ not json")          # must not kill the connection

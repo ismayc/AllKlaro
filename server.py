@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import zlib
 from difflib import SequenceMatcher
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
@@ -103,15 +104,49 @@ def glossary_whisper_terms() -> str:
     return ", ".join(ln.split("=")[0].strip() for ln in load_glossary())
 
 
+def is_degenerate(text: str) -> bool:
+    """Whisper repetition loops ("ninninnin…", a phrase echoed 30×) compress
+    absurdly well; real speech doesn't."""
+    stripped = re.sub(r"\s+", "", text)
+    if len(stripped) < 60:
+        return False
+    ratio = len(stripped) / len(zlib.compress(stripped.encode("utf-8")))
+    return ratio > 4.0
+
+
+def collapse_repeats(text: str) -> str:
+    """Collapse short units repeated 8+ times ("L-L-L-L…" → "L-"), rescuing
+    the real speech in a segment that ends in a repetition loop."""
+    return re.sub(r"(.{1,12}?)\1{7,}", r"\1", text)
+
+
+def _clean_segment(raw: str) -> str | None:
+    """A segment's usable text, or None if it is a repetition artifact."""
+    if is_degenerate(raw):
+        return None                    # long-unit loop (repeated phrases)
+    collapsed = collapse_repeats(raw)
+    if len(collapsed) < 0.4 * len(raw) and len(collapsed.strip()) < 30:
+        return None                    # mostly loop, nothing left worth keeping
+    return collapsed
+
+
 def clean_transcript(result: dict) -> str:
-    """Drop low-confidence segments (music, jingles, background chatter) the
-    hallucination blocklist has never seen, using Whisper's own signals."""
+    """Drop low-confidence and degenerate segments (music, jingles, repetition
+    loops) the hallucination blocklist has never seen, using Whisper's own
+    signals plus text-level repetition checks."""
     segments = result.get("segments")
     if not segments:
-        return result.get("text", "").strip()
-    kept = [s.get("text", "") for s in segments
-            if not (s.get("no_speech_prob", 0.0) > 0.6
-                    and s.get("avg_logprob", 0.0) < -1.0)]
+        return (_clean_segment(result.get("text", "").strip()) or "").strip()
+    kept = []
+    for s in segments:
+        if (s.get("no_speech_prob", 0.0) > 0.6
+                and s.get("avg_logprob", 0.0) < -1.0):
+            continue
+        if s.get("compression_ratio", 0.0) > 2.4:
+            continue                   # Whisper's own repetitiveness signal
+        text = _clean_segment(s.get("text", ""))
+        if text is not None:
+            kept.append(text)
     return "".join(kept).strip()
 
 
@@ -124,7 +159,10 @@ def transcribe(audio: np.ndarray, language: str | None,
         path_or_hf_repo=WHISPER_REPO,
         language=language,
         initial_prompt=prompt,
-        temperature=0.0,
+        # A ladder (not a fixed 0.0) lets Whisper retry a segment at higher
+        # temperature when the greedy decode degenerates into a repetition loop.
+        temperature=(0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+        compression_ratio_threshold=2.4,
         no_speech_threshold=0.5,
         condition_on_previous_text=False,
     )

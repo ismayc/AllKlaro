@@ -7,5 +7,8 @@ __pycache__/
 # TLS certificates for phone/LAN mode (contain a private key — never commit)
 certs/
 
+# Personal conversation transcripts used for local testing
+testing/
+
 # macOS
 .DS_Store
