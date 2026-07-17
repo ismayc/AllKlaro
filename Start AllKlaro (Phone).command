@@ -24,5 +24,6 @@ fi
 echo ""
 echo "  On your phone, open:  https://$IP:8710"
 echo ""
-exec uv run uvicorn server:app --host 0.0.0.0 --port 8710 \
+# --reload: pick up server.py changes without a manual restart.
+exec uv run uvicorn server:app --host 0.0.0.0 --port 8710 --reload \
   --ssl-keyfile "$CERT_DIR/key.pem" --ssl-certfile "$CERT_DIR/cert.pem"

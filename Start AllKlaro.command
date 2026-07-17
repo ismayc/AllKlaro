@@ -9,4 +9,5 @@ if ! curl -s -o /dev/null http://127.0.0.1:11434/api/tags; then
 fi
 
 ( sleep 2 && open "http://127.0.0.1:8710" ) &
-exec uv run uvicorn server:app --host 127.0.0.1 --port 8710
+# --reload: pick up server.py changes without a manual restart.
+exec uv run uvicorn server:app --host 127.0.0.1 --port 8710 --reload
