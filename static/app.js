@@ -168,6 +168,9 @@ function newCard(msg) {
     ? `<span class="speaker">${msg.speaker === "them" ? "Them" : "You"}</span>` : "";
   orig.innerHTML = speakerChip + langChip(msg.source);
   orig.append(document.createTextNode(msg.text));
+  orig.title = "Tap to hear it spoken";
+  // Tapping a phrase speaks it aloud in that phrase's own language.
+  orig.onclick = (e) => { e.stopPropagation(); speakText(msg.text, msg.source, true); };
   card.append(orig);
 
   const rows = {};
@@ -175,10 +178,15 @@ function newCard(msg) {
     const row = document.createElement("div");
     row.className = "trans";
     row.innerHTML = langChip(t) + '<span class="cursor">▍</span>';
+    row.title = "Tap to hear it spoken";
+    row.onclick = (e) => {
+      e.stopPropagation();
+      speakText(cards.get(msg.id)?.rows[t].text, t, true);
+    };
     card.append(row);
     rows[t] = { el: row, text: "" };
   }
-  card.onclick = () => showBig(msg.id);
+  card.onclick = () => showBig(msg.id); // card background still opens big-text
   feed.appendChild(card);
   feed.scrollTop = feed.scrollHeight;
   cards.set(msg.id, {
@@ -208,8 +216,9 @@ function showBig(id) {
 }
 bigText.onclick = () => bigText.classList.add("hidden");
 
-function speakText(text, lang) {
+function speakText(text, lang, interrupt = false) {
   if (!text || !window.speechSynthesis) return;
+  if (interrupt) speechSynthesis.cancel(); // a tap always wins over the queue
   const u = new SpeechSynthesisUtterance(text);
   u.lang = TTS_LANG[lang] || "en-US";
   // Mute capture while speaking so the app doesn't translate its own voice.

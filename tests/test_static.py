@@ -27,3 +27,14 @@ def test_controls_are_collapsible():
     assert 'id="controls"' in HTML and 'id="controlsBtn"' in HTML
     assert "#controls.hidden" in (STATIC / "style.css").read_text()
     assert "controlsHidden" in JS  # collapsed state persists across reloads
+
+
+def test_phrases_speak_on_tap_in_their_own_language():
+    # Original speaks in the source language, each translation row in its
+    # target language; both stop propagation so the big-text view isn't
+    # triggered by the same tap.
+    assert re.search(r"orig\.onclick.*stopPropagation", JS, re.S)
+    assert "speakText(msg.text, msg.source" in JS
+    assert re.search(r"row\.onclick[^}]*rows\[t\]\.text, t", JS, re.S)
+    # A tap interrupts any queued auto-speech instead of waiting behind it.
+    assert "speechSynthesis.cancel()" in JS
