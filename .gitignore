@@ -1,0 +1,11 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# TLS certificates for phone/LAN mode (contain a private key — never commit)
+certs/
+
+# macOS
+.DS_Store

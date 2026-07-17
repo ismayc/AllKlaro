@@ -1,0 +1,5 @@
+# Personal glossary — one entry per line, reloaded automatically when saved.
+# Bare terms bias speech recognition toward correct spellings (names, jargon):
+#   Data Society
+# `term = translation` additionally pins how the translator renders it:
+#   Geschäftsführer = managing director

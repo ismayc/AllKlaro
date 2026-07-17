@@ -1,0 +1,26 @@
+[project]
+name = "allklaro"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.139.2",
+    "httpx>=0.28.1",
+    "mlx-whisper>=0.4.3",
+    "numpy>=2.4.6",
+    "onnxruntime>=1.27.0",
+    "uvicorn[standard]>=0.51.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "tests"]
+asyncio_mode = "auto"
+markers = [
+    "integration: slow tests against the real Whisper model / Ollama server (set RUN_INTEGRATION=1)",
+]

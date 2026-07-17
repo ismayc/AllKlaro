@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AllKlaro</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗣️</text></svg>" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header>
+    <div class="brand">AllKlaro</div>
+    <button id="micBtn" class="mic-btn" title="Start / stop listening">
+      <span class="mic-icon">🎙️</span><span id="micLabel">Start</span>
+    </button>
+    <div class="control">
+      <label for="device">Input</label>
+      <select id="device"></select>
+    </div>
+    <div class="control">
+      <label for="mode">Direction</label>
+      <select id="mode">
+        <option value="auto-de-en" selected>Auto: German ↔ English</option>
+        <option value="auto-es-en">Auto: Spanish ↔ English</option>
+        <option value="auto-es-de">Auto: Spanish ↔ German</option>
+        <option value="de-en">German → English</option>
+        <option value="en-de">English → German</option>
+        <option value="es-en">Spanish → English</option>
+        <option value="en-es">English → Spanish</option>
+        <option value="de-es">German → Spanish</option>
+        <option value="es-de">Spanish → German</option>
+        <option value="de-en+es">German → English + Spanish</option>
+        <option value="en-de+es">English → German + Spanish</option>
+      </select>
+    </div>
+    <div class="control">
+      <label for="model">Model</label>
+      <select id="model"></select>
+    </div>
+    <div class="control">
+      <label for="fontSize">Text size</label>
+      <input type="range" id="fontSize" min="16" max="42" value="22" />
+    </div>
+    <div class="control">
+      <label for="pause">Pause <span id="pauseVal">700</span> ms</label>
+      <input type="range" id="pause" min="300" max="1500" step="50" value="700" />
+    </div>
+    <label class="chk"><input type="checkbox" id="speakChk" /> Speak</label>
+    <button id="summarizeBtn" class="tool-btn">Summarize</button>
+    <button id="exportBtn" class="tool-btn">Export</button>
+    <div class="status">
+      <div class="meter" title="Input level"><div id="meterFill"></div></div>
+      <span id="statusDot" class="dot"></span><span id="statusText">idle</span>
+    </div>
+  </header>
+
+  <main id="feed">
+    <div id="hint">
+      Press <strong>Start</strong> and speak. Each pause finalizes an utterance,
+      auto-detected and translated within the chosen language pair
+      (German, Spanish, English).
+    </div>
+  </main>
+
+  <div id="partialBar" class="hidden">
+    <span class="pulse"></span><span id="partialText"></span>
+  </div>
+
+  <div id="bigText" class="hidden" title="Click to close"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
