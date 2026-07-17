@@ -97,6 +97,17 @@ async def test_real_ollama_dictionary_gender_overrides_generic_rule(
     assert "einen caipirinha" in text and "eine caipirinha" not in text
 
 
+async def test_real_ollama_spanish_gender_note_followed(gender_lexicon):
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    # "mapa" is masculine despite -a; the es-lexicon note must be obeyed.
+    gender_lexicon([("map", "mapa", "m")], target="es")
+    text = (await server.stream_translation(
+        FakeWS(), 1, "The map is very old.", "en", "es",
+        server.DEFAULT_MODEL)).lower()
+    assert "el mapa" in text and "la mapa" not in text
+
+
 async def test_real_translate_once_refinement_pass():
     if not ollama_up():
         pytest.skip("Ollama not running")

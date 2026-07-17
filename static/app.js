@@ -567,6 +567,7 @@ async function start() {
   }
 
   try {
+    if (ws) { ws.onclose = null; ws.close(); } // e.g. opened by typed input
     await connectWS();
   } catch {
     showError("Could not reach the server. Is it running?");
@@ -614,5 +615,22 @@ function stop() {
 }
 
 micBtn.onclick = () => (running ? stop() : start());
+
+// ------------------------------------------------------------- typed input
+
+const typeForm = document.getElementById("typeBar");
+const typeInput = document.getElementById("typeInput");
+
+typeForm.onsubmit = async (e) => {
+  e.preventDefault();
+  const text = typeInput.value.trim();
+  if (!text) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    try { await connectWS(); } // typing works without the mic running
+    catch { return showError("Could not reach the server. Is it running?"); }
+  }
+  ws.send(JSON.stringify({ type: "text", text }));
+  typeInput.value = "";
+};
 
 Promise.all([loadModels(), loadDevices()]).then(() => setStatus("ok", "ready"));

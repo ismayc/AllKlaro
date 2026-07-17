@@ -37,7 +37,8 @@ by default) that sees the conversation's recent context.
 | 📱 **Phone mode** | Serve over LAN HTTPS and use your iPhone's mic for in-person conversations |
 | 🎯 **Focus mode** | Keep the newest text mid-screen ("Center latest") instead of at the bottom edge |
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
-| 🇩🇪 **Gender lexicon** | Optional: compile a dict.cc export into a loanword-gender dictionary — sentences mentioning "caipirinha" or "email" get the correct der/die/das injected |
+| ⌨️ **Type to translate** | A text box under the feed — type instead of speaking, mic not required; same context, corrections, and draft+refine pipeline |
+| 📖 **Gender lexicons** | Optional: compile dict.cc / FreeDict exports into loanword-gender dictionaries — "caipirinha" gets der/die/das and "problema" gets el/la injected |
 
 ## 🚀 Quick start
 
@@ -163,26 +164,33 @@ The speed and correctness machinery, for the curious:
 - **VAD hysteresis** — starting speech needs Silero probability > 0.5,
   continuing only > 0.35, so quiet word-endings don't chop sentences.
 
-## 🇩🇪 Gender lexicon (optional)
+## 📖 Gender lexicons (optional)
 
 Local models sometimes guess wrong on the grammatical gender of loanwords
-("einen Margarita"). If you have a [dict.cc translation-file export](https://www.dict.cc/translation_file_request.php)
-(EN→DE), compile it once:
+("einen Margarita", "la problema"). Feed the compiler any mix of
+[dict.cc translation-file exports](https://www.dict.cc/translation_file_request.php)
+(.zip) and [FreeDict source tarballs](https://freedict.org/downloads/)
+(.src.tar.xz) in one call:
 
 ```bash
-uv run python build_gender_lexicon.py /path/to/english-to-german-dictionary.zip
+uv run python build_gender_lexicon.py \
+  english-to-german-dictionary.zip \
+  freedict-eng-deu-*.src.tar.xz freedict-deu-eng-*.src.tar.xz \
+  freedict-eng-spa-*.src.tar.xz freedict-spa-deu-*.src.tar.xz ...
 ```
 
-This writes ~17k same-spelling noun genders (margarita → die Margarita,
-email → die E-Mail, caipirinha → der Caipirinha) to
-`~/.cache/allklaro/de_noun_genders.tsv`. When a sentence being translated
-into German mentions one of these words, the correct article is injected
-into the prompt — overriding the model's guess and the built-in rules of
-thumb. Only unambiguous, same-spelling pairs are kept, so the lexicon can
-never push a false-friend word choice ("gift" ≠ das Gift), and words
-dict.cc itself lists with two genders (Margarita is both!) are left to the
-general rules. ⚠️ dict.cc data is licensed for **private use only** — the
-compiled lexicon stays in `~/.cache` and must never be committed.
+This writes per-target lexicons (~27k German, ~1k Spanish noun genders) to
+`~/.cache/allklaro/`. When a sentence being translated into German or
+Spanish mentions one of these words, the correct article is injected into
+the prompt (caipirinha → der Caipirinha, problem → el problema) —
+overriding the model's guess and the built-in rules of thumb. Safety rules:
+only unambiguous, same-spelling pairs are kept, so the lexicon can never
+push a false-friend word choice ("gift" ≠ das Gift); words any dictionary
+lists with two genders (Margarita {m} {f}, la/el radio) are dropped; and
+gender-less dictionaries (FreeDict eng-spa) borrow genders from the others
+only when every observation agrees. ⚠️ dict.cc data is licensed for
+**private use only** — the compiled lexicons stay in `~/.cache` and must
+never be committed.
 
 ## 🧪 Tests
 

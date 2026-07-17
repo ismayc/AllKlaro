@@ -61,9 +61,12 @@ DEFAULT_MODEL = "gemma3:12b"
 GLOSSARY_PATH = Path(__file__).parent / "glossary.txt"
 CORRECTIONS_PATH = Path(__file__).parent / "corrections.jsonl"
 CORRECTION_EXAMPLES = 3            # retrieved corrections shown to the model
-# Compiled by build_gender_lexicon.py from a dict.cc export. Lives in
-# ~/.cache (dict.cc data is private-use only — never commit it to the repo).
-GENDER_LEXICON_PATH = Path.home() / ".cache" / "allklaro" / "de_noun_genders.tsv"
+# Compiled by build_gender_lexicon.py from dict.cc / FreeDict exports. They
+# live in ~/.cache (dict.cc data is private-use only — never commit it).
+GENDER_LEXICON_PATHS = {
+    "de": Path.home() / ".cache" / "allklaro" / "de_noun_genders.tsv",
+    "es": Path.home() / ".cache" / "allklaro" / "es_noun_genders.tsv",
+}
 GENDER_NOTE_LIMIT = 8              # max per-sentence dictionary notes
 
 VAD_BACKEND = os.environ.get("VAD_BACKEND", "silero")  # "silero" | "energy"
@@ -112,42 +115,48 @@ def glossary_whisper_terms() -> str:
 
 # ---------------------------------------------------------------- gender lexicon
 
-_gender_cache = {"mtime": None, "map": {}}
-ARTICLES = {"m": "der", "f": "die", "n": "das"}
+_gender_caches: dict[str, dict] = {}   # target -> {"mtime", "map"}
+ARTICLES = {"de": {"m": "der", "f": "die", "n": "das"},
+            "es": {"m": "el", "f": "la"}}
 
 
-def load_gender_lexicon() -> dict[str, tuple[str, str]]:
-    """english word -> (German noun, article), mtime-cached like the glossary."""
-    try:
-        mtime = GENDER_LEXICON_PATH.stat().st_mtime
-    except OSError:
-        _gender_cache.update(mtime=None, map={})
+def load_gender_lexicon(target: str) -> dict[str, tuple[str, str]]:
+    """source word -> (target-language noun, article), mtime-cached."""
+    path = GENDER_LEXICON_PATHS.get(target)
+    articles = ARTICLES.get(target)
+    if path is None or articles is None:
         return {}
-    if mtime != _gender_cache["mtime"]:
+    cache = _gender_caches.setdefault(target, {"mtime": None, "map": {}})
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        cache.update(mtime=None, map={})
+        return {}
+    if mtime != cache["mtime"]:
         entries = {}
-        for line in GENDER_LEXICON_PATH.read_text(encoding="utf-8").splitlines():
+        for line in path.read_text(encoding="utf-8").splitlines():
             parts = line.split("\t")
-            if len(parts) == 3 and parts[2] in ARTICLES:
-                entries[parts[0]] = (parts[1], ARTICLES[parts[2]])
-        _gender_cache.update(mtime=mtime, map=entries)
-    return _gender_cache["map"]
+            if len(parts) == 3 and parts[2] in articles:
+                entries[parts[0]] = (parts[1], articles[parts[2]])
+        cache.update(mtime=mtime, map=entries)
+    return cache["map"]
 
 
 def gender_notes(text: str, target: str) -> str | None:
-    """Dictionary gender facts for source words that are German loanwords.
+    """Dictionary gender facts for source words that are target-language
+    loanwords/cognates.
 
-    Only fires when translating INTO German. The lexicon holds same-spelling
-    pairs exclusively (margarita -> die Margarita), so a note can never push
-    the model toward a false-friend word choice; ambiguous-gender words
-    (dict.cc "Margarita {m} {f}") were dropped at build time.
+    Fires when translating into German or Spanish. The lexicons hold
+    same-spelling pairs exclusively (caipirinha -> der Caipirinha,
+    problem -> el problema), so a note can never push the model toward a
+    false-friend word choice; words any dictionary lists with several
+    genders (dict.cc "Margarita {m} {f}") were dropped at build time.
     """
-    if target != "de":
-        return None
-    lexicon = load_gender_lexicon()
+    lexicon = load_gender_lexicon(target)
     if not lexicon:
         return None
     notes, seen = [], set()
-    for word in re.findall(r"[A-Za-zÄÖÜäöüß'\-]+", text.lower()):
+    for word in re.findall(r"[^\W\d_]+(?:[-'][^\W\d_]+)*", text.lower()):
         if len(word) < 3 or word in seen:
             continue
         seen.add(word)
@@ -818,6 +827,40 @@ def normalize_text(text: str) -> str:
     return re.sub(r"[\W_]+", "", text.lower())
 
 
+# Typed text skips Whisper, so auto modes need their own language detection.
+STOPWORDS = {
+    "de": {"der", "die", "das", "und", "ist", "nicht", "ich", "du", "wir",
+           "ihr", "sie", "es", "ein", "eine", "einen", "dem", "den", "mit",
+           "für", "auf", "haben", "hat", "war", "sind", "bitte", "danke",
+           "schon", "noch", "auch", "aber", "oder", "wenn", "wie", "wo",
+           "was", "warum", "kann", "können", "möchte", "geht", "gut"},
+    "en": {"the", "and", "is", "are", "was", "were", "i", "you", "we",
+           "they", "it", "a", "an", "to", "of", "in", "on", "with", "for",
+           "have", "has", "had", "please", "thanks", "this", "that", "what",
+           "why", "how", "where", "when", "not", "can", "could", "would",
+           "like", "good"},
+    "es": {"el", "la", "los", "las", "y", "es", "no", "yo", "tú", "usted",
+           "un", "una", "unos", "unas", "de", "en", "con", "para", "por",
+           "que", "qué", "cómo", "dónde", "cuándo", "gracias", "está",
+           "están", "ser", "estar", "pero", "si", "como", "puedo", "quiero",
+           "bien", "muy"},
+}
+CHAR_HINTS = {"de": "äöüß", "es": "ñ¿¡áéíóú"}
+
+
+def detect_language(text: str, candidates: tuple[str, str] = ("de", "en")) -> str:
+    """Stopword/charset scorer for typed text; ties go to the first candidate."""
+    lowered = text.lower()
+    words = re.findall(r"[^\W\d_]+", lowered)
+    best, best_score = candidates[0], -1
+    for lang in candidates:
+        score = sum(1 for w in words if w in STOPWORDS.get(lang, ()))
+        score += sum(2 for c in lowered if c in CHAR_HINTS.get(lang, ""))
+        if score > best_score:
+            best, best_score = lang, score
+    return best
+
+
 def is_echo(a: str, b: str) -> bool:
     """True when two normalized transcripts are near-duplicates — the same
     speech captured on both channels (mic picked up the call speakers)."""
@@ -947,46 +990,67 @@ async def ws_endpoint(ws: WebSocket):
             if replaces is not None:
                 final_msg["replaces"] = replaces
             await safe_send(ws, final_msg)
-            # Two-tier translation: stream the fast draft model first so text
-            # appears immediately, then re-translate with the main model
-            # behind the scenes and swap in its (better) answer.
-            draft = draft_model if draft_model and draft_model != model else None
-            context = list(history)
-            translations = await asyncio.gather(
-                *(stream_translation(ws, my_uid, text, source, t,
-                                     draft or model, context)
-                  for t in targets))
-            if all(t is not None for t in translations):
-                history.append({"uid": my_uid, "source": source,
-                                "target": targets[0], "text": text,
-                                "translation": translations[0]})
-                await safe_send(ws, {
-                    "type": "translation_done", "id": my_uid,
-                    "refining": bool(draft),
-                    "transcribe_ms": int((t1 - t0) * 1000),
-                    "translate_ms": int((loop.time() - t1) * 1000)})
-                if draft:
-                    texts = {}
-                    for t, drafted in zip(targets, translations):
-                        refined = await translate_once(text, source, t,
-                                                       model, context)
-                        if refined and refined != drafted:
-                            texts[t] = refined
-                    # The refined text becomes the conversation context —
-                    # unless the user already corrected this utterance.
-                    if targets[0] in texts and my_uid not in corrected_uids:
-                        for h in history:
-                            if h.get("uid") == my_uid:
-                                h["translation"] = texts[targets[0]]
-                    # Always sent (even empty): tells the UI refining ended.
-                    await safe_send(ws, {"type": "translation_revised",
-                                         "id": my_uid, "texts": texts})
+            await run_translations(my_uid, text, source, targets, t0, t1)
         except Exception as exc:
             log.exception("transcription failed")
             await safe_send(ws, {"type": "error", "id": my_uid,
                                  "message": f"Transcription failed: {exc}"})
         finally:
             busy = False
+
+    async def run_translations(my_uid, text, source, targets, t0, t1):
+        # Two-tier translation: stream the fast draft model first so text
+        # appears immediately, then re-translate with the main model
+        # behind the scenes and swap in its (better) answer.
+        draft = draft_model if draft_model and draft_model != model else None
+        context = list(history)
+        translations = await asyncio.gather(
+            *(stream_translation(ws, my_uid, text, source, t,
+                                 draft or model, context)
+              for t in targets))
+        if all(t is not None for t in translations):
+            history.append({"uid": my_uid, "source": source,
+                            "target": targets[0], "text": text,
+                            "translation": translations[0]})
+            await safe_send(ws, {
+                "type": "translation_done", "id": my_uid,
+                "refining": bool(draft),
+                "transcribe_ms": int((t1 - t0) * 1000),
+                "translate_ms": int((loop.time() - t1) * 1000)})
+            if draft:
+                texts = {}
+                for t, drafted in zip(targets, translations):
+                    refined = await translate_once(text, source, t,
+                                                   model, context)
+                    if refined and refined != drafted:
+                        texts[t] = refined
+                # The refined text becomes the conversation context —
+                # unless the user already corrected this utterance.
+                if targets[0] in texts and my_uid not in corrected_uids:
+                    for h in history:
+                        if h.get("uid") == my_uid:
+                            h["translation"] = texts[targets[0]]
+                # Always sent (even empty): tells the UI refining ended.
+                await safe_send(ws, {"type": "translation_revised",
+                                     "id": my_uid, "texts": texts})
+
+    async def handle_text(text, my_uid):
+        """Typed input: same translation pipeline, no audio machinery —
+        no Whisper, no merging, no echo dedupe, no busy flag."""
+        t0 = loop.time()
+        try:
+            pair = auto_pair()
+            detected = (detect_language(text, pair) if pair
+                        else lang_hint(mode) or "de")
+            source, targets = resolve_targets(mode, detected)
+            await safe_send(ws, {"type": "final", "id": my_uid, "text": text,
+                                 "source": source, "target": targets[0],
+                                 "targets": targets, "speaker": "you"})
+            await run_translations(my_uid, text, source, targets, t0, t0)
+        except Exception as exc:
+            log.exception("typed translation failed")
+            await safe_send(ws, {"type": "error", "id": my_uid,
+                                 "message": f"Translation failed: {exc}"})
 
     async def maybe_partial():
         nonlocal last_partial, busy
@@ -1038,6 +1102,12 @@ async def ws_endpoint(ws: WebSocket):
                         c["vad"].end_silence = pause_frames
                     log.info("config: mode=%s model=%s pause=%dms",
                              mode, model, pause_frames * FRAME_MS)
+                elif isinstance(cfg, dict) and cfg.get("type") == "text":
+                    typed = cfg.get("text")
+                    if isinstance(typed, str) and typed.strip():
+                        uid += 1
+                        asyncio.create_task(
+                            handle_text(typed.strip()[:2000], uid))
                 elif isinstance(cfg, dict) and cfg.get("type") == "correction":
                     # An edited translation also fixes the live context, so
                     # follow-up utterances build on the corrected phrasing.

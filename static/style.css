@@ -111,6 +111,15 @@ main {
   color: var(--muted); font-style: italic; font-size: 17px;
 }
 #partialBar.hidden { display: none; }
+#typeBar {
+  display: flex; gap: 8px; padding: 10px 20px 12px;
+  background: var(--panel); border-top: 1px solid var(--border);
+}
+#typeBar input {
+  flex: 1; background: var(--bg); color: var(--text); font-size: 15px;
+  border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px;
+}
+#typeBar input:focus { outline: none; border-color: var(--muted); }
 .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--err);
   animation: blink 1s infinite; flex-shrink: 0; }
 .edit-btn { background: none; border: none; cursor: pointer;

@@ -99,3 +99,12 @@ def test_draft_model_control_is_wired():
     assert "translation_revised" in JS
     # A refinement never overwrites a translation the user already edited.
     assert re.search(r"translation_revised.*?row\.edited.*?continue", JS, re.S)
+
+
+def test_typed_input_is_wired():
+    assert 'id="typeBar"' in HTML and 'id="typeInput"' in HTML
+    assert re.search(r'type:\s*"text"', JS)     # reaches the server
+    assert "typeForm.onsubmit" in JS
+    # Typing must work without the mic: the socket connects on demand.
+    assert re.search(r"typeForm\.onsubmit[\s\S]*?connectWS\(\)", JS)
+    assert "#typeBar" in (STATIC / "style.css").read_text()

@@ -438,3 +438,51 @@ def test_failed_refinement_keeps_draft_quietly(client, stub_transcribe,
     revised = next(m for m in msgs if m["type"] == "translation_revised")
     assert revised["texts"] == {}            # UI just clears the spinner
     assert not any(m["type"] == "error" for m in msgs)
+
+
+# --------------------------------------------------------------- typed input
+
+
+def test_typed_text_translates_without_audio(client, stub_transcribe,
+                                             fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "text",
+                                 "text": "Wie geht es dir und der Familie?"}))
+        msgs = collect_until(ws)
+    final = next(m for m in msgs if m["type"] == "final")
+    assert final["source"] == "de" and final["target"] == "en"
+    assert final["speaker"] == "you"
+    assert any(m["type"] == "translation_done" for m in msgs)
+    assert stub_transcribe.calls == []       # no Whisper involved
+
+
+def test_typed_english_reverses_direction(client, stub_transcribe,
+                                          fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "text",
+                                 "text": "Where is the train station, please?"}))
+        msgs = collect_until(ws)
+    final = next(m for m in msgs if m["type"] == "final")
+    assert final["source"] == "en" and final["target"] == "de"
+
+
+def test_typed_text_shares_history_with_speech(client, stub_transcribe,
+                                               fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "text", "text": "Wie geht es dir?"}))
+        collect_until(ws)
+        speak(ws)                            # spoken follow-up sees typed turn
+        collect_until(ws)
+    users = [m["content"] for m in fake_ollama["chat"]["messages"]
+             if m["role"] == "user"]
+    assert users.count("Wie geht es dir?") == 2  # history turn + new sentence
+
+
+def test_typed_garbage_is_ignored(client, stub_transcribe):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "text", "text": "   "}))
+        ws.send_text(json.dumps({"type": "text", "text": 42}))
+        ws.send_text(json.dumps({"type": "text"}))
+        speak(ws)
+        msgs = collect_until(ws)
+    assert any(m["type"] == "final" for m in msgs)  # still fully functional

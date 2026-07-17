@@ -38,23 +38,23 @@ def stub_transcribe(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def no_user_gender_lexicon(tmp_path, monkeypatch):
-    """Tests must not see the developer's real ~/.cache lexicon."""
-    monkeypatch.setattr(server, "GENDER_LEXICON_PATH",
-                        tmp_path / "no-lexicon.tsv")
-    server._gender_cache.update(mtime=None, map={})
+    """Tests must not see the developer's real ~/.cache lexicons."""
+    monkeypatch.setattr(server, "GENDER_LEXICON_PATHS",
+                        {t: tmp_path / f"no-lexicon-{t}.tsv"
+                         for t in ("de", "es")})
+    server._gender_caches.clear()
     yield
-    server._gender_cache.update(mtime=None, map={})
+    server._gender_caches.clear()
 
 
 @pytest.fixture
 def gender_lexicon(no_user_gender_lexicon, tmp_path, monkeypatch):
-    """A small lexicon file; write entries then call flush()."""
-    path = tmp_path / "genders.tsv"
-    monkeypatch.setattr(server, "GENDER_LEXICON_PATH", path)
-
-    def write(entries):
-        path.write_text("".join(f"{en}\t{de}\t{g}\n" for en, de, g in entries))
-        server._gender_cache.update(mtime=None, map={})
+    """Write a small per-target lexicon file: write(entries, target="de")."""
+    def write(entries, target="de"):
+        path = tmp_path / f"genders-{target}.tsv"
+        path.write_text("".join(f"{k}\t{w}\t{g}\n" for k, w, g in entries))
+        server.GENDER_LEXICON_PATHS[target] = path
+        server._gender_caches.clear()
 
     return write
 

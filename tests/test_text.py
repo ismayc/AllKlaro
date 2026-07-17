@@ -225,3 +225,25 @@ def test_missing_glossary_is_harmless(tmp_path, monkeypatch):
     server._glossary_cache.update(mtime=1.0, lines=["stale"])
     assert server.load_glossary() == []
     assert "Glossary" not in translation_messages("Hi", "en", "de")[0]["content"]
+
+
+# ------------------------------------------------------ typed-text detection
+
+
+def test_detect_language_german_english():
+    from server import detect_language
+    assert detect_language("Wie geht es dir und der Familie?") == "de"
+    assert detect_language("Where is the train station, please?") == "en"
+    assert detect_language("Das ist doch schön hier.", ("de", "en")) == "de"
+
+
+def test_detect_language_spanish_pair():
+    from server import detect_language
+    assert detect_language("¿Dónde está la estación?", ("es", "en")) == "es"
+    assert detect_language("I would like to buy a ticket.", ("es", "en")) == "en"
+
+
+def test_detect_language_tie_goes_to_first_candidate():
+    from server import detect_language
+    assert detect_language("Xylophon", ("de", "en")) == "de"
+    assert detect_language("Xylophon", ("en", "de")) == "en"
