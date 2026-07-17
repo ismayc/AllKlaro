@@ -93,6 +93,9 @@ main {
   color: var(--muted); border: 1px solid var(--border); border-radius: 20px;
   padding: 1px 7px; margin-right: 8px; vertical-align: 2px; }
 .latency { color: var(--muted); font-size: 11px; text-align: right; margin-top: 4px; }
+.refining { font-style: italic; animation: blink 1.4s infinite; }
+.card .trans.revised { animation: reviseFlash 1.2s ease-out; }
+@keyframes reviseFlash { from { background: rgba(62, 207, 142, .18); } }
 .card.summary { border-left: 4px solid var(--muted); white-space: pre-wrap;
   font-size: .8em; line-height: 1.55; }
 #bigText {

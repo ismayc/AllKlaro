@@ -5,6 +5,7 @@ const micLabel = document.getElementById("micLabel");
 const modeSel = document.getElementById("mode");
 const deviceSel = document.getElementById("device");
 const modelSel = document.getElementById("model");
+const draftSel = document.getElementById("draftModel");
 const fontSize = document.getElementById("fontSize");
 const speakChk = document.getElementById("speakChk");
 const focusChk = document.getElementById("focusChk");
@@ -44,6 +45,7 @@ function saveSettings() {
   localStorage.setItem(CFG_KEY, JSON.stringify({
     mode: modeSel.value,
     model: modelSel.value,
+    draft: draftSel.value,
     deviceLabel: deviceSel.selectedOptions[0]?.textContent || "",
     fontSize: fontSize.value,
     speak: speakChk.checked,
@@ -103,12 +105,28 @@ focusChk.onchange = () => {
 async function loadModels() {
   try {
     const r = await fetch("/api/models");
-    const { models, default: def, error } = await r.json();
+    const { models, default: def, sizes, error } = await r.json();
     if (error) showError(error);
     modelSel.innerHTML = "";
     for (const m of models) modelSel.add(new Option(m, m, m === def, m === def));
     if (saved.model && models.includes(saved.model)) modelSel.value = saved.model;
     else if (!models.includes(def) && models.length) modelSel.value = models[0];
+
+    draftSel.innerHTML = "";
+    draftSel.add(new Option("Off", ""));
+    for (const m of models) draftSel.add(new Option(m, m));
+    if (saved.draft !== undefined &&
+        [...draftSel.options].some((o) => o.value === saved.draft)) {
+      draftSel.value = saved.draft;
+    } else if (sizes) {
+      // Default: the smallest model that's smaller than the main one shows
+      // a fast draft; the main model then refines it behind the scenes.
+      const smaller = models
+        .filter((m) => m !== modelSel.value &&
+                       (sizes[m] || Infinity) < (sizes[modelSel.value] || 0))
+        .sort((a, b) => sizes[a] - sizes[b]);
+      draftSel.value = smaller[0] || "";
+    }
   } catch {
     showError("Could not list Ollama models — is `ollama serve` running?");
   }
@@ -148,11 +166,13 @@ navigator.mediaDevices.addEventListener?.("devicechange", loadDevices);
 function sendConfig() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "config", mode: modeSel.value,
-                             model: modelSel.value, pause_ms: +pauseSlider.value }));
+                             model: modelSel.value, draft_model: draftSel.value,
+                             pause_ms: +pauseSlider.value }));
   }
 }
 modeSel.onchange = () => { sendConfig(); saveSettings(); };
 modelSel.onchange = () => { sendConfig(); saveSettings(); };
+draftSel.onchange = () => { sendConfig(); saveSettings(); };
 deviceSel.onchange = async () => {
   saveSettings();
   if (running) { stop(); await start(); } // re-open capture on the new device
@@ -356,9 +376,21 @@ function handleMessage(msg) {
     // Re-render each row without the cursor and with its edit button.
     for (const t of c.targets) renderFinalRow(c, t);
     const secs = ((msg.transcribe_ms + msg.translate_ms) / 1000).toFixed(1);
+    const refining = msg.refining ? '<span class="refining">refining…</span> ' : "";
     c.card.insertAdjacentHTML("beforeend",
-      `<div class="latency">${secs}s</div>`);
+      `<div class="latency">${refining}${secs}s</div>`);
     if (speakChk.checked) speakText(c.rows[c.targets[0]].text, c.targets[0]);
+  } else if (msg.type === "translation_revised") {
+    const c = cards.get(msg.id);
+    if (!c) return;
+    c.card.querySelector(".refining")?.remove();
+    for (const [t, text] of Object.entries(msg.texts || {})) {
+      const row = c.rows[t];
+      if (!row || row.edited) continue; // a user edit outranks the refinement
+      row.text = text;
+      renderFinalRow(c, t);
+      row.el.classList.add("revised"); // brief flash marks the swap
+    }
   } else if (msg.type === "discard") {
     clearPartial();
   } else if (msg.type === "error") {

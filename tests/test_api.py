@@ -150,3 +150,9 @@ def test_correction_endpoint_rejects_garbage(client, corrections_file):
     for payload in bad:
         assert "error" in client.post("/api/correction", json=payload).json()
     assert not corrections_file.exists()      # nothing was written
+
+
+def test_models_report_sizes_for_draft_suggestion(client):
+    data = client.get("/api/models").json()
+    assert data["sizes"]["qwen2.5:7b-instruct"] < data["sizes"]["gemma3:12b"]
+    assert "nomic-embed-text:latest" not in data["sizes"]

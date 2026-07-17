@@ -83,3 +83,15 @@ def test_phrases_speak_on_tap_in_their_own_language():
     assert re.search(r"row\.onclick[^}]*rows\[t\]\.text, t", JS, re.S)
     # A tap interrupts any queued auto-speech instead of waiting behind it.
     assert "speechSynthesis.cancel()" in JS
+
+
+def test_draft_model_control_is_wired():
+    assert 'id="draftModel"' in HTML
+    assert "draft_model" in JS                 # reaches the server config
+    assert re.search(r"draft:\s*draftSel\.value", JS)  # persisted setting
+    css = (STATIC / "style.css").read_text()
+    # The refining hint and the revision flash are both styled.
+    assert ".refining" in css and ".revised" in css
+    assert "translation_revised" in JS
+    # A refinement never overwrites a translation the user already edited.
+    assert re.search(r"translation_revised.*?row\.edited.*?continue", JS, re.S)

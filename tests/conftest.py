@@ -54,21 +54,26 @@ def fake_ollama(monkeypatch):
 
     @fake.get("/api/tags")
     async def tags():
-        return {"models": [{"name": "gemma3:12b"},
-                           {"name": "qwen2.5:7b-instruct"},
-                           {"name": "nomic-embed-text:latest"}]}
+        return {"models": [{"name": "gemma3:12b", "size": 8_100_000_000},
+                           {"name": "qwen2.5:7b-instruct", "size": 4_700_000_000},
+                           {"name": "nomic-embed-text:latest", "size": 274_000_000}]}
 
     @fake.post("/api/chat")
     async def chat(request: Request):
         body = await request.json()
         record["chat"] = body
+        record.setdefault("all", []).append(body)
         if "missing" in body["model"]:
             return JSONResponse({"error": f"model '{body['model']}' not found"},
                                 status_code=404)
-        if body.get("stream", True) is False:  # summarize path
-            return JSONResponse({"message": {"content":
-                "**Summary** They planned a project meeting.\n"
-                "**Vocabulary** das Projekt — the project"}, "done": True})
+        if body.get("stream", True) is False:
+            if body["messages"][0]["content"].startswith("You summarize"):
+                return JSONResponse({"message": {"content":
+                    "**Summary** They planned a project meeting.\n"
+                    "**Vocabulary** das Projekt — the project"}, "done": True})
+            # Non-streaming translation = the refinement pass.
+            return JSONResponse({"message": {"content": "Refined translation."},
+                                 "done": True})
 
         async def gen():
             for piece in ["How ", "are ", "you?"]:

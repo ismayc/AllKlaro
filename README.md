@@ -31,6 +31,7 @@ by default) that sees the conversation's recent context.
 | 🗣️ **Tap to hear** | Tap any phrase to hear it spoken in its own language (great for pronunciation) |
 | 🧠 **Context-aware** | Translations see the recent conversation, so pronouns and topics resolve correctly |
 | 🧩 **German-aware pausing** | Verb-final sentences chopped by a short pause are re-joined and re-translated whole |
+| ⚡ **Draft + refine** | A small model streams a translation instantly; the main model re-translates behind the scenes and swaps in its better answer |
 | ✏️ **Correctable** | Edit any translation in place — corrections are saved locally and steer future translations of similar sentences (few-shot retrieval) |
 | 📖 **Learner tools** | One-click **Summarize** (summary + vocabulary list) and Markdown **Export** for later review |
 | 📱 **Phone mode** | Serve over LAN HTTPS and use your iPhone's mic for in-person conversations |
@@ -113,6 +114,11 @@ conversation gets the full screen):
 - **Model** — any installed Ollama chat model. `gemma3:12b` default;
   `gemma3:4b` / `qwen2.5:7b-instruct` are lighter, `qwen2.5:32b-instruct`
   stronger but slower.
+- **Draft model** — optional fast first pass: this model's translation
+  appears immediately ("refining…"), then the main model's answer replaces
+  it with a green flash. Defaults to the smallest installed model; set
+  **Off** for single-pass translation. Edits you make always win over the
+  refinement.
 - **Pause** — silence that ends an utterance (default 700 ms). Fragments cut
   mid-sentence are auto-merged with the speaker's next utterance.
 - **Speak** — auto-read translations aloud (capture mutes itself while

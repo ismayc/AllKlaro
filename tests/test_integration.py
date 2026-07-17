@@ -84,6 +84,15 @@ async def test_real_ollama_translates_german():
     assert "morning" in text.lower()
 
 
+async def test_real_translate_once_refinement_pass():
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    text = await server.translate_once(
+        "Guten Morgen! Wie geht es Ihnen heute?", "de", "en",
+        server.DEFAULT_MODEL)
+    assert text and "morning" in text.lower()
+
+
 async def test_real_ollama_gender_agreement_for_loanword_drinks(
         corrections_file, tmp_path, monkeypatch):
     if not ollama_up():

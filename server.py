@@ -440,14 +440,16 @@ async def models():
         async with ollama_client() as client:
             r = await client.get("/api/tags", timeout=5)
             r.raise_for_status()
-            names = [m["name"] for m in r.json().get("models", [])]
+            installed = r.json().get("models", [])
     except Exception as exc:
         log.warning("Ollama unreachable: %s", exc)
         return {"models": [], "default": DEFAULT_MODEL,
                 "error": f"Cannot reach Ollama at {OLLAMA_URL} — is `ollama serve` running?"}
     # Skip embedding models; they can't translate.
-    names = [n for n in names if "embed" not in n]
-    return {"models": names, "default": DEFAULT_MODEL}
+    kept = [m for m in installed if "embed" not in m["name"]]
+    return {"models": [m["name"] for m in kept], "default": DEFAULT_MODEL,
+            # Sizes let the UI suggest the smallest model as the fast draft.
+            "sizes": {m["name"]: m.get("size", 0) for m in kept}}
 
 
 def build_markdown(items: list[dict], summary: str = "") -> str:
@@ -678,6 +680,36 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
     return None
 
 
+async def translate_once(text: str, source: str, target: str, model: str,
+                         history: list[dict] | None = None) -> str | None:
+    """One-shot, non-streaming translation; None on any failure.
+
+    Used for the behind-the-scenes refinement pass, which replaces the fast
+    draft wholesale — streaming deltas would rewrite text mid-read.
+    """
+    body = {
+        "model": model,
+        "messages": translation_messages(text, source, target, history),
+        "stream": False,
+        "options": {"temperature": 0.0},
+        "keep_alive": "60m",
+    }
+    if any(k in model.lower() for k in ("qwen3", "deepseek-r1", "gpt-oss")):
+        body["think"] = False
+    try:
+        async with ollama_client() as client:
+            r = await client.post("/api/chat", json=body, timeout=120)
+            if r.status_code != 200:
+                log.warning("refinement failed: %s", r.text[:200])
+                return None
+            return r.json().get("message", {}).get("content", "").strip() or None
+    except Exception as exc:
+        # The draft is already on screen; a failed refinement is not an error
+        # worth interrupting the conversation for.
+        log.warning("refinement failed: %s", exc)
+        return None
+
+
 # ------------------------------------------------------------------- directions
 
 
@@ -758,6 +790,8 @@ async def ws_endpoint(ws: WebSocket):
     last_final: dict[str, str] = {}  # language -> last final text (whisper prompt)
     mode = "auto-de-en"
     model = DEFAULT_MODEL
+    draft_model = None               # fast first-pass model; None = single-pass
+    corrected_uids: set[int] = set()  # user edits that refinement must not undo
     pause_frames = END_SILENCE_FRAMES
     uid = 0
     last_partial = 0.0
@@ -852,17 +886,40 @@ async def ws_endpoint(ws: WebSocket):
             if replaces is not None:
                 final_msg["replaces"] = replaces
             await safe_send(ws, final_msg)
+            # Two-tier translation: stream the fast draft model first so text
+            # appears immediately, then re-translate with the main model
+            # behind the scenes and swap in its (better) answer.
+            draft = draft_model if draft_model and draft_model != model else None
+            context = list(history)
             translations = await asyncio.gather(
-                *(stream_translation(ws, my_uid, text, source, t, model,
-                                     list(history)) for t in targets))
+                *(stream_translation(ws, my_uid, text, source, t,
+                                     draft or model, context)
+                  for t in targets))
             if all(t is not None for t in translations):
                 history.append({"uid": my_uid, "source": source,
                                 "target": targets[0], "text": text,
                                 "translation": translations[0]})
                 await safe_send(ws, {
                     "type": "translation_done", "id": my_uid,
+                    "refining": bool(draft),
                     "transcribe_ms": int((t1 - t0) * 1000),
                     "translate_ms": int((loop.time() - t1) * 1000)})
+                if draft:
+                    texts = {}
+                    for t, drafted in zip(targets, translations):
+                        refined = await translate_once(text, source, t,
+                                                       model, context)
+                        if refined and refined != drafted:
+                            texts[t] = refined
+                    # The refined text becomes the conversation context —
+                    # unless the user already corrected this utterance.
+                    if targets[0] in texts and my_uid not in corrected_uids:
+                        for h in history:
+                            if h.get("uid") == my_uid:
+                                h["translation"] = texts[targets[0]]
+                    # Always sent (even empty): tells the UI refining ended.
+                    await safe_send(ws, {"type": "translation_revised",
+                                         "id": my_uid, "texts": texts})
         except Exception as exc:
             log.exception("transcription failed")
             await safe_send(ws, {"type": "error", "id": my_uid,
@@ -909,6 +966,8 @@ async def ws_endpoint(ws: WebSocket):
                 if isinstance(cfg, dict) and cfg.get("type") == "config":
                     mode = cfg.get("mode", mode)
                     model = cfg.get("model", model)
+                    if "draft_model" in cfg:  # "" means draft pass off
+                        draft_model = cfg["draft_model"] or None
                     try:
                         pause_ms = int(cfg.get("pause_ms", pause_frames * FRAME_MS))
                         pause_frames = max(200, min(2000, pause_ms)) // FRAME_MS
@@ -923,6 +982,7 @@ async def ws_endpoint(ws: WebSocket):
                     # follow-up utterances build on the corrected phrasing.
                     corrected = cfg.get("corrected")
                     if isinstance(corrected, str) and corrected.strip():
+                        corrected_uids.add(cfg.get("id"))
                         for h in history:
                             if (h.get("uid") == cfg.get("id")
                                     and h.get("target") == cfg.get("target")):

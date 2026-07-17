@@ -367,3 +367,74 @@ def test_malformed_correction_message_survives(client, stub_transcribe):
         speak(ws)
         msgs = collect_until(ws)
     assert any(m["type"] == "final" for m in msgs)  # still fully functional
+
+
+# ------------------------------------------------------------ draft + refine
+
+
+def draft_config(ws, draft="qwen2.5:7b-instruct", model="gemma3:12b"):
+    ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en",
+                             "model": model, "draft_model": draft}))
+
+
+def test_draft_streams_then_main_model_refines(client, stub_transcribe,
+                                               fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        draft_config(ws)
+        speak(ws)
+        msgs = collect_until(ws, stop_types=("translation_revised", "error"))
+    done = next(m for m in msgs if m["type"] == "translation_done")
+    assert done["refining"] is True
+    revised = next(m for m in msgs if m["type"] == "translation_revised")
+    assert revised["texts"] == {"en": "Refined translation."}
+    streamed = [b for b in fake_ollama["all"] if b.get("stream", True)]
+    quiet = [b for b in fake_ollama["all"] if b.get("stream", True) is False]
+    assert streamed[-1]["model"] == "qwen2.5:7b-instruct"  # draft, visible
+    assert quiet[-1]["model"] == "gemma3:12b"              # refinement, quiet
+
+
+def test_refined_text_becomes_context_for_next_utterance(client,
+                                                         stub_transcribe,
+                                                         fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        draft_config(ws)
+        speak(ws)
+        collect_until(ws, stop_types=("translation_revised", "error"))
+        stub_transcribe.result = {"text": "Und morgen?", "language": "de"}
+        speak(ws)
+        collect_until(ws)
+    assistants = [m["content"] for m in fake_ollama["chat"]["messages"]
+                  if m["role"] == "assistant"]
+    assert "Refined translation." in assistants
+    assert "How are you?" not in assistants  # draft was superseded
+
+
+def test_no_draft_model_means_single_pass(client, stub_transcribe,
+                                          fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        msgs = collect_until(ws)
+    done = next(m for m in msgs if m["type"] == "translation_done")
+    assert done["refining"] is False
+    assert all(b.get("stream", True) for b in fake_ollama["all"])
+
+
+def test_draft_same_as_main_model_means_single_pass(client, stub_transcribe,
+                                                    fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        draft_config(ws, draft="gemma3:12b", model="gemma3:12b")
+        speak(ws)
+        msgs = collect_until(ws)
+    assert next(m for m in msgs
+                if m["type"] == "translation_done")["refining"] is False
+
+
+def test_failed_refinement_keeps_draft_quietly(client, stub_transcribe,
+                                               fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        draft_config(ws, draft="gemma3:12b", model="missing:1b")
+        speak(ws)
+        msgs = collect_until(ws, stop_types=("translation_revised", "error"))
+    revised = next(m for m in msgs if m["type"] == "translation_revised")
+    assert revised["texts"] == {}            # UI just clears the spinner
+    assert not any(m["type"] == "error" for m in msgs)
