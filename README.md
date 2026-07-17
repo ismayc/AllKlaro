@@ -37,6 +37,7 @@ by default) that sees the conversation's recent context.
 | 📱 **Phone mode** | Serve over LAN HTTPS and use your iPhone's mic for in-person conversations |
 | 🎯 **Focus mode** | Keep the newest text mid-screen ("Center latest") instead of at the bottom edge |
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
+| 🇩🇪 **Gender lexicon** | Optional: compile a dict.cc export into a loanword-gender dictionary — sentences mentioning "caipirinha" or "email" get the correct der/die/das injected |
 
 ## 🚀 Quick start
 
@@ -161,6 +162,27 @@ The speed and correctness machinery, for the curious:
   blocklist of stock hallucinations ("Untertitelung des ZDF…").
 - **VAD hysteresis** — starting speech needs Silero probability > 0.5,
   continuing only > 0.35, so quiet word-endings don't chop sentences.
+
+## 🇩🇪 Gender lexicon (optional)
+
+Local models sometimes guess wrong on the grammatical gender of loanwords
+("einen Margarita"). If you have a [dict.cc translation-file export](https://www.dict.cc/translation_file_request.php)
+(EN→DE), compile it once:
+
+```bash
+uv run python build_gender_lexicon.py /path/to/english-to-german-dictionary.zip
+```
+
+This writes ~17k same-spelling noun genders (margarita → die Margarita,
+email → die E-Mail, caipirinha → der Caipirinha) to
+`~/.cache/allklaro/de_noun_genders.tsv`. When a sentence being translated
+into German mentions one of these words, the correct article is injected
+into the prompt — overriding the model's guess and the built-in rules of
+thumb. Only unambiguous, same-spelling pairs are kept, so the lexicon can
+never push a false-friend word choice ("gift" ≠ das Gift), and words
+dict.cc itself lists with two genders (Margarita is both!) are left to the
+general rules. ⚠️ dict.cc data is licensed for **private use only** — the
+compiled lexicon stays in `~/.cache` and must never be committed.
 
 ## 🧪 Tests
 

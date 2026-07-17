@@ -84,6 +84,19 @@ async def test_real_ollama_translates_german():
     assert "morning" in text.lower()
 
 
+async def test_real_ollama_dictionary_gender_overrides_generic_rule(
+        gender_lexicon):
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    # The generic -a rule says feminine, but dict.cc says der Caipirinha —
+    # the per-word dictionary note must win.
+    gender_lexicon([("caipirinha", "Caipirinha", "m")])
+    text = (await server.stream_translation(
+        FakeWS(), 1, "I'd like a caipirinha, please.", "en", "de",
+        server.DEFAULT_MODEL)).lower()
+    assert "einen caipirinha" in text and "eine caipirinha" not in text
+
+
 async def test_real_translate_once_refinement_pass():
     if not ollama_up():
         pytest.skip("Ollama not running")

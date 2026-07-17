@@ -36,6 +36,29 @@ def stub_transcribe(monkeypatch):
     return stub
 
 
+@pytest.fixture(autouse=True)
+def no_user_gender_lexicon(tmp_path, monkeypatch):
+    """Tests must not see the developer's real ~/.cache lexicon."""
+    monkeypatch.setattr(server, "GENDER_LEXICON_PATH",
+                        tmp_path / "no-lexicon.tsv")
+    server._gender_cache.update(mtime=None, map={})
+    yield
+    server._gender_cache.update(mtime=None, map={})
+
+
+@pytest.fixture
+def gender_lexicon(no_user_gender_lexicon, tmp_path, monkeypatch):
+    """A small lexicon file; write entries then call flush()."""
+    path = tmp_path / "genders.tsv"
+    monkeypatch.setattr(server, "GENDER_LEXICON_PATH", path)
+
+    def write(entries):
+        path.write_text("".join(f"{en}\t{de}\t{g}\n" for en, de, g in entries))
+        server._gender_cache.update(mtime=None, map={})
+
+    return write
+
+
 @pytest.fixture
 def corrections_file(tmp_path, monkeypatch):
     """Point the corrections store at a scratch file with a clean cache."""

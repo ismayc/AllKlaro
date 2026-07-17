@@ -61,6 +61,10 @@ DEFAULT_MODEL = "gemma3:12b"
 GLOSSARY_PATH = Path(__file__).parent / "glossary.txt"
 CORRECTIONS_PATH = Path(__file__).parent / "corrections.jsonl"
 CORRECTION_EXAMPLES = 3            # retrieved corrections shown to the model
+# Compiled by build_gender_lexicon.py from a dict.cc export. Lives in
+# ~/.cache (dict.cc data is private-use only — never commit it to the repo).
+GENDER_LEXICON_PATH = Path.home() / ".cache" / "allklaro" / "de_noun_genders.tsv"
+GENDER_NOTE_LIMIT = 8              # max per-sentence dictionary notes
 
 VAD_BACKEND = os.environ.get("VAD_BACKEND", "silero")  # "silero" | "energy"
 SILERO_URL = ("https://github.com/snakers4/silero-vad/raw/master/"
@@ -104,6 +108,58 @@ def load_glossary() -> list[str]:
 def glossary_whisper_terms() -> str:
     """Source-side spellings only, to bias Whisper toward proper nouns."""
     return ", ".join(ln.split("=")[0].strip() for ln in load_glossary())
+
+
+# ---------------------------------------------------------------- gender lexicon
+
+_gender_cache = {"mtime": None, "map": {}}
+ARTICLES = {"m": "der", "f": "die", "n": "das"}
+
+
+def load_gender_lexicon() -> dict[str, tuple[str, str]]:
+    """english word -> (German noun, article), mtime-cached like the glossary."""
+    try:
+        mtime = GENDER_LEXICON_PATH.stat().st_mtime
+    except OSError:
+        _gender_cache.update(mtime=None, map={})
+        return {}
+    if mtime != _gender_cache["mtime"]:
+        entries = {}
+        for line in GENDER_LEXICON_PATH.read_text(encoding="utf-8").splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3 and parts[2] in ARTICLES:
+                entries[parts[0]] = (parts[1], ARTICLES[parts[2]])
+        _gender_cache.update(mtime=mtime, map=entries)
+    return _gender_cache["map"]
+
+
+def gender_notes(text: str, target: str) -> str | None:
+    """Dictionary gender facts for source words that are German loanwords.
+
+    Only fires when translating INTO German. The lexicon holds same-spelling
+    pairs exclusively (margarita -> die Margarita), so a note can never push
+    the model toward a false-friend word choice; ambiguous-gender words
+    (dict.cc "Margarita {m} {f}") were dropped at build time.
+    """
+    if target != "de":
+        return None
+    lexicon = load_gender_lexicon()
+    if not lexicon:
+        return None
+    notes, seen = [], set()
+    for word in re.findall(r"[A-Za-zÄÖÜäöüß'\-]+", text.lower()):
+        if len(word) < 3 or word in seen:
+            continue
+        seen.add(word)
+        hit = lexicon.get(word)
+        if hit:
+            notes.append(f"{word} → {hit[1]} {hit[0]}")
+            if len(notes) >= GENDER_NOTE_LIMIT:
+                break
+    if not notes:
+        return None
+    return ("Dictionary genders for nouns in this sentence — authoritative, "
+            "overriding any general rule above: " + "; ".join(notes) + ".")
 
 
 # ------------------------------------------------------------------ corrections
@@ -556,9 +612,10 @@ LANG_NAMES = {"de": "German", "en": "English", "es": "Spanish"}
 # direction so Ollama's prefix cache survives.
 GRAMMAR_NOTES = {
     "de": ("German grammar notes: names of drinks and cocktails ending in "
-           "-a (Margarita, Cola, Sangria, Piña Colada) are feminine — die "
-           "Margarita, eine Sangria. Decline articles and adjectives to "
-           "match the noun's gender."),
+           "-a (Margarita, Sangria, Piña Colada) are feminine — die "
+           "Margarita, eine Sangria — unless a dictionary note below says "
+           "otherwise. Decline articles and adjectives to match the noun's "
+           "gender."),
 }
 
 
@@ -589,6 +646,10 @@ def translation_messages(text: str, source: str, target: str,
     if glossary:
         system += ("\n\nGlossary — use these exact translations where "
                    "relevant:\n" + "\n".join(glossary))
+    # Dynamic additions go last so the static prefix above stays cacheable.
+    note = gender_notes(text, target)
+    if note:
+        system += "\n\n" + note
     # User-corrected translations similar to this sentence are shown as
     # few-shot pairs. The system prompt must mark them as authoritative:
     # unlabeled example turns read as mere history and gemma3 ignores their
