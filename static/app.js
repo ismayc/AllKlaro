@@ -17,6 +17,8 @@ const meterFill = document.getElementById("meterFill");
 const partialBar = document.getElementById("partialBar");
 const partialText = document.getElementById("partialText");
 const bigText = document.getElementById("bigText");
+const controls = document.getElementById("controls");
+const controlsBtn = document.getElementById("controlsBtn");
 
 let ws = null, audioCtx = null;
 let streams = [], workletNodes = [];
@@ -41,6 +43,7 @@ function saveSettings() {
     fontSize: fontSize.value,
     speak: speakChk.checked,
     pause: pauseSlider.value,
+    controlsHidden: controls.classList.contains("hidden"),
   }));
 }
 const saved = loadSettings();
@@ -53,6 +56,19 @@ if (saved.pause) pauseSlider.value = saved.pause;
 pauseVal.textContent = pauseSlider.value;
 pauseSlider.oninput = () => { pauseVal.textContent = pauseSlider.value; };
 pauseSlider.onchange = () => { sendConfig(); saveSettings(); };
+
+// Collapsible settings: hidden by default on phone-sized screens so the
+// conversation gets the whole viewport; the gear button toggles.
+function setControlsHidden(hidden) {
+  controls.classList.toggle("hidden", hidden);
+  controlsBtn.setAttribute("aria-expanded", String(!hidden));
+}
+setControlsHidden(saved.controlsHidden ??
+                  window.matchMedia("(max-width: 640px)").matches);
+controlsBtn.onclick = () => {
+  setControlsHidden(!controls.classList.contains("hidden"));
+  saveSettings();
+};
 
 function setStatus(cls, text) {
   statusDot.className = "dot" + (cls ? " " + cls : "");

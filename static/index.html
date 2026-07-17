@@ -9,10 +9,19 @@
 </head>
 <body>
   <header>
-    <div class="brand">AllKlaro</div>
-    <button id="micBtn" class="mic-btn" title="Start / stop listening">
-      <span class="mic-icon">🎙️</span><span id="micLabel">Start</span>
-    </button>
+    <div class="topbar">
+      <div class="brand">AllKlaro</div>
+      <button id="micBtn" class="mic-btn" title="Start / stop listening">
+        <span class="mic-icon">🎙️</span><span id="micLabel">Start</span>
+      </button>
+      <button id="controlsBtn" class="tool-btn" title="Show / hide settings"
+              aria-expanded="true">⚙︎</button>
+      <div class="status">
+        <div class="meter" title="Input level"><div id="meterFill"></div></div>
+        <span id="statusDot" class="dot"></span><span id="statusText">idle</span>
+      </div>
+    </div>
+    <div id="controls">
     <div class="control">
       <label for="device">Input</label>
       <select id="device"></select>
@@ -48,9 +57,6 @@
     <label class="chk"><input type="checkbox" id="speakChk" /> Speak</label>
     <button id="summarizeBtn" class="tool-btn">Summarize</button>
     <button id="exportBtn" class="tool-btn">Export</button>
-    <div class="status">
-      <div class="meter" title="Input level"><div id="meterFill"></div></div>
-      <span id="statusDot" class="dot"></span><span id="statusText">idle</span>
     </div>
   </header>
 
