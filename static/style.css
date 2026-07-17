@@ -7,7 +7,9 @@
 body {
   background: var(--bg); color: var(--text);
   font-family: -apple-system, "SF Pro Text", Helvetica, Arial, sans-serif;
-  height: 100vh; display: flex; flex-direction: column;
+  /* dvh: mobile Safari's 100vh extends behind its toolbar, pushing the
+     bottom bars below the fold; dynamic viewport height tracks reality. */
+  height: 100vh; height: 100dvh; display: flex; flex-direction: column;
 }
 header {
   display: flex; flex-direction: column; gap: 10px;
@@ -112,7 +114,9 @@ main {
 }
 #partialBar.hidden { display: none; }
 #typeBar {
-  display: flex; gap: 8px; padding: 10px 20px 12px;
+  display: flex; gap: 8px;
+  /* Clear the iPhone home indicator when installed full-screen. */
+  padding: 10px 20px calc(12px + env(safe-area-inset-bottom));
   background: var(--panel); border-top: 1px solid var(--border);
 }
 #typeBar input {

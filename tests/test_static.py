@@ -108,3 +108,11 @@ def test_typed_input_is_wired():
     # Typing must work without the mic: the socket connects on demand.
     assert re.search(r"typeForm\.onsubmit[\s\S]*?connectWS\(\)", JS)
     assert "#typeBar" in (STATIC / "style.css").read_text()
+
+
+def test_layout_fits_mobile_viewport():
+    css = (STATIC / "style.css").read_text()
+    # Mobile Safari's 100vh hides the bottom bars behind its toolbar.
+    assert "100dvh" in css
+    assert "safe-area-inset-bottom" in css
+    assert "viewport-fit=cover" in HTML
