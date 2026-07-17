@@ -89,6 +89,10 @@ def test_draft_model_control_is_wired():
     assert 'id="draftModel"' in HTML
     assert "draft_model" in JS                 # reaches the server config
     assert re.search(r"draft:\s*draftSel\.value", JS)  # persisted setting
+    # Dropdowns show sizes so the speed/quality tradeoff is visible, and the
+    # auto-picked draft skips 3B-class models that paraphrase too freely.
+    assert "MIN_DRAFT_BYTES" in JS
+    assert re.search(r"GB", JS)
     css = (STATIC / "style.css").read_text()
     # The refining hint and the revision flash are both styled.
     assert ".refining" in css and ".revised" in css

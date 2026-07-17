@@ -111,14 +111,17 @@ conversation gets the full screen):
 - **Direction** — auto pairs, forced directions, or multi-target modes. Add
   more languages by extending `LANG_NAMES` in `server.py` plus `<option>`s in
   `static/index.html`.
-- **Model** — any installed Ollama chat model. `gemma3:12b` default;
-  `gemma3:4b` / `qwen2.5:7b-instruct` are lighter, `qwen2.5:32b-instruct`
-  stronger but slower.
+- **Model** — any installed Ollama chat model; this model's translation is
+  the one you keep. Suggested pairings (benchmarked on grammar probes +
+  warm latency): everyday calls **Draft `qwen2.5:7b-instruct` + Model
+  `gemma3:12b`**; important conversations **Draft `gemma3:12b` + Model
+  `qwen2.5:32b-instruct`** (needs ~32 GB+ RAM to keep both warm). Models
+  under ~4 GB (3B-class) paraphrase too freely — avoid them even as drafts.
 - **Draft model** — optional fast first pass: this model's translation
   appears immediately ("refining…"), then the main model's answer replaces
-  it with a green flash. Defaults to the smallest installed model; set
-  **Off** for single-pass translation. Edits you make always win over the
-  refinement.
+  it with a green flash. Defaults to the smallest installed model above the
+  4 GB trust line; set **Off** for single-pass translation. Edits you make
+  always win over the refinement.
 - **Pause** — silence that ends an utterance (default 700 ms). Fragments cut
   mid-sentence are auto-merged with the speaker's next utterance.
 - **Speak** — auto-read translations aloud (capture mutes itself while

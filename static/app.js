@@ -102,30 +102,43 @@ focusChk.onchange = () => {
 
 // ----------------------------------------------------------- models & devices
 
+// Models under ~4 GB (≈3B params) translate fast but paraphrase too freely
+// to trust even as drafts; prefer the smallest model above this line.
+const MIN_DRAFT_BYTES = 4e9;
+
+function modelLabel(name, sizes) {
+  const gb = (sizes?.[name] || 0) / 1e9;
+  return gb ? `${name} · ${gb.toFixed(1).replace(/\.0$/, "")} GB` : name;
+}
+
 async function loadModels() {
   try {
     const r = await fetch("/api/models");
     const { models, default: def, sizes, error } = await r.json();
     if (error) showError(error);
     modelSel.innerHTML = "";
-    for (const m of models) modelSel.add(new Option(m, m, m === def, m === def));
+    for (const m of models) {
+      modelSel.add(new Option(modelLabel(m, sizes), m, m === def, m === def));
+    }
     if (saved.model && models.includes(saved.model)) modelSel.value = saved.model;
     else if (!models.includes(def) && models.length) modelSel.value = models[0];
 
     draftSel.innerHTML = "";
     draftSel.add(new Option("Off", ""));
-    for (const m of models) draftSel.add(new Option(m, m));
+    for (const m of models) draftSel.add(new Option(modelLabel(m, sizes), m));
     if (saved.draft !== undefined &&
         [...draftSel.options].some((o) => o.value === saved.draft)) {
       draftSel.value = saved.draft;
     } else if (sizes) {
-      // Default: the smallest model that's smaller than the main one shows
-      // a fast draft; the main model then refines it behind the scenes.
+      // Default draft: smallest model that's still trustworthy (see
+      // MIN_DRAFT_BYTES) and smaller than the main model; if only tiny
+      // models exist, the largest of those is the least-bad choice.
       const smaller = models
         .filter((m) => m !== modelSel.value &&
                        (sizes[m] || Infinity) < (sizes[modelSel.value] || 0))
         .sort((a, b) => sizes[a] - sizes[b]);
-      draftSel.value = smaller[0] || "";
+      draftSel.value = smaller.find((m) => sizes[m] >= MIN_DRAFT_BYTES)
+        ?? smaller[smaller.length - 1] ?? "";
     }
   } catch {
     showError("Could not list Ollama models — is `ollama serve` running?");
