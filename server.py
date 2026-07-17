@@ -547,6 +547,18 @@ async def summarize(payload: dict):
 
 LANG_NAMES = {"de": "German", "en": "English", "es": "Spanish"}
 
+# Target-language grammar notes appended to the system prompt. Generic
+# "be careful with grammar" instructions measurably do nothing (gemma3:12b
+# still writes "der Margarita"); stating the concrete rule fixes it — the
+# model lacks the lexical fact, not the diligence. Keep these static per
+# direction so Ollama's prefix cache survives.
+GRAMMAR_NOTES = {
+    "de": ("German grammar notes: names of drinks and cocktails ending in "
+           "-a (Margarita, Cola, Sangria, Piña Colada) are feminine — die "
+           "Margarita, eine Sangria. Decline articles and adjectives to "
+           "match the noun's gender."),
+}
+
 
 def translation_messages(text: str, source: str, target: str,
                          history: list[dict] | None = None) -> list[dict]:
@@ -569,6 +581,8 @@ def translation_messages(text: str, source: str, target: str,
         f"intended meaning naturally. Earlier exchanges are shown for "
         f"context; use them to resolve pronouns and topic."
     )
+    if target in GRAMMAR_NOTES:
+        system += "\n\n" + GRAMMAR_NOTES[target]
     glossary = load_glossary()
     if glossary:
         system += ("\n\nGlossary — use these exact translations where "

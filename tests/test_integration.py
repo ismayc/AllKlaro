@@ -84,6 +84,25 @@ async def test_real_ollama_translates_german():
     assert "morning" in text.lower()
 
 
+async def test_real_ollama_gender_agreement_for_loanword_drinks(
+        corrections_file, tmp_path, monkeypatch):
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    # No glossary, no corrections: the GRAMMAR_NOTES rule alone must get
+    # "die Margarita" (feminine) right — gemma3:12b says "der" without it.
+    monkeypatch.setattr(server, "GLOSSARY_PATH", tmp_path / "no-glossary.txt")
+    server._glossary_cache.update(mtime=None, lines=[])
+    checks = [("I'd like a margarita, please.",
+               "eine margarita", "einen margarita"),
+              ("This margarita is really good.",
+               "diese margarita", "dieser margarita")]
+    for sentence, want, reject in checks:
+        text = (await server.stream_translation(
+            FakeWS(), 1, sentence, "en", "de", server.DEFAULT_MODEL)).lower()
+        assert want in text and reject not in text, f"{sentence!r} -> {text!r}"
+    server._glossary_cache.update(mtime=None, lines=[])
+
+
 async def test_real_ollama_correction_steers_translation(corrections_file):
     if not ollama_up():
         pytest.skip("Ollama not running")

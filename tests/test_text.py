@@ -90,6 +90,14 @@ def test_translation_prompt_structure():
     assert msgs[1]["content"] == "Guten Morgen"
 
 
+def test_grammar_notes_only_for_targets_that_have_them():
+    into_de = translation_messages("The margarita is good.", "en", "de")
+    assert "feminine" in into_de[0]["content"]      # German gender note present
+    for source, target in [("de", "en"), ("en", "es")]:
+        msgs = translation_messages("x", source, target)
+        assert "feminine" not in msgs[0]["content"]  # no note defined yet
+
+
 def test_history_becomes_chat_turns_with_static_system():
     h = [{"source": "de", "target": "en", "text": "A", "translation": "B"}]
     m1 = translation_messages("X", "de", "en", h)
