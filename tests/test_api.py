@@ -156,3 +156,21 @@ def test_models_report_sizes_for_draft_suggestion(client):
     data = client.get("/api/models").json()
     assert data["sizes"]["qwen2.5:7b-instruct"] < data["sizes"]["gemma3:12b"]
     assert "nomic-embed-text:latest" not in data["sizes"]
+
+
+# ------------------------------------------------------------ cert download
+
+
+def test_cert_endpoint_serves_certificate(client, tmp_path, monkeypatch):
+    pem = tmp_path / "cert.pem"
+    pem.write_text("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
+    monkeypatch.setattr(server, "CERT_PATH", pem)
+    r = client.get("/cert")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/x-x509-ca-cert")
+    assert b"BEGIN CERTIFICATE" in r.content
+
+
+def test_cert_endpoint_404_without_phone_mode(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "CERT_PATH", tmp_path / "missing.pem")
+    assert client.get("/cert").status_code == 404

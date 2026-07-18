@@ -160,6 +160,15 @@ printing the exact URL. On a phone on the same Wi-Fi: open
 the mic, and lay the phone between the speakers. ⚠️ This exposes the app to
 everyone on the network — use networks you trust.
 
+**Add to Home Screen** (Share → Add to Home Screen) installs it like an app
+— full screen, with the AllKlaro icon. If the icon shows as a lettered
+tile: iOS's icon fetcher ignores the certificate exception you granted in
+Safari, so install the certificate once — open `https://<mac-ip>:8710/cert`,
+allow the download, install it under **Settings → General → VPN & Device
+Management**, then enable it under **Settings → General → About →
+Certificate Trust Settings**. Re-add to the home screen afterwards; this
+also removes the warning page for good.
+
 ## ⚙️ Under the hood
 
 The speed and correctness machinery, for the curious:

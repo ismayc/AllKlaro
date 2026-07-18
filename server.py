@@ -22,7 +22,7 @@ from pathlib import Path
 import httpx
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -944,6 +944,22 @@ async def index():
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+CERT_PATH = Path(__file__).parent / "certs" / "cert.pem"
+
+
+@app.get("/cert")
+async def cert():
+    """Phone mode's self-signed certificate, for a one-time install on the
+    phone. Until iOS fully trusts the cert, its home-screen icon fetcher
+    (which runs outside the Safari session that accepted the warning)
+    rejects the connection and falls back to a lettered tile."""
+    if not CERT_PATH.exists():
+        return JSONResponse(
+            {"error": "No certificate — start phone mode first."},
+            status_code=404)
+    return FileResponse(CERT_PATH, media_type="application/x-x509-ca-cert",
+                        filename="allklaro.pem")
 
 
 def ollama_client() -> httpx.AsyncClient:

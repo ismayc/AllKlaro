@@ -24,6 +24,13 @@ fi
 echo ""
 echo "  On your phone, open:  https://$IP:8710"
 echo ""
+echo "  First time on a new phone? Install the certificate once so iOS"
+echo "  fully trusts the site (removes the warning and fixes the"
+echo "  home-screen icon): open https://$IP:8710/cert and allow the"
+echo "  download, then Settings > General > VPN & Device Management >"
+echo "  install the profile, and finally enable it under Settings >"
+echo "  General > About > Certificate Trust Settings."
+echo ""
 # --reload: pick up server.py changes without a manual restart.
 exec uv run uvicorn server:app --host 0.0.0.0 --port 8710 --reload \
   --ssl-keyfile "$CERT_DIR/key.pem" --ssl-certfile "$CERT_DIR/cert.pem"
