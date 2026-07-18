@@ -1,5 +1,7 @@
 # 🗣️ AllKlaro
 
+<img src="docs/logo.png" width="96" align="right" alt="AllKlaro logo" />
+
 **Live, fully-local speech translation between German, English, and Spanish.**
 
 > ***All*** *(EN)* + ***Klaro!*** *(DE)* + ***claro*** *(ES)* — everything
@@ -7,7 +9,11 @@
 
 ![local](https://img.shields.io/badge/privacy-100%25%20local-3ecf8e)
 ![platform](https://img.shields.io/badge/platform-Apple%20Silicon-4fa3ff)
-![tests](https://img.shields.io/badge/tests-100%2B%20passing-f5a623)
+![tests](https://img.shields.io/badge/tests-200%2B%20passing-f5a623)
+
+🌐 **Website:** [ismayc.github.io/AllKlaro](https://ismayc.github.io/AllKlaro/)
+— also in [Deutsch](https://ismayc.github.io/AllKlaro/?lang=de) and
+[Español](https://ismayc.github.io/AllKlaro/?lang=es)
 
 Someone speaks German or Spanish on your call — two seconds later the English
 translation is streaming onto your screen, color-coded by speaker and language.
@@ -131,8 +137,15 @@ conversation gets the full screen):
   speaking). Independent of tap-to-hear, which always works.
 - **Center latest** — focus mode: newest card and live transcript sit
   mid-screen; history scrolls up.
-- **Summarize / Export** — learner review tools; the summary rides along in
-  the export.
+- **Summarize / Export / Clear** — learner review tools (the summary rides
+  along in the export); Clear wipes the conversation after a confirmation.
+- **✏️ on any finished translation** — edit it in place; the correction is
+  saved for retrieval and immediately fixes the conversation context.
+- **Type to translate** — the text bar at the very bottom works without the
+  mic; auto modes detect the typed language.
+- **Speak** voices: German `de-DE`, English `en-US`, Spanish `es-MX`
+  (Latin American).
+- **About** — links to the website and repo.
 - Tap a card's background for a **full-screen big-text view** to show the
   person you're talking to.
 - Settings persist; the WebSocket auto-reconnects; a wake-lock keeps the
@@ -231,11 +244,15 @@ uv run pytest                                   # fast unit suite (mocked Whispe
 RUN_INTEGRATION=1 uv run pytest -m integration  # real Whisper + Ollama, ~25 s
 ```
 
-100+ unit tests cover the VAD state machine, filtering, direction resolution,
+200+ tests cover the VAD state machine, filtering, direction resolution,
 merging, echo dedupe, speculation, context, speaker channels, export,
-summarize, frontend wiring, and the WebSocket protocol including error paths.
-Integration tests synthesize German and Spanish speech with macOS `say` and
-push it through the real pipeline.
+summarize, frontend wiring, the WebSocket protocol including error paths,
+typed input, the draft+refine flow, correction retrieval, gender-lexicon
+compilation, the constraint-intersection declension guard, and dialect
+hints. Integration tests synthesize German and Spanish speech with macOS
+`say`, push it through the real pipeline, and verify against the live
+models that corrections steer wording, dictionary genders beat the
+model's guesses, and dialect mis-hearings keep their meaning.
 
 ## 🛟 Troubleshooting
 

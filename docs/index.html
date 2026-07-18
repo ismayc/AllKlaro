@@ -293,6 +293,10 @@ uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
         <div class="feature"><h3 data-i18n="h_vad_h">VAD hysteresis</h3>
           <p data-i18n="h_vad_p">Starting speech needs Silero probability &gt; 0.5, continuing only
           &gt; 0.35, so quiet word-endings don't chop sentences.</p></div>
+        <div class="feature"><h3 data-i18n="h_decl_h">Declension guard</h3>
+          <p data-i18n="h_decl_p">Determiner and noun paradigms are intersected — a phrase with no
+          consistent case/number/gender reading ("das Termin", "mit die
+          Frau") triggers one verified corrective re-ask.</p></div>
       </div>
     </div>
   </section>
@@ -365,6 +369,8 @@ uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
       h_junk_p: "Temperatur-Leiter, Kompressions- und No-Speech-Signale, ein Detektor für Wiederholungsschleifen und eine Sperrliste bekannter Whisper-Halluzinationen.",
       h_vad_h: "VAD-Hysterese",
       h_vad_p: "Sprechbeginn braucht Silero-Wahrscheinlichkeit &gt; 0,5, Weitersprechen nur &gt; 0,35 — leise Wortenden zerhacken keine Sätze.",
+      h_decl_h: "Deklinations-Wächter",
+      h_decl_p: "Determinativ- und Substantiv-Paradigmen werden geschnitten — eine Phrase ohne konsistente Kasus/Numerus/Genus-Lesart („das Termin“, „mit die Frau“) löst genau eine verifizierte Korrektur-Nachfrage aus.",
       footer: '<a href="https://github.com/ismayc/AllKlaro">GitHub</a> · <a href="https://github.com/ismayc/AllKlaro#-troubleshooting">Fehlerbehebung</a> · Gebaut mit <a href="https://github.com/ml-explore/mlx-examples">mlx-whisper</a>, <a href="https://github.com/snakers4/silero-vad">Silero VAD</a> und <a href="https://ollama.com">Ollama</a>.',
     },
     es: {
@@ -421,6 +427,8 @@ uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
       h_junk_p: "Escalera de temperatura, señales de compresión y de no-habla, detector de bucles de repetición y una lista de alucinaciones típicas de Whisper.",
       h_vad_h: "Histéresis del VAD",
       h_vad_p: "Empezar a hablar requiere probabilidad de Silero &gt; 0,5; continuar solo &gt; 0,35 — los finales suaves de palabra no cortan frases.",
+      h_decl_h: "Guardia de declinación",
+      h_decl_p: "Se intersecan los paradigmas de determinantes y sustantivos — una frase sin lectura consistente de caso/número/género («das Termin», «mit die Frau») provoca una sola repregunta correctiva verificada.",
       footer: '<a href="https://github.com/ismayc/AllKlaro">GitHub</a> · <a href="https://github.com/ismayc/AllKlaro#-troubleshooting">Solución de problemas</a> · Hecho con <a href="https://github.com/ml-explore/mlx-examples">mlx-whisper</a>, <a href="https://github.com/snakers4/silero-vad">Silero VAD</a> y <a href="https://ollama.com">Ollama</a>.',
     },
   };
