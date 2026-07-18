@@ -339,3 +339,132 @@ def test_prep_and_impossible_passes_do_not_double_flag(output_gender_map):
     output_gender_map([("Frau", "f")])
     # "mit das Frau" violates both passes; one clear message is enough.
     assert len(server.agreement_issues("Ich rede mit das Frau.", "de")) == 1
+
+
+# --------------------------------------------- paradigm-table intersection
+
+
+LEHRER = ("lehrer", "Lehrer", "m", "ns,ds,as,np,gp,ap")     # dat pl: Lehrern
+LEHRERN = ("lehrern", "Lehrer", "m", "dp")
+AUTO = ("auto", "Auto", "n", "ns,ds,as")                    # plural: Autos
+AUTOS = ("autos", "Auto", "n", "gs,np,gp,dp,ap")
+FRAUEN = ("frauen", "Frau", "f", "np,gp,dp,ap")
+STUDENT = ("student", "Student", "m", "ns")                 # weak noun
+STUDENTEN = ("studenten", "Student", "m", "gs,ds,as,np,gp,dp,ap")
+
+
+def test_paradigms_catch_number_errors(noun_forms):
+    noun_forms([LEHRER, LEHRERN, AUTO, AUTOS, FRAUEN])
+    assert server.agreement_issues("Die Auto ist schnell.", "de")
+    assert server.agreement_issues("Mit den Lehrer reden wir.", "de")  # Lehrern!
+    assert server.agreement_issues("Ich sehe dem Frauen zu.", "de")
+    (issue,) = server.agreement_issues("Die Auto ist schnell.", "de")
+    assert "neuter" in issue and "das Auto" in issue
+
+
+def test_paradigms_accept_plurals_and_weak_nouns(noun_forms):
+    noun_forms([LEHRER, LEHRERN, AUTO, AUTOS, FRAUEN, STUDENT, STUDENTEN])
+    for ok in ("Die Lehrer sind da.",             # nom plural
+               "Mit den Lehrern reden wir.",      # dat plural
+               "Die Autos sind schnell.",
+               "Ich sehe den Studenten.",         # weak acc singular
+               "Wegen des Studenten bleiben wir.",  # weak gen singular
+               "Der Lehrer der Frauen ist da.",   # gen plural via "der"
+               ):
+        assert server.agreement_issues(ok, "de") == [], ok
+
+
+def test_paradigms_catch_missing_genitive_s(noun_forms):
+    noun_forms([("termin", "Termin", "m", "ns,ds,as"),
+                ("termins", "Termin", "m", "gs")])
+    assert server.agreement_issues("Wegen des Termin bleiben wir.", "de")
+    assert server.agreement_issues("Wegen des Termins bleiben wir.", "de") == []
+
+
+def test_relative_pronouns_after_comma_not_flagged(noun_forms):
+    noun_forms([FRAUEN, ("mann", "Mann", "m", "ns,ds,as")])
+    # "dem" refers to Mann; Frauen is the subject of the relative clause.
+    assert server.agreement_issues(
+        "Das ist der Mann, dem Frauen vertrauen.", "de") == []
+    # Same efter a preposition: ", mit dem Frauen tanzen".
+    assert server.agreement_issues(
+        "Das ist der Mann, mit dem Frauen tanzen.", "de") == []
+    # But without the comma context it is a real error.
+    assert server.agreement_issues("Ich gebe dem Frauen Geld.", "de")
+
+
+def test_fallback_dative_plural_needs_n_or_s(output_gender_map):
+    output_gender_map([("Frau", "f"), ("Handy", "n")])
+    # "den Frau" has no reading: not acc-sg-m (feminine), and the dative
+    # plural would need -n/-s ("den Frauen").
+    assert server.agreement_issues("Ich helfe den Frau.", "de")
+    assert server.agreement_issues("Mit den Handys telefonieren wir.",
+                                   "de") == []
+
+
+def test_homograph_forms_are_left_alone(noun_forms):
+    # A form belonging to two lemmas with different genders — anything goes.
+    noun_forms([("band", "Band", "n", "ns,ds,as"),
+                ("band", "Band", "f", "ns,ds,as")])
+    assert server.agreement_issues("Die Band spielt laut.", "de") == []
+    assert server.agreement_issues("Das Band ist lang.", "de") == []
+
+
+def test_two_gender_words_still_flag_the_third_gender(noun_forms):
+    # die SMS (standard) / das SMS (Austrian) — but never masculine. The
+    # spurious SM-genitive homograph must not suppress the flag either.
+    noun_forms([("sms", "SM", "m", "gs"),
+                ("sms", "SMS", "f", "ns,as,ds,gs,np,ap,dp,gp"),
+                ("sms", "SMS", "n", "ns,as,ds,gs,np,ap,dp,gp")])
+    (issue,) = server.agreement_issues("Er hat mir einen SMS geschickt.", "de")
+    assert "feminine or neuter" in issue and "die/das SMS" in issue
+    assert server.agreement_issues("Er hat mir eine SMS geschickt.", "de") == []
+    assert server.agreement_issues("Er hat mir ein SMS geschickt.", "de") == []
+
+
+# ------------------------------------------------------------- LanguageTool
+
+
+class FakeMatch:
+    def __init__(self, issue_type, offset, length, message, replacements,
+                 rule_id="X"):
+        self.rule_issue_type = issue_type
+        self.offset, self.error_length = offset, length
+        self.message, self.replacements = message, replacements
+        self.rule_id = rule_id
+
+
+def test_languagetool_filters_to_grammar_findings(monkeypatch):
+    class FakeTool:
+        def check(self, text):
+            return [FakeMatch("grammar", 0, 3, "Kongruenzfehler", ["Dem"]),
+                    FakeMatch("uncategorized", 0, 3, "Übereinstimmung",
+                              ["Dem"], rule_id="SIMPLE_AGREEMENT_MAS"),
+                    FakeMatch("uncategorized", 4, 5, "Sonstiges", []),
+                    FakeMatch("style", 4, 5, "Zu lang", [])]
+    monkeypatch.setattr(server, "LT_ENABLED", True)
+    monkeypatch.setattr(server, "_lt_tools", {"de": FakeTool()})
+    issues = server.languagetool_issues("Der Termin hier.", "de")
+    assert issues == ['"Der": Kongruenzfehler (suggestion: "Dem")',
+                      '"Der": Übereinstimmung (suggestion: "Dem")']
+
+
+def test_languagetool_disabled_and_unavailable_are_silent(monkeypatch):
+    assert server.languagetool_issues("x", "de") == []   # env off by default
+    monkeypatch.setattr(server, "LT_ENABLED", True)
+    monkeypatch.setattr(server, "_lt_tools", {"de": None})  # init failed
+    assert server.languagetool_issues("x", "de") == []
+    assert server.languagetool_issues("x", "en") == []   # unsupported target
+
+
+async def test_languagetool_findings_feed_the_retry(monkeypatch, fake_ollama):
+    monkeypatch.setattr(server, "LT_ENABLED", True)
+    monkeypatch.setattr(
+        server, "languagetool_issues",
+        lambda text, target: (['"kaputt": Kongruenzfehler']
+                              if "kaputt" in text else []))
+    final, changed = await server.enforce_agreement(
+        "x", "en", "de", "gemma3:12b", [], "Der kaputt Satz.")
+    assert changed and final == "Refined translation."
+    revise = fake_ollama["chat"]["messages"][-1]["content"]
+    assert "Kongruenzfehler" in revise

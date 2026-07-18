@@ -73,6 +73,9 @@ OUTPUT_GENDER_PATHS = {
     "de": Path.home() / ".cache" / "allklaro" / "de_output_genders.tsv",
     "es": Path.home() / ".cache" / "allklaro" / "es_output_genders.tsv",
 }
+# Per-form German noun readings (case/number), built by build_noun_forms.py
+# from the Wiktionary-derived german-nouns CSV.
+NOUN_FORMS_PATH = Path.home() / ".cache" / "allklaro" / "de_noun_forms.tsv"
 GENDER_NOTE_LIMIT = 8              # max per-sentence dictionary notes
 
 VAD_BACKEND = os.environ.get("VAD_BACKEND", "silero")  # "silero" | "energy"
@@ -203,22 +206,59 @@ def load_output_genders(target: str) -> dict[str, tuple[str, str]]:
 
 # ------------------------------------------------------- agreement checking
 #
-# Article forms that are unambiguously SINGULAR, mapped to the genders they
-# can never modify in ANY case. This sidesteps case analysis entirely:
-# "das <feminine>" is wrong in every reading, while ambiguous forms (der =
-# masc nom / fem dat / gen plural; die/den have plural readings) are left
-# unchecked. Conservative by construction — near-zero false positives.
+# Every German determiner form is mapped to its complete set of possible
+# (case, number, gender) readings — gender None means "any" (plural).
+# An NP is flagged only when NO determiner reading is consistent with any
+# reading of the noun form (from the Wiktionary paradigm table, or a
+# conservative fallback synthesized from the gender lexicon). Wrong in
+# every interpretation = provably wrong; anything else passes.
 
-DE_IMPOSSIBLE = {
-    "das": "mf", "dem": "f", "des": "f",
-    "ein": "f", "einen": "fn", "einem": "f", "einer": "mn",
-    "eine": "mn", "eines": "f",
-    "kein": "f", "keinem": "f", "keines": "f",
-    "dieses": "f", "diesem": "f", "jedes": "f", "jedem": "f",
-    # Preposition+article contractions encode gender directly.
-    "beim": "f", "vom": "f", "zum": "f", "zur": "mn",
-    "am": "f", "im": "f", "ins": "mf", "ans": "mf",
+def _derword_readings(ending):
+    return {
+        "e": {("n", "s", "f"), ("a", "s", "f"),
+              ("n", "p", None), ("a", "p", None)},
+        "er": {("n", "s", "m"), ("d", "s", "f"), ("g", "s", "f"),
+               ("g", "p", None)},
+        "es": {("n", "s", "n"), ("a", "s", "n"),
+               ("g", "s", "m"), ("g", "s", "n")},
+        "en": {("a", "s", "m"), ("d", "p", None)},
+        "em": {("d", "s", "m"), ("d", "s", "n")},
+    }[ending]
+
+
+DET_READINGS = {
+    "der": _derword_readings("er"), "die": _derword_readings("e"),
+    "den": _derword_readings("en"), "dem": _derword_readings("em"),
+    "des": {("g", "s", "m"), ("g", "s", "n")},
+    "das": {("n", "s", "n"), ("a", "s", "n")},
+    # Contractions fix case AND gender.
+    "am": _derword_readings("em"), "im": _derword_readings("em"),
+    "beim": _derword_readings("em"), "vom": _derword_readings("em"),
+    "zum": _derword_readings("em"), "zur": {("d", "s", "f")},
+    "ins": {("a", "s", "n")}, "ans": {("a", "s", "n")},
 }
+for _end in ("e", "er", "es", "en", "em"):
+    DET_READINGS["dies" + _end] = _derword_readings(_end)
+    # "jeder" has no plural readings.
+    DET_READINGS["jed" + _end] = {r for r in _derword_readings(_end)
+                                  if r[1] == "s"}
+
+# ein-words (mixed declension) by ending; the article "ein" itself has no
+# plural, kein-/possessives add plural readings.
+EIN_READINGS = {
+    "": {("n", "s", "m"), ("n", "s", "n"), ("a", "s", "n")},
+    "e": {("n", "s", "f"), ("a", "s", "f")},
+    "en": {("a", "s", "m")},
+    "em": {("d", "s", "m"), ("d", "s", "n")},
+    "er": {("d", "s", "f"), ("g", "s", "f")},
+    "es": {("g", "s", "m"), ("g", "s", "n")},
+}
+POSS_PLURAL = {"e": {("n", "p", None), ("a", "p", None)},
+               "en": {("d", "p", None)}, "er": {("g", "p", None)}}
+# Definite forms double as relative pronouns after a comma ("der Mann, dem
+# Frauen vertrauen" — dem refers to Mann, Frauen is the subject).
+RELATIVE_FORMS = {"der", "die", "das", "den", "dem", "des"}
+
 ES_IMPOSSIBLE = {"el": "f", "un": "f", "la": "m", "una": "m"}
 # After these article forms, mixed adjective declension allows exactly one
 # ending set ("ein schöne Tag" is impossible in every reading).
@@ -241,26 +281,26 @@ DE_ADJ_ENDINGS = {
 # dative that dominates spoken German.
 
 DE_PREP_CASE = {
-    "aus": {"dat"}, "bei": {"dat"}, "mit": {"dat"}, "nach": {"dat"},
-    "seit": {"dat"}, "von": {"dat"}, "zu": {"dat"}, "gegenüber": {"dat"},
-    "durch": {"acc"}, "für": {"acc"}, "gegen": {"acc"}, "ohne": {"acc"},
-    "um": {"acc"},
-    "während": {"gen", "dat"}, "wegen": {"gen", "dat"},
-    "trotz": {"gen", "dat"}, "anstatt": {"gen", "dat"}, "statt": {"gen", "dat"},
+    "aus": "d", "bei": "d", "mit": "d", "nach": "d", "seit": "d",
+    "von": "d", "zu": "d", "gegenüber": "d",
+    "durch": "a", "für": "a", "gegen": "a", "ohne": "a", "um": "a",
+    "während": "gd", "wegen": "gd", "trotz": "gd",
+    "anstatt": "gd", "statt": "gd",
 }
+CASE_NAMES = {"n": "nominative", "a": "accusative",
+              "d": "dative", "g": "genitive"}
 DE_DEF_ART = {
-    "nom": {"m": "der", "f": "die", "n": "das"},
-    "acc": {"m": "den", "f": "die", "n": "das"},
-    "dat": {"m": "dem", "f": "der", "n": "dem"},
-    "gen": {"m": "des", "f": "der", "n": "des"},
+    "n": {"m": "der", "f": "die", "n": "das"},
+    "a": {"m": "den", "f": "die", "n": "das"},
+    "d": {"m": "dem", "f": "der", "n": "dem"},
+    "g": {"m": "des", "f": "der", "n": "des"},
 }
 DE_EIN_ENDINGS = {
-    "nom": {"m": "", "f": "e", "n": ""},
-    "acc": {"m": "en", "f": "e", "n": ""},
-    "dat": {"m": "em", "f": "er", "n": "em"},
-    "gen": {"m": "es", "f": "er", "n": "es"},
+    "n": {"m": "", "f": "e", "n": ""},
+    "a": {"m": "en", "f": "e", "n": ""},
+    "d": {"m": "em", "f": "er", "n": "em"},
+    "g": {"m": "es", "f": "er", "n": "es"},
 }
-DE_DEF_FORMS = {"der", "die", "das", "den", "dem", "des"}
 DE_POSS_RE = re.compile(r"^(ein|kein|mein|dein|sein|ihr|unser|euer|eur)"
                         r"(e|en|em|er|es)?$")
 # Bare "sein"/"ihr" are verb/pronoun homonyms ("mit ihr Deutsch üben" =
@@ -275,42 +315,132 @@ DE_PREP_NP_RE = re.compile(
     r"([A-ZÄÖÜ][A-Za-zÄÖÜäöüß-]*)")
 
 
-def _prep_case_issue(prep, det, noun, display, g):
-    """The wrong-determiner complaint for a case-governing preposition, or
-    None when the determiner fits (or isn't one we can classify)."""
-    cases = DE_PREP_CASE[prep.lower()]
-    detl = det.lower()
-    if detl in DE_DEF_FORMS:
-        allowed = {DE_DEF_ART[c][g] for c in cases}
-        if detl in allowed:
-            return None
-        want = " or ".join(f'"{a}"' for a in sorted(allowed))
-    else:
-        m = DE_POSS_RE.match(detl)
-        if not m or detl in DE_BARE_AMBIGUOUS:
-            return None                # pronoun/quantifier/unknown — skip
-        endings = {DE_EIN_ENDINGS[c][g] for c in cases}
-        if (m.group(2) or "") in endings:
-            return None
+def det_readings(detl: str):
+    """All (case, number, gender) readings of a determiner form, or None
+    for words we can't classify (pronouns, quantifiers, bare sein/ihr)."""
+    if detl in DET_READINGS:
+        return DET_READINGS[detl]
+    m = DE_POSS_RE.match(detl)
+    if not m or detl in DE_BARE_AMBIGUOUS:
+        return None
+    ending = m.group(2) or ""
+    readings = set(EIN_READINGS.get(ending, ()))
+    if m.group(1) != "ein":            # kein/possessives have plurals too
+        readings |= POSS_PLURAL.get(ending, set())
+    return readings or None
+
+
+_noun_forms_cache = {"mtime": None, "map": {}}
+
+
+def load_noun_forms() -> dict[str, tuple]:
+    """form (lowercased) -> ((lemma, gender, frozenset of case+number
+    codes), ...) from the compiled Wiktionary paradigm table."""
+    try:
+        mtime = NOUN_FORMS_PATH.stat().st_mtime
+    except OSError:
+        _noun_forms_cache.update(mtime=None, map={})
+        return {}
+    if mtime != _noun_forms_cache["mtime"]:
+        entries: dict[str, list] = {}
+        for line in NOUN_FORMS_PATH.read_text(encoding="utf-8").splitlines():
+            parts = line.split("\t")
+            if len(parts) == 4:
+                entries.setdefault(parts[0], []).append(
+                    (parts[1], parts[2], frozenset(parts[3].split(","))))
+        _noun_forms_cache.update(
+            mtime=mtime, map={k: tuple(v) for k, v in entries.items()})
+    return _noun_forms_cache["map"]
+
+
+def _noun_analyses(form: str):
+    """Possible (lemma, gender, readings) of a noun form. Falls back to the
+    gender lexicon with conservative assumptions: the bare lemma covers the
+    singular (genitive only for feminines — m/n need -s), and any plural
+    except the dative, which requires -n or -s."""
+    entries = load_noun_forms().get(form.lower())
+    if entries:
+        return entries
+    fallback = load_output_genders("de").get(form.lower())
+    if not fallback:
+        return None
+    display, g = fallback
+    codes = {"ns", "as", "ds"} | ({"gs"} if g == "f" else set())
+    codes |= {"np", "ap", "gp"}
+    if form.lower().endswith(("n", "s")):
+        codes.add("dp")
+    return ((display, g, frozenset(codes)),)
+
+
+def _compatible(readings, entries) -> bool:
+    """Is any determiner reading consistent with any noun reading?"""
+    return any(
+        c + n in codes and (n == "p" or g is None or g == g2)
+        for c, n, g in readings
+        for _, g2, codes in entries)
+
+
+def _gender_options(entries, form):
+    """(display, genders) for messaging an incompatible NP. Prefers entries
+    whose lemma is the form itself (homograph noise like SM/SMS otherwise
+    leaks in); more than two candidate genders means the message would be
+    mush, so callers skip flagging then."""
+    exact = [e for e in entries if e[0].lower() == form.lower()]
+    pool = exact or entries
+    return pool[0][0], sorted({g for _, g, _ in pool})
+
+
+def _wanted_det(detl, cases, gender):
+    """The determiner form(s) that would be correct, for the message."""
+    if detl in RELATIVE_FORMS or detl in ("das",):
+        return " or ".join(sorted({f'"{DE_DEF_ART[c][gender]}"'
+                                   for c in cases}))
+    m = DE_POSS_RE.match(detl)
+    if m:
         stem = "euer" if m.group(1) == "eur" else m.group(1)
-        want = " or ".join(f'"{stem + e}"' for e in sorted(endings))
-    return (f'"{prep} {det} {noun}" is wrong — "{prep.lower()}" takes the '
-            f'{"/".join(sorted(cases))} case and {display} is '
-            f'{GENDER_NAMES[g]}, so it must be {want} {noun}.')
+        return " or ".join(sorted({f'"{stem + DE_EIN_ENDINGS[c][gender]}"'
+                                   for c in cases}))
+    return None
 # Measure/quantity constructions carry their own agreement ("ein bisschen
 # Ruhe" is correct despite Ruhe being feminine) — skip the whole phrase.
 MEASURE_WORDS = {"paar", "bisschen", "wenig", "viel", "etwas", "mehr", "poco"}
 UNDECLINED_ADJS = {"rosa", "lila", "prima", "super", "extra", "klasse",
                    "orange", "beige"}
+# Words between determiner and noun that end like adjectives but aren't
+# ("Das werden gute Freunde", "das heute Abend") — their presence means the
+# "determiner" is really a pronoun, so the whole match is skipped.
+NON_ADJ_MIDS = {"werden", "waren", "wurde", "wurden", "würde", "würden",
+                "haben", "hatten", "hätte", "hätten", "sollen", "wollen",
+                "können", "müssen", "dürfen", "mögen", "möchten",
+                "heute", "morgen", "gestern", "immer", "wieder", "gerne",
+                "leider", "lieber", "eher", "weiter", "außer", "über",
+                "unter", "hinter"}
+
+
+def _plausible_adj(word: str) -> bool:
+    """Could this be an attributive adjective inside an NP? Attributive
+    adjectives are always declined, so they end -e/-er/-es/-en/-em; verbs,
+    adverbs, and nested determiners mean we're not looking at one NP."""
+    return (word.endswith(("e", "er", "es", "en", "em"))
+            and word not in NON_ADJ_MIDS
+            and word not in DET_READINGS
+            and not DE_POSS_RE.match(word))
 AGREEMENT_EXCEPTIONS = {("ein", "uhr")}   # "um ein Uhr" (telling time)
 GENDER_NAMES = {"m": "masculine", "f": "feminine", "n": "neuter"}
 NOM_ARTICLE = {"de": {"m": "der", "f": "die", "n": "das"},
                "es": {"m": "el", "f": "la"}}
 
+def _det_alternation() -> str:
+    forms = set(DET_READINGS)
+    for stem in ("ein", "kein", "mein", "dein", "sein", "ihr", "unser",
+                 "euer", "eur"):
+        for end in ("", "e", "en", "em", "er", "es"):
+            forms.add(stem + end)
+    return "|".join(sorted(forms, key=len, reverse=True))
+
+
 DE_NP_RE = re.compile(
-    r"\b(?i:(das|dem|des|einen|einem|einer|eines|eine|ein|kein|keinem"
-    r"|keines|dieses|diesem|jedes|jedem"
-    r"|beim|vom|zum|zur|am|im|ins|ans))\s+"
+    r"\b(?i:(" + _det_alternation() + r"))\s+"
     r"(?:([a-zäöüß-]+)\s+)?(?:([a-zäöüß-]+)\s+)?"
     r"([A-ZÄÖÜ][A-Za-zÄÖÜäöüß-]*)")
 ES_NP_RE = re.compile(
@@ -322,53 +452,88 @@ def agreement_issues(text: str, target: str) -> list[str]:
     human-readable facts suitable for a corrective prompt. Empty when the
     output map is missing or nothing matches."""
     genders = load_output_genders(target)
-    if not genders:
+    if target == "de":
+        if not genders and not load_noun_forms():
+            return []
+    elif not genders:
         return []
     issues = []
     if target == "de":
-        # Pass 1: case is known — a preposition governs it unconditionally.
         flagged_spans = []
+        # Pass 1: a case-governing preposition pins the case; the NP must
+        # have a consistent reading within that case.
         for m in DE_PREP_NP_RE.finditer(text):
             prep, det, noun = m.group(1), m.group(2), m.group(5)
             mids = [w for w in (m.group(3), m.group(4)) if w]
-            if ((det.lower(), noun.lower()) in AGREEMENT_EXCEPTIONS
+            detl = det.lower()
+            if ((detl, noun.lower()) in AGREEMENT_EXCEPTIONS
                     or any(w in MEASURE_WORDS for w in mids)
-                    or det.lower() in MEASURE_WORDS):
+                    or detl in MEASURE_WORDS
+                    or not all(_plausible_adj(w) for w in mids)):
                 continue
-            entry = genders.get(noun.lower())
-            if not entry:
+            if (detl in RELATIVE_FORMS
+                    and text[:m.start()].rstrip().endswith((",", ";"))):
+                continue               # ", mit dem …" — relative pronoun
+            readings = det_readings(detl)
+            entries = _noun_analyses(noun)
+            if readings is None or entries is None:
                 continue
-            issue = _prep_case_issue(prep, det, noun, *entry)
-            if issue:
-                issues.append(issue)
-                flagged_spans.append((m.start(), m.end()))
-        # Pass 2: case unknown — flag only combinations impossible in
-        # every case (skipping NPs pass 1 already complained about).
+            cases = DE_PREP_CASE[prep.lower()]
+            filtered = {r for r in readings if r[0] in cases}
+            if filtered and _compatible(filtered, entries):
+                continue
+            display, noun_genders = _gender_options(entries, noun)
+            if len(noun_genders) > 2:
+                continue               # message would be mush — skip
+            wants = sorted({w for g in noun_genders
+                            for w in [_wanted_det(detl, cases, g)] if w})
+            gender_txt = " or ".join(GENDER_NAMES[g] for g in noun_genders)
+            case_names = "/".join(CASE_NAMES[c] for c in sorted(cases))
+            issues.append(
+                f'"{prep} {det} {noun}" is wrong — "{prep.lower()}" takes '
+                f'the {case_names} case and {display} is {gender_txt}'
+                + (f", so it must be {' or '.join(wants)} {noun}."
+                   if wants else "."))
+            flagged_spans.append((m.start(), m.end()))
+        # Pass 2: case unknown — flag NPs with NO consistent reading in
+        # any (case, number), via determiner/noun-paradigm intersection.
         for m in DE_NP_RE.finditer(text):
             if any(s <= m.start() < e for s, e in flagged_spans):
                 continue
-            art = m.group(1).lower()
+            det, noun = m.group(1), m.group(4)
+            detl = det.lower()
             mids = [w for w in (m.group(2), m.group(3)) if w]
-            noun = m.group(4)
-            if ((art, noun.lower()) in AGREEMENT_EXCEPTIONS
-                    or any(w in MEASURE_WORDS for w in mids)):
+            if ((detl, noun.lower()) in AGREEMENT_EXCEPTIONS
+                    or any(w in MEASURE_WORDS for w in mids)
+                    or not all(_plausible_adj(w) for w in mids)):
                 continue
-            entry = genders.get(noun.lower())
-            if not entry:
+            before = text[:m.start()].rstrip()
+            if detl in RELATIVE_FORMS and (
+                    before.endswith((",", ";"))
+                    or re.search(r"[,;]\s*[a-zäöüß]+$", before)):
+                continue   # "…, den Frauen vertrauen", "…, mit dem Frauen …"
+            readings = det_readings(detl)
+            entries = _noun_analyses(noun)
+            if readings is None or entries is None:
                 continue
-            display, g = entry
-            if g in DE_IMPOSSIBLE[art]:
-                issues.append(
-                    f'"{m.group(1)} {noun}" is wrong — {display} is '
-                    f'{GENDER_NAMES[g]}: {NOM_ARTICLE["de"][g]} {display}.')
-            elif (mids and art in DE_ADJ_ENDINGS
+            if not _compatible(readings, entries):
+                display, noun_genders = _gender_options(entries, noun)
+                if len(noun_genders) <= 2:
+                    gender_txt = " or ".join(GENDER_NAMES[g]
+                                             for g in noun_genders)
+                    correct = "/".join(DE_DEF_ART["n"][g]
+                                       for g in noun_genders)
+                    issues.append(
+                        f'"{det} {noun}" is wrong — {display} is '
+                        f'{gender_txt}: {correct} {display}.')
+            elif (mids and detl in DE_ADJ_ENDINGS
                     and mids[-1] not in UNDECLINED_ADJS
                     and not any(mids[-1].endswith(e)
-                                for e in DE_ADJ_ENDINGS[art])):
-                endings = " or ".join(f"-{e}" for e in DE_ADJ_ENDINGS[art])
+                                for e in DE_ADJ_ENDINGS[detl])):
+                endings = " or ".join(f"-{e}" for e in DE_ADJ_ENDINGS[detl])
                 issues.append(
-                    f'"{m.group(1)} {mids[-1]} {noun}" is wrong — after '
-                    f'"{art}" the adjective must end in {endings}.')
+                    f'"{det} {mids[-1]} {noun}" is wrong — after '
+                    f'"{detl}" the adjective must end in {endings}.')
     elif target == "es":
         for m in ES_NP_RE.finditer(text):
             art = m.group(1).lower()
@@ -1016,19 +1181,78 @@ async def translate_once(text: str, source: str, target: str, model: str,
         return None
 
 
+# Optional second opinion from a local LanguageTool server (Java).
+# Opt-in: install with `uv sync --extra lt` and run with ALLKLARO_LT=1.
+LT_ENABLED = os.environ.get("ALLKLARO_LT") == "1"
+LT_LANGS = {"de": "de-DE", "es": "es"}
+_lt_tools: dict = {}
+
+
+def _lt_tool(target: str):
+    if target not in _lt_tools:
+        try:
+            import language_tool_python
+            _lt_tools[target] = language_tool_python.LanguageTool(
+                LT_LANGS[target])
+            log.info("LanguageTool ready for %s", target)
+        except Exception as exc:
+            log.warning("LanguageTool unavailable (%s); disabled for %s",
+                        exc, target)
+            _lt_tools[target] = None
+    return _lt_tools[target]
+
+
+def languagetool_issues(text: str, target: str) -> list[str]:
+    """Grammar-category LanguageTool findings (blocking — run in executor).
+    Filtered to ruleIssueType 'grammar' for precision; style/typography
+    opinions must not trigger re-translations."""
+    if not LT_ENABLED or target not in LT_LANGS:
+        return []
+    tool = _lt_tool(target)
+    if tool is None:
+        return []
+    try:
+        matches = tool.check(text)
+    except Exception as exc:
+        log.warning("LanguageTool check failed: %s", exc)
+        return []
+    issues = []
+    for m in matches:
+        # German agreement rules ship as 'uncategorized' — accept them by
+        # rule id; otherwise only grammar-typed findings (never style).
+        agreementish = any(k in (m.rule_id or "")
+                           for k in ("AGREEMENT", "KONGRUENZ"))
+        if m.rule_issue_type != "grammar" and not agreementish:
+            continue
+        bad = text[m.offset:m.offset + m.error_length]
+        fix = f' (suggestion: "{m.replacements[0]}")' if m.replacements else ""
+        issues.append(f'"{bad}": {m.message}{fix}')
+    return issues[:4]
+
+
+async def _combined_issues(text: str, target: str) -> list[str]:
+    issues = agreement_issues(text, target)
+    if LT_ENABLED:
+        issues += await asyncio.get_running_loop().run_in_executor(
+            None, languagetool_issues, text, target)
+    return issues
+
+
 async def enforce_agreement(text: str, source: str, target: str, model: str,
                             context: list[dict] | None,
                             candidate: str) -> tuple[str, bool]:
     """Returns (final text, changed). If the candidate contains impossible
-    article/gender combinations, re-ask once with the facts stated; the
-    retry is used only if it verifies clean — otherwise keep the original."""
-    issues = agreement_issues(candidate, target)
+    article/gender combinations (or LanguageTool findings, when enabled),
+    re-ask once with the facts stated; the retry is used only if it
+    verifies clean — otherwise keep the original."""
+    issues = await _combined_issues(candidate, target)
     if not issues:
         return candidate, False
     log.info("agreement retry (%s): %s", target, " ".join(issues))
     fixed = await translate_once(text, source, target, model, context,
                                  revise=(candidate, " ".join(issues)))
-    if fixed and fixed != candidate and not agreement_issues(fixed, target):
+    if (fixed and fixed != candidate
+            and not await _combined_issues(fixed, target)):
         return fixed, True
     return candidate, False
 

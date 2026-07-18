@@ -45,11 +45,14 @@ def no_user_gender_lexicon(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "OUTPUT_GENDER_PATHS",
                         {t: tmp_path / f"no-output-{t}.tsv"
                          for t in ("de", "es")})
+    monkeypatch.setattr(server, "NOUN_FORMS_PATH", tmp_path / "no-forms.tsv")
     server._gender_caches.clear()
     server._output_caches.clear()
+    server._noun_forms_cache.update(mtime=None, map={})
     yield
     server._gender_caches.clear()
     server._output_caches.clear()
+    server._noun_forms_cache.update(mtime=None, map={})
 
 
 @pytest.fixture
@@ -73,6 +76,20 @@ def gender_lexicon(no_user_gender_lexicon, tmp_path, monkeypatch):
         path.write_text("".join(f"{k}\t{w}\t{g}\n" for k, w, g in entries))
         server.GENDER_LEXICON_PATHS[target] = path
         server._gender_caches.clear()
+
+    return write
+
+
+@pytest.fixture
+def noun_forms(no_user_gender_lexicon, tmp_path, monkeypatch):
+    """Write a small German noun-paradigm table:
+    write([(form, lemma, gender, "ns,as"), ...])."""
+    def write(entries):
+        path = tmp_path / "noun-forms.tsv"
+        path.write_text("".join(f"{f.lower()}\t{l}\t{g}\t{c}\n"
+                                for f, l, g, c in entries))
+        monkeypatch.setattr(server, "NOUN_FORMS_PATH", path)
+        server._noun_forms_cache.update(mtime=None, map={})
 
     return write
 

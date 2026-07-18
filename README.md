@@ -164,18 +164,27 @@ The speed and correctness machinery, for the curious:
 - **VAD hysteresis** — starting speech needs Silero probability > 0.5,
   continuing only > 0.35, so quiet word-endings don't chop sentences.
 - **Declension guard** — with the gender lexicons built, every final
-  translation is scanned for article/gender combinations that are wrong in
-  *every* case and number ("das Termin", "eine Termin", "la problema") and
-  for impossible adjective endings ("ein schöne Tag"). Where German case is
-  *computable* — after case-governing prepositions (mit/für/ohne/…) and in
-  gendered contractions (zum/zur/im/ins) — the guard checks the exact
-  required article: "mit die Frau" → der Frau, "für der Hund" → den Hund,
-  including possessive determiners ("ohne seinem Handy"). Violations
-  trigger one corrective re-ask with the dictionary fact stated; the retry
-  is used only if it verifies clean. Undecidable contexts are deliberately
-  unchecked (two-way prepositions like in/auf depend on motion semantics;
-  subject/object case needs parsing; genitive prepositions accept the
-  colloquial dative) — near-zero false positives by construction.
+  translation is checked by *constraint intersection*: each German
+  determiner form maps to its complete set of (case, number, gender)
+  readings, each noun form to its possible readings from a Wiktionary
+  paradigm table (256k forms — plurals, weak nouns, genitive -s), and an
+  NP with no consistent reading is wrong in every interpretation: "das
+  Termin", "eine Termin", "die Auto", "mit den Lehrer" (dative plural is
+  Lehrern), "wegen des Termin" (missing -s), "ein schöne Tag", "la
+  problema". Where a preposition pins the case (mit/für/ohne/…) or a
+  contraction pins the gender (zum/zur/im/ins), the exact required
+  article is named: "mit die Frau" → der Frau. Violations trigger one
+  corrective re-ask with the facts stated; the retry is used only if it
+  verifies clean. Undecidable contexts stay unchecked (two-way
+  prepositions depend on motion semantics, subject/object case needs
+  parsing, relative pronouns are recognized and skipped, genitive
+  prepositions accept the colloquial dative) — near-zero false positives
+  by construction.
+- **LanguageTool (optional)** — `uv sync --extra lt` and run with
+  `ALLKLARO_LT=1` to add a local LanguageTool (Java) as a second opinion:
+  its grammar/agreement findings feed the same corrective re-ask,
+  filtered to hard grammar rules so style opinions never trigger
+  re-translations.
 
 ## 📖 Gender lexicons (optional)
 
@@ -192,7 +201,16 @@ uv run python build_gender_lexicon.py \
   freedict-eng-spa-*.src.tar.xz freedict-spa-deu-*.src.tar.xz ...
 ```
 
-This writes per-target lexicons (~27k German, ~1k Spanish noun genders) to
+Then (optional, German declension checking at full strength) compile the
+noun paradigm table — this downloads the Wiktionary-derived
+[german-nouns](https://github.com/gambolputty/german-nouns) CSV:
+
+```bash
+uv run python build_noun_forms.py
+```
+
+This writes per-target lexicons (~27k German, ~1k Spanish noun genders,
+~256k German noun forms with case/number readings) to
 `~/.cache/allklaro/`. When a sentence being translated into German or
 Spanish mentions one of these words, the correct article is injected into
 the prompt (caipirinha → der Caipirinha, problem → el problema) —
