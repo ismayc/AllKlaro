@@ -258,10 +258,42 @@ function renderRow(c, target) {
 
 // -------------------------------------------------------- editing corrections
 
+async function copyText(text, btn) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // Plain-http on the LAN has no async clipboard; fall back to execCommand.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.append(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    btn.textContent = "✓";
+    btn.classList.add("copied");
+    setTimeout(() => {
+      btn.textContent = "📋";
+      btn.classList.remove("copied");
+    }, 1200);
+  } catch {
+    showError("Could not copy to the clipboard.");
+  }
+}
+
 function renderFinalRow(c, target) {
   const row = c.rows[target];
   row.el.innerHTML = langChip(target);
   row.el.append(document.createTextNode(row.text));
+  const copyBtn = document.createElement("button");
+  copyBtn.className = "copy-btn";
+  copyBtn.title = "Copy this translation";
+  copyBtn.textContent = "📋";
+  copyBtn.onclick = (e) => { e.stopPropagation(); copyText(row.text, copyBtn); };
+  row.el.append(copyBtn);
   const btn = document.createElement("button");
   btn.className = "edit-btn";
   btn.title = "Edit this translation";

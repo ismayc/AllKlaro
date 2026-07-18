@@ -64,6 +64,21 @@ def test_translations_are_editable():
     assert 'class="edited"' in JS
 
 
+def test_translations_are_copyable_without_selecting_text():
+    css = (STATIC / "style.css").read_text()
+    assert "copy-btn" in JS and ".copy-btn" in css
+    # One tap copies via the async clipboard API, with an execCommand
+    # fallback for plain-http LAN contexts where that API is unavailable.
+    assert "navigator.clipboard?.writeText" in JS
+    assert 'document.execCommand("copy")' in JS
+    # The tap must not also speak the row or open the big-text overlay.
+    assert re.search(r"copyBtn\.onclick[^;]*stopPropagation", JS)
+    # Brief visual confirmation, then the button returns to normal.
+    assert ".copy-btn.copied" in css
+    assert re.search(r'btn\.textContent = "✓"', JS)
+    assert re.search(r'btn\.textContent = "📋"', JS)
+
+
 def test_about_panel_links_to_site_and_repo():
     assert 'id="aboutBtn"' in HTML and 'id="about"' in HTML
     assert "https://ismayc.github.io/AllKlaro/" in HTML

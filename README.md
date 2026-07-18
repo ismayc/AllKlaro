@@ -141,6 +141,8 @@ conversation gets the full screen):
   along in the export); Clear wipes the conversation after a confirmation.
 - **✏️ on any finished translation** — edit it in place; the correction is
   saved for retrieval and immediately fixes the conversation context.
+- **📋 on any finished translation** — copy it to the clipboard with one tap,
+  no text selection needed.
 - **Type to translate** — the text bar at the very bottom works without the
   mic; auto modes detect the typed language.
 - **Speak** voices: German `de-DE`, English `en-US`, Spanish `es-MX`

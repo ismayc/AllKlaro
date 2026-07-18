@@ -126,9 +126,11 @@ main {
 #typeBar input:focus { outline: none; border-color: var(--muted); }
 .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--err);
   animation: blink 1s infinite; flex-shrink: 0; }
-.edit-btn { background: none; border: none; cursor: pointer;
+.edit-btn, .copy-btn { background: none; border: none; cursor: pointer;
   font-size: 12px; margin-left: 8px; padding: 2px 4px; opacity: .45; }
-.edit-btn:hover { opacity: 1; }
+.edit-btn:hover, .copy-btn:hover { opacity: 1; }
+.copy-btn { margin-left: 12px; }
+.copy-btn.copied { opacity: 1; color: var(--en); }
 .edit-box {
   display: block; width: 100%; margin-top: 4px; resize: vertical;
   background: var(--bg); color: var(--text); font: inherit; line-height: 1.45;
