@@ -247,3 +247,21 @@ def test_detect_language_tie_goes_to_first_candidate():
     from server import detect_language
     assert detect_language("Xylophon", ("de", "en")) == "de"
     assert detect_language("Xylophon", ("en", "de")) == "en"
+
+# ------------------------------------------------------ German output flavor
+
+
+def test_flavor_note_added_for_german_target():
+    for flavor, marker in (("berlin", "ick (ich)"), ("hessian", "isch (ich)")):
+        system = translation_messages("Hello", "en", "de",
+                                      flavor=flavor)[0]["content"]
+        assert marker in system
+        assert "never change the meaning" in system
+
+
+def test_flavor_off_or_wrong_target_stays_standard():
+    assert "Berlinerisch" not in translation_messages(
+        "Hello", "en", "de")[0]["content"]
+    # Flavor styles German output only — translating TO English ignores it.
+    assert "Berlinerisch" not in translation_messages(
+        "Hallo", "de", "en", flavor="berlin")[0]["content"]

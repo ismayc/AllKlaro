@@ -1176,8 +1176,30 @@ GRAMMAR_NOTES = {
 }
 
 
+# Optional German output flavor (WhatsApp friends write Berlinerisch and
+# Hessisch; replying in kind is half the fun). Static per connection and
+# inserted before the dynamic prompt parts, so prefix caching survives.
+FLAVOR_NOTES = {
+    "berlin": (
+        "Write the German translation in casual Berlin dialect "
+        "(Berlinerisch), the way a Berliner actually talks: ick (ich), "
+        "dit/det (das), wat (was), ooch (auch), keen/keene (kein/keine), "
+        "nüscht (nichts), jut (gut), j- for g- (jehen, jenau, Jeld). "
+        "Dialect flavor, not parody — keep it readable and never change "
+        "the meaning."),
+    "hessian": (
+        "Write the German translation in casual Hessian dialect "
+        "(Hessisch), the way people around Frankfurt talk: isch (ich), "
+        "net (nicht), aach (auch), ebbes (etwas), gell as a tag question, "
+        "gude as a greeting, babbeln (reden), -sch for -ch (isch, disch). "
+        "Dialect flavor, not parody — keep it readable and never change "
+        "the meaning."),
+}
+
+
 def translation_messages(text: str, source: str, target: str,
-                         history: list[dict] | None = None) -> list[dict]:
+                         history: list[dict] | None = None,
+                         flavor: str | None = None) -> list[dict]:
     """Static system prompt + history as chat turns.
 
     Keeping the system prompt constant and prepending history as normal
@@ -1199,6 +1221,8 @@ def translation_messages(text: str, source: str, target: str,
     )
     if target in GRAMMAR_NOTES:
         system += "\n\n" + GRAMMAR_NOTES[target]
+    if target == "de" and flavor in FLAVOR_NOTES:
+        system += "\n\n" + FLAVOR_NOTES[flavor]
     glossary = load_glossary()
     if glossary:
         system += ("\n\nGlossary — use these exact translations where "
@@ -1250,14 +1274,15 @@ async def safe_send(ws: WebSocket, payload: dict) -> bool:
 
 async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
                              target: str, model: str,
-                             history: list[dict] | None = None) -> str | None:
+                             history: list[dict] | None = None,
+                             flavor: str | None = None) -> str | None:
     """Streams deltas to the client; returns the full translation, or None on error.
 
     The caller sends the closing `translation_done` message (with metrics).
     """
     payload = {
         "model": model,
-        "messages": translation_messages(text, source, target, history),
+        "messages": translation_messages(text, source, target, history, flavor),
         "stream": True,
         "options": {"temperature": 0.0},
         "keep_alive": "60m",
@@ -1303,7 +1328,8 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
 
 async def translate_once(text: str, source: str, target: str, model: str,
                          history: list[dict] | None = None,
-                         revise: tuple[str, str] | None = None) -> str | None:
+                         revise: tuple[str, str] | None = None,
+                         flavor: str | None = None) -> str | None:
     """One-shot, non-streaming translation; None on any failure.
 
     Used for the behind-the-scenes refinement pass, which replaces the fast
@@ -1311,7 +1337,7 @@ async def translate_once(text: str, source: str, target: str, model: str,
     `revise=(candidate, issues)` the model is instead asked to correct its
     own earlier translation, with the offending facts spelled out.
     """
-    messages = translation_messages(text, source, target, history)
+    messages = translation_messages(text, source, target, history, flavor)
     if revise:
         candidate, issues = revise
         messages.append({"role": "assistant", "content": candidate})
@@ -1533,6 +1559,7 @@ async def ws_endpoint(ws: WebSocket):
     mode = "auto-de-en"
     model = DEFAULT_MODEL
     draft_model = None               # fast first-pass model; None = single-pass
+    de_flavor = ""                   # "" standard | "berlin" | "hessian"
     corrected_uids: set[int] = set()  # user edits that refinement must not undo
     pause_frames = END_SILENCE_FRAMES
     uid = 0
@@ -1646,7 +1673,7 @@ async def ws_endpoint(ws: WebSocket):
         context = list(history)
         translations = await asyncio.gather(
             *(stream_translation(ws, my_uid, text, source, t,
-                                 draft or model, context)
+                                 draft or model, context, de_flavor)
               for t in targets))
         if all(t is not None for t in translations):
             history.append({"uid": my_uid, "source": source,
@@ -1662,11 +1689,18 @@ async def ws_endpoint(ws: WebSocket):
                 candidate = streamed
                 if draft:
                     refined = await translate_once(text, source, t,
-                                                   model, context)
+                                                   model, context,
+                                                   flavor=de_flavor)
                     if refined:
                         candidate = refined
-                final, _ = await enforce_agreement(text, source, t, model,
-                                                   context, candidate)
+                if t == "de" and de_flavor:
+                    # The declension guard assumes standard German; dialect
+                    # forms ("dit Haus", "keene") would trip it and get
+                    # "corrected" back to Hochdeutsch.
+                    final = candidate
+                else:
+                    final, _ = await enforce_agreement(text, source, t, model,
+                                                       context, candidate)
                 if final != streamed:
                     texts[t] = final
             # The final text becomes the conversation context — unless
@@ -1740,6 +1774,9 @@ async def ws_endpoint(ws: WebSocket):
                     model = cfg.get("model", model)
                     if "draft_model" in cfg:  # "" means draft pass off
                         draft_model = cfg["draft_model"] or None
+                    if "de_flavor" in cfg:  # "" means standard German
+                        de_flavor = (cfg["de_flavor"]
+                                     if cfg["de_flavor"] in FLAVOR_NOTES else "")
                     try:
                         pause_ms = int(cfg.get("pause_ms", pause_frames * FRAME_MS))
                         pause_frames = max(200, min(2000, pause_ms)) // FRAME_MS

@@ -252,3 +252,25 @@ async def test_real_dialect_mishearing_negation_preserved():
         "de", "en", server.DEFAULT_MODEL)).lower()
     assert "not" in text or "didn't" in text or "did not" in text
     assert "nicely" not in text and "nice" not in text
+
+
+async def test_real_ollama_berlin_flavor_produces_dialect():
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    text = await server.stream_translation(
+        FakeWS(), 1, "I can't make it today, let's meet tomorrow instead.",
+        "en", "de", server.DEFAULT_MODEL, flavor="berlin")
+    # At least one unmistakable Berlin marker (verified live 2026-07-18:
+    # gemma3:12b wrote "dit heite ... morjen up'm Markt").
+    assert any(m in text.lower() for m in ("ick", "dit ", "wat ", "ooch",
+                                           "nüscht", "morjen", "jut"))
+
+
+async def test_real_ollama_hessian_flavor_produces_dialect():
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    text = await server.stream_translation(
+        FakeWS(), 1, "I can't make it today, let's meet tomorrow instead.",
+        "en", "de", server.DEFAULT_MODEL, flavor="hessian")
+    assert any(m in text.lower() for m in (" net ", "net,", "net.", "gell",
+                                           "isch ", "aach", "ebbes"))

@@ -156,6 +156,19 @@ def test_draft_model_control_is_wired():
     assert re.search(r"translation_revised.*?row\.edited.*?continue", JS, re.S)
 
 
+def test_german_flavor_and_paste_are_wired():
+    assert 'id="deFlavor"' in HTML
+    assert 'value="berlin"' in HTML and 'value="hessian"' in HTML
+    assert re.search(r"de_flavor:\s*flavorSel\.value", JS)  # reaches the server
+    assert re.search(r"deFlavor:\s*flavorSel\.value", JS)   # persisted setting
+    # Paste-and-translate: one tap from a WhatsApp copy to a translation,
+    # falling back to a focused input if clipboard access is refused.
+    assert 'id="pasteBtn"' in HTML
+    assert "clipboard.readText" in JS
+    assert "requestSubmit" in JS
+    assert re.search(r"catch[^}]*typeInput\.focus", JS, re.S)
+
+
 def test_typed_input_is_wired():
     assert 'id="typeBar"' in HTML and 'id="typeInput"' in HTML
     assert re.search(r'type:\s*"text"', JS)     # reaches the server

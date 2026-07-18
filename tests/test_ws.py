@@ -500,3 +500,27 @@ def test_single_pass_agreement_fix_sends_revision(client, stub_transcribe,
         msgs = collect_until(ws, stop_types=("translation_revised", "error"))
     revised = next(m for m in msgs if m["type"] == "translation_revised")
     assert revised["texts"] == {"en": "Refined translation."}
+
+
+def test_german_flavor_reaches_the_translation_prompt(client, stub_transcribe,
+                                                      fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "en-de",
+                                 "model": "gemma3:12b",
+                                 "de_flavor": "berlin"}))
+        ws.send_text(json.dumps({"type": "text", "text": "See you tomorrow!"}))
+        collect_until(ws)
+    system = fake_ollama["chat"]["messages"][0]["content"]
+    assert "Berlinerisch" in system and "ick (ich)" in system
+
+
+def test_unknown_flavor_falls_back_to_standard_german(client, stub_transcribe,
+                                                      fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "en-de",
+                                 "model": "gemma3:12b",
+                                 "de_flavor": "bavarian"}))
+        ws.send_text(json.dumps({"type": "text", "text": "See you tomorrow!"}))
+        collect_until(ws)
+    system = fake_ollama["chat"]["messages"][0]["content"]
+    assert "dialect" not in system.lower()
