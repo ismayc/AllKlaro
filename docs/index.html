@@ -121,6 +121,8 @@
       white-space: nowrap; margin-top: 26px;
     }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .group-h { font-size: 19px; margin: 30px 0 14px; color: var(--text); }
+    h2 + .group-h { margin-top: 0; }
     .feature { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 18px; }
     .feature h3 { font-size: 16.5px; margin-bottom: 6px; }
     .feature p { color: var(--muted); font-size: 14.5px; }
@@ -167,7 +169,7 @@
     <div class="chips">
       <span class="chip" data-i18n="chip_local">🔒 <b class="en">100% local</b> — no cloud, no accounts</span>
       <span class="chip">🍎 Apple Silicon GPU</span>
-      <span class="chip" data-i18n="chip_tests">🧪 100+ tests</span>
+      <span class="chip" data-i18n="chip_tests">🧪 200+ tests</span>
     </div>
 
     <div class="demo" aria-hidden="true">
@@ -191,6 +193,8 @@
   <section id="features">
     <div class="wrap">
       <h2 data-i18n="features_h2">✨ What it does</h2>
+
+      <h3 class="group-h" data-i18n="g_live">🎙️ Live translation</h3>
       <div class="grid">
         <div class="feature"><h3 data-i18n="f_auto_h">🔄 Auto direction</h3>
           <p data-i18n="f_auto_p">Detects each utterance's language and translates to the other —
@@ -199,9 +203,6 @@
         <div class="feature"><h3 data-i18n="f_call_h">📞 Call mode</h3>
           <p data-i18n="f_call_p">Captures your mic and the meeting as separate <em>You / Them</em>
           channels via BlackHole; echoes picked up twice are dropped automatically.</p></div>
-        <div class="feature"><h3 data-i18n="f_tap_h">🗣️ Tap to hear</h3>
-          <p data-i18n="f_tap_p">Tap any phrase to hear it spoken in its own language — great for
-          pronunciation practice.</p></div>
         <div class="feature"><h3 data-i18n="f_ctx_h">🧠 Context-aware</h3>
           <p data-i18n="f_ctx_p">Translations see the recent conversation, so pronouns and topics
           resolve correctly.</p></div>
@@ -211,15 +212,33 @@
         <div class="feature"><h3 data-i18n="f_draft_h">⚡ Draft + refine</h3>
           <p data-i18n="f_draft_p">A small model streams a translation instantly; the main model
           re-translates behind the scenes and swaps in its better answer.</p></div>
+        <div class="feature"><h3 data-i18n="f_type_h">⌨️ Type to translate</h3>
+          <p data-i18n="f_type_p">A text box under the feed — type instead of speaking; same
+          context and refinement pipeline, mic not required.</p></div>
+      </div>
+
+      <h3 class="group-h" data-i18n="g_learn">📚 For the language learner</h3>
+      <div class="grid">
+        <div class="feature"><h3 data-i18n="f_lookup_h">🔍 Long-press dictionary</h3>
+          <p data-i18n="f_lookup_p">Hold any word for its Wiktionary entry — gender with article,
+          plural, IPA, and meanings; "ging" chains to gehen. Built locally
+          from free kaikki.org extracts.</p></div>
+        <div class="feature"><h3 data-i18n="f_tap_h">🗣️ Tap to hear</h3>
+          <p data-i18n="f_tap_p">Tap any phrase to hear it spoken in its own language — great for
+          pronunciation practice.</p></div>
+        <div class="feature"><h3 data-i18n="f_copy_h">📋 One-tap copy</h3>
+          <p data-i18n="f_copy_p">Every finished translation carries a copy button — no fiddly
+          text selection, and a ✓ confirms it landed on the clipboard.</p></div>
         <div class="feature"><h3 data-i18n="f_correct_h">✏️ Correctable</h3>
           <p data-i18n="f_correct_p">Edit any translation in place — corrections are saved locally and
           steer future translations of similar sentences.</p></div>
         <div class="feature"><h3 data-i18n="f_learn_h">📖 Learner tools</h3>
           <p data-i18n="f_learn_p">One-click summary with a vocabulary list, and Markdown export for
           later review.</p></div>
-        <div class="feature"><h3 data-i18n="f_type_h">⌨️ Type to translate</h3>
-          <p data-i18n="f_type_p">A text box under the feed — type instead of speaking; same
-          context and refinement pipeline, mic not required.</p></div>
+      </div>
+
+      <h3 class="group-h" data-i18n="g_quality">🎯 Accuracy helpers</h3>
+      <div class="grid">
         <div class="feature"><h3 data-i18n="f_gender_h">📖 Gender lexicons</h3>
           <p data-i18n="f_gender_p">Compile dict.cc / FreeDict exports into gender dictionaries —
           "caipirinha" gets der/die/das and "problema" gets el/la injected
@@ -228,19 +247,22 @@
           <p data-i18n="f_dialect_p">Berlin and Hessian forms ("dit", "ebbes", "gell") are detected
           and hinted to the translator — including typical speech-recognition
           mishearings of them.</p></div>
+        <div class="feature"><h3 data-i18n="f_gloss_h">📚 Glossary</h3>
+          <p data-i18n="f_gloss_p">Pin names and terms in <code>glossary.txt</code> — biases both
+          recognition and translation.</p></div>
+      </div>
+
+      <h3 class="group-h" data-i18n="g_use">🖥️ Ways to use it</h3>
+      <div class="grid">
         <div class="feature"><h3 data-i18n="f_phone_h">📱 Phone mode</h3>
           <p data-i18n="f_phone_p">Serve over LAN HTTPS and use your iPhone's mic for in-person
           conversations.</p></div>
         <div class="feature"><h3 data-i18n="f_focus_h">🎯 Focus mode</h3>
           <p data-i18n="f_focus_p">Keep the newest text mid-screen ("Center latest") instead of at the
           bottom edge.</p></div>
-        <div class="feature"><h3 data-i18n="f_gloss_h">📚 Glossary</h3>
-          <p data-i18n="f_gloss_p">Pin names and terms in <code>glossary.txt</code> — biases both
-          recognition and translation.</p></div>
-        <div class="feature"><h3 data-i18n="f_lookup_h">🔍 Long-press dictionary</h3>
-          <p data-i18n="f_lookup_p">Hold any word for its Wiktionary entry — gender with article,
-          plural, IPA, and meanings; "ging" chains to gehen. Built locally
-          from free kaikki.org extracts.</p></div>
+        <div class="feature"><h3 data-i18n="f_big_h">🔎 Big-text view</h3>
+          <p data-i18n="f_big_p">Tap a card's background and the translation fills the screen —
+          made for showing the person across the table.</p></div>
       </div>
     </div>
   </section>
@@ -326,9 +348,17 @@ uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
       cta_start: "Loslegen",
       cta_github: "Auf GitHub ansehen",
       chip_local: '🔒 <b class="en">100 % lokal</b> — keine Cloud, keine Konten',
-      chip_tests: "🧪 Über 100 Tests",
+      chip_tests: "🧪 Über 200 Tests",
       them: "Die andere Seite", you: "Du", them2: "Die andere Seite",
       features_h2: "✨ Was es kann",
+      g_live: "🎙️ Live-Übersetzung",
+      g_learn: "📚 Zum Sprachenlernen",
+      g_quality: "🎯 Genauigkeits-Helfer",
+      g_use: "🖥️ Nutzungsarten",
+      f_copy_h: "📋 Kopieren mit einem Tipp",
+      f_copy_p: "Jede fertige Übersetzung hat einen Kopier-Button — kein fummeliges Markieren, ein ✓ bestätigt, dass sie in der Zwischenablage ist.",
+      f_big_h: "🔎 Großtext-Ansicht",
+      f_big_p: "Tippe auf den Kartenhintergrund und die Übersetzung füllt den Bildschirm — gemacht, um sie dem Gegenüber zu zeigen.",
       f_auto_h: "🔄 Automatische Richtung",
       f_auto_p: "Erkennt die Sprache jeder Äußerung und übersetzt in die jeweils andere — DE↔EN, ES↔EN, ES↔DE — oder mit fester Richtung, auch Deutsch&nbsp;→&nbsp;Englisch&nbsp;+&nbsp;Spanisch gleichzeitig.",
       f_call_h: "📞 Call-Modus",
@@ -386,9 +416,17 @@ uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
       cta_start: "Comenzar",
       cta_github: "Ver en GitHub",
       chip_local: '🔒 <b class="en">100 % local</b> — sin nube, sin cuentas',
-      chip_tests: "🧪 Más de 100 pruebas",
+      chip_tests: "🧪 Más de 200 pruebas",
       them: "La otra persona", you: "Tú", them2: "La otra persona",
       features_h2: "✨ Qué hace",
+      g_live: "🎙️ Traducción en vivo",
+      g_learn: "📚 Para aprender idiomas",
+      g_quality: "🎯 Ayudas de precisión",
+      g_use: "🖥️ Formas de usarlo",
+      f_copy_h: "📋 Copia con un toque",
+      f_copy_p: "Cada traducción terminada tiene un botón de copiar — sin seleccionar texto, y un ✓ confirma que quedó en el portapapeles.",
+      f_big_h: "🔎 Vista de texto grande",
+      f_big_p: "Toca el fondo de una tarjeta y la traducción llena la pantalla — pensada para mostrarla a la persona de enfrente.",
       f_auto_h: "🔄 Dirección automática",
       f_auto_p: "Detecta el idioma de cada frase y traduce al otro — DE↔EN, ES↔EN, ES↔DE — o fija una dirección, incluso alemán&nbsp;→&nbsp;inglés&nbsp;+&nbsp;español a la vez.",
       f_call_h: "📞 Modo llamada",

@@ -39,9 +39,11 @@ by default) that sees the conversation's recent context.
 | 🧩 **German-aware pausing** | Verb-final sentences chopped by a short pause are re-joined and re-translated whole |
 | ⚡ **Draft + refine** | A small model streams a translation instantly; the main model re-translates behind the scenes and swaps in its better answer |
 | ✏️ **Correctable** | Edit any translation in place — corrections are saved locally and steer future translations of similar sentences (few-shot retrieval) |
+| 📋 **One-tap copy** | Every finished translation carries a copy button — no text selection, a ✓ confirms it landed on the clipboard |
 | 📖 **Learner tools** | One-click **Summarize** (summary + vocabulary list) and Markdown **Export** for later review |
 | 📱 **Phone mode** | Serve over LAN HTTPS and use your iPhone's mic for in-person conversations |
 | 🎯 **Focus mode** | Keep the newest text mid-screen ("Center latest") instead of at the bottom edge |
+| 🔎 **Big-text view** | Tap a card's background and the translation fills the screen — made for showing the person across the table |
 | 🗺️ **Dialect-aware** | Berlinerisch/Hessisch markers ("dit", "ebbes", "gell") are detected and the likely intended forms — including Whisper mis-hearings like "nett" for "net" (nicht) — are hinted to the translator; extend via `dialects.txt` |
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
 | ⌨️ **Type to translate** | A text box under the feed — type instead of speaking, mic not required; same context, corrections, and draft+refine pipeline |

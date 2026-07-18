@@ -35,6 +35,18 @@ def test_language_toggle_covers_de_and_es():
     assert 'name="google" content="notranslate"' in DOCS
 
 
+def test_features_are_grouped_into_sections():
+    # The tile wall outgrew one screenful; group headings keep it scannable.
+    groups = re.findall(r'class="group-h" data-i18n="(g_\w+)"', DOCS)
+    assert len(groups) >= 4 and len(set(groups)) == len(groups)
+    # Each group heading introduces its own tile grid ("Under the hood"
+    # keeps a grid of its own, hence the +1).
+    assert DOCS.count('<div class="grid">') == len(groups) + 1
+    # The newest user-facing features made it onto the site.
+    for key in ("f_copy_h", "f_big_h", "f_lookup_h"):
+        assert f'data-i18n="{key}"' in DOCS
+
+
 def test_docs_mentions_all_three_languages():
     for lang in ("German", "English", "Spanish"):
         assert lang in DOCS, f"landing page no longer mentions {lang}"
