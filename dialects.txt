@@ -1,0 +1,64 @@
+# German dialect forms and common speech-recognition mis-hearings of them.
+# Format:  dialect = standard German (gloss)
+# Lines starting with "?" are AMBIGUOUS: they are real standard-German words
+# too, so they are only hinted when the sentence also contains an
+# unambiguous dialect marker ("nett" only means "net" (nicht) in a sentence
+# that already says "nochemol").
+
+# --- Berlinerisch
+ick = ich
+icke = ich
+dit = das
+det = das
+wat = was
+ooch = auch
+keene = keine
+keen = kein
+nüscht = nichts
+nischt = nichts
+kiek = guck (look)
+kiekma = guck mal (look)
+kieken = gucken (to look)
+jut = gut
+janz = ganz
+jenau = genau
+morjen = morgen
+uff = auf
+een = ein
+eene = eine
+haste = hast du
+biste = bist du
+isset = ist es
+Schrippe = Brötchen (bread roll)
+Molle = Bier (beer)
+
+# --- Hessisch
+isch = ich
+aach = auch
+ebbes = etwas
+gell = nicht wahr (right?)
+gude = hallo / guten Tag
+nochemol = noch einmal
+net = nicht
+mer = wir
+babbele = reden (to talk)
+babbeln = reden (to talk)
+schwätze = reden (to talk)
+isses = ist es
+kannste = kannst du
+saache = sagen
+verstanne = verstanden
+Äbbelwoi = Apfelwein (apple cider)
+Ebbelwoi = Apfelwein (apple cider)
+Abbelwoi = Apfelwein (apple cider)
+Stöffche = Apfelwein (apple cider)
+Handkäs = Handkäse (sour-milk cheese)
+Bembel = Apfelwein-Krug (cider jug)
+
+# --- Ambiguous: standard words that are often mis-heard dialect
+? des = das
+? nett = net (nicht)
+? mehr = mer (wir)
+? schoppe = Schoppen (a glass of cider/wine)
+? shoppe = Schoppen (a glass of cider/wine)
+? mol = mal

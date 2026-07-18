@@ -239,3 +239,16 @@ async def test_real_agreement_guard_fixes_declension(output_gender_map):
         "I'd like a margarita, please.", "en", "de", server.DEFAULT_MODEL,
         [], "Ich hätte gerne einen Margarita, bitte.")
     assert changed and "eine Margarita" in final
+
+
+async def test_real_dialect_mishearing_negation_preserved():
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    # Whisper heard Hessian "net verstanne" as "nett verstarne"; without the
+    # dialect note gemma inverts the meaning to "understood nicely".
+    text = (await server.stream_translation(
+        FakeWS(), 1,
+        "Ich hab des nett verstarne, kannste des nochemol saache?",
+        "de", "en", server.DEFAULT_MODEL)).lower()
+    assert "not" in text or "didn't" in text or "did not" in text
+    assert "nicely" not in text and "nice" not in text

@@ -59,6 +59,7 @@ WHISPER_REPO = "mlx-community/whisper-large-v3-turbo"
 OLLAMA_URL = "http://127.0.0.1:11434"
 DEFAULT_MODEL = "gemma3:12b"
 GLOSSARY_PATH = Path(__file__).parent / "glossary.txt"
+DIALECTS_PATH = Path(__file__).parent / "dialects.txt"
 CORRECTIONS_PATH = Path(__file__).parent / "corrections.jsonl"
 CORRECTION_EXAMPLES = 3            # retrieved corrections shown to the model
 # Compiled by build_gender_lexicon.py from dict.cc / FreeDict exports. They
@@ -120,6 +121,68 @@ def load_glossary() -> list[str]:
 def glossary_whisper_terms() -> str:
     """Source-side spellings only, to bias Whisper toward proper nouns."""
     return ", ".join(ln.split("=")[0].strip() for ln in load_glossary())
+
+
+# ----------------------------------------------------------------- dialects
+
+_dialects_cache = {"mtime": None, "map": {}}
+
+
+def load_dialects() -> dict[str, tuple[str, bool]]:
+    """dialects.txt: dialect token -> (standard gloss, ambiguous).
+
+    Ambiguous entries ("? nett = net (nicht)") are real standard-German
+    words too; they are only hinted when the sentence also contains an
+    unambiguous dialect marker."""
+    try:
+        mtime = DIALECTS_PATH.stat().st_mtime
+    except OSError:
+        _dialects_cache.update(mtime=None, map={})
+        return {}
+    if mtime != _dialects_cache["mtime"]:
+        entries = {}
+        for line in DIALECTS_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            ambiguous = line.startswith("?")
+            term, _, standard = line.lstrip("? ").partition("=")
+            if term.strip() and standard.strip():
+                entries[term.strip().lower()] = (standard.strip(), ambiguous)
+        _dialects_cache.update(mtime=mtime, map=entries)
+    return _dialects_cache["map"]
+
+
+def dialect_notes(text: str, source: str) -> str | None:
+    """A hint block when the German source contains dialect markers.
+
+    Whisper mangles spoken dialect in meaning-changing ways ("net
+    verstanne" -> "nett verstarne", which gemma then translates as
+    'understood nicely' — an inversion). Whisper-side prompt biasing made
+    transcripts WORSE in testing, so the fix lives here: name the likely
+    intended forms and let the model translate the intended meaning.
+    """
+    if source != "de":
+        return None
+    lexicon = load_dialects()
+    if not lexicon:
+        return None
+    hits, seen, marker = [], set(), False
+    for token in re.findall(r"[^\W\d_]+", text.lower()):
+        if token in seen:
+            continue
+        seen.add(token)
+        entry = lexicon.get(token)
+        if entry:
+            hits.append((token, entry[0]))
+            marker = marker or not entry[1]
+    if not marker:                     # ambiguous words alone prove nothing
+        return None
+    listed = "; ".join(f'"{t}" = {std}' for t, std in hits[:10])
+    return ("The German speaker is using regional dialect (e.g. Berlin or "
+            "Hessian), and speech recognition may have mis-heard dialect "
+            f"words. In this sentence: {listed}. Translate the intended "
+            "standard meaning naturally.")
 
 
 # ---------------------------------------------------------------- gender lexicon
@@ -1049,6 +1112,9 @@ def translation_messages(text: str, source: str, target: str,
     note = gender_notes(text, target)
     if note:
         system += "\n\n" + note
+    dialect = dialect_notes(text, source)
+    if dialect:
+        system += "\n\n" + dialect
     # User-corrected translations similar to this sentence are shown as
     # few-shot pairs. The system prompt must mark them as authoritative:
     # unlabeled example turns read as mere history and gemma3 ignores their

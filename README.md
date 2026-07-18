@@ -36,6 +36,7 @@ by default) that sees the conversation's recent context.
 | 📖 **Learner tools** | One-click **Summarize** (summary + vocabulary list) and Markdown **Export** for later review |
 | 📱 **Phone mode** | Serve over LAN HTTPS and use your iPhone's mic for in-person conversations |
 | 🎯 **Focus mode** | Keep the newest text mid-screen ("Center latest") instead of at the bottom edge |
+| 🗺️ **Dialect-aware** | Berlinerisch/Hessisch markers ("dit", "ebbes", "gell") are detected and the likely intended forms — including Whisper mis-hearings like "nett" for "net" (nicht) — are hinted to the translator; extend via `dialects.txt` |
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
 | ⌨️ **Type to translate** | A text box under the feed — type instead of speaking, mic not required; same context, corrections, and draft+refine pipeline |
 | 📖 **Gender lexicons** | Optional: compile dict.cc / FreeDict exports into loanword-gender dictionaries — "caipirinha" gets der/die/das and "problema" gets el/la injected |
