@@ -85,6 +85,13 @@ controlsBtn.onclick = () => {
   saveSettings();
 };
 
+// The About panel shows which deployed build this page is actually running,
+// so a stale phone cache is diagnosable at a glance.
+const buildV = new URL(document.querySelector('script[src*="app.js"]').src)
+  .searchParams.get("v");
+document.getElementById("buildStamp").textContent =
+  /^\d+$/.test(buildV) ? new Date(buildV * 1000).toLocaleString() : "unversioned";
+
 aboutBtn.onclick = () => aboutBox.classList.remove("hidden");
 aboutClose.onclick = () => aboutBox.classList.add("hidden");
 aboutBox.onclick = (e) => { // tap the backdrop (not the card) to dismiss

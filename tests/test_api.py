@@ -180,3 +180,13 @@ def test_static_assets_must_be_revalidated_not_cached(client):
     # shipped features would silently vanish on the phone after updates.
     for path in ("/", "/static/app.js", "/static/style.css"):
         assert client.get(path).headers.get("cache-control") == "no-cache", path
+
+def test_index_stamps_asset_versions_for_cache_busting(client):
+    # Browsers revalidate the HTML on navigation but can keep subresources
+    # cached (seen on iOS: new HTML, old CSS/JS). A changed ?v= forces a
+    # fresh CSS/JS fetch as soon as the new HTML lands.
+    import re
+    html = client.get("/").text
+    assert "__BUILD__" not in html
+    assert re.search(r'/static/app\.js\?v=\d+', html)
+    assert re.search(r'/static/style\.css\?v=\d+', html)

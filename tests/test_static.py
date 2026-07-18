@@ -99,6 +99,26 @@ def test_words_are_lookupable_on_long_press():
     assert re.search(r"data\.error", JS)
 
 
+def test_row_buttons_are_finger_visible_on_touch_screens():
+    # Touch has no hover-reveal: 12px at 45% opacity made the silver
+    # clipboard emoji effectively invisible on iPhone screens.
+    css = (STATIC / "style.css").read_text()
+    base = re.search(r"\.edit-btn, \.copy-btn \{[^}]*\}", css, re.S).group()
+    assert re.search(r"font-size:\s*1[6-9]px", base)
+    assert not re.search(r"opacity:\s*\.[0-4]", base)
+    mobile = css[css.index("@media (max-width: 640px)"):]
+    assert re.search(r"\.edit-btn, \.copy-btn \{[^}]*font-size:\s*1[89]px", mobile)
+
+
+def test_asset_urls_are_cache_busted_and_build_is_visible():
+    assert 'href="/static/style.css?v=__BUILD__"' in HTML
+    assert 'src="/static/app.js?v=__BUILD__"' in HTML
+    # The About panel shows the running build, so a stale phone cache is
+    # diagnosable instead of surfacing as "the feature disappeared".
+    assert 'id="buildStamp"' in HTML
+    assert "buildStamp" in JS and 'searchParams.get("v")' in JS
+
+
 def test_about_panel_links_to_site_and_repo():
     assert 'id="aboutBtn"' in HTML and 'id="about"' in HTML
     assert "https://ismayc.github.io/AllKlaro/" in HTML

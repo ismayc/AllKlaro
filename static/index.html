@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="AllKlaro" />
   <meta name="theme-color" content="#10141a" />
-  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/style.css?v=__BUILD__" />
 </head>
 <body>
   <header>
@@ -119,10 +119,11 @@
         <a href="https://ismayc.github.io/AllKlaro/" target="_blank" rel="noopener">Website</a>
         <a href="https://github.com/ismayc/AllKlaro" target="_blank" rel="noopener">GitHub</a>
       </p>
+      <p class="about-build">Build <span id="buildStamp">?</span></p>
       <button id="aboutClose" class="tool-btn">Close</button>
     </div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=__BUILD__"></script>
 </body>
 </html>

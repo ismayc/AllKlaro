@@ -23,7 +23,7 @@ from pathlib import Path
 import httpx
 import numpy as np
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -962,7 +962,14 @@ class NoCacheStaticFiles(StaticFiles):
 
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html",
+    """index.html with cache-busted asset URLs: __BUILD__ becomes the newest
+    static-file mtime. Browsers do revalidate the page on navigation but can
+    keep its subresources cached (observed on iOS: new HTML, old CSS/JS); a
+    changed ?v= forces a fresh fetch the moment the HTML mentions it."""
+    html = (STATIC_DIR / "index.html").read_text()
+    stamp = max(int(p.stat().st_mtime)
+                for p in STATIC_DIR.iterdir() if p.is_file())
+    return HTMLResponse(html.replace("__BUILD__", str(stamp)),
                         headers={"Cache-Control": "no-cache"})
 
 
