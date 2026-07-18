@@ -7,6 +7,9 @@
   <meta name="description" content="Live, fully-local speech translation between German, English, and Spanish. Runs entirely on your Mac — nothing leaves your machine." />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🗣️</text></svg>" />
   <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <!-- The page has its own EN/DE/ES toggle; browser translate prompts only
+       add noise (Chrome misdetects the Spanish as Italian). -->
+  <meta name="google" content="notranslate" />
   <!-- Link-preview card (iMessage, Slack, social) -->
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="AllKlaro" />

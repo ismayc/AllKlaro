@@ -31,6 +31,8 @@ def test_language_toggle_covers_de_and_es():
     assert "documentElement.lang" in DOCS  # <html lang> follows the toggle
     # Spot-check the translations are actually there.
     assert "Schnellstart" in DOCS and "Inicio rápido" in DOCS
+    # Browser translate prompts are suppressed — the page translates itself.
+    assert 'name="google" content="notranslate"' in DOCS
 
 
 def test_docs_mentions_all_three_languages():
