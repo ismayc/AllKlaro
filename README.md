@@ -207,27 +207,76 @@ a WhatsApp message can be translated without switching apps:
 returns `{"source": "de", "target": "en", "translation": "...",
 "translations": {"en": "..."}}`.
 
-One-time setup in the Shortcuts app (server must be running in phone mode):
+**Step 0 — prove the server is reachable** (do this before touching
+Shortcuts; it isolates the two things that can fail):
 
-1. New Shortcut → name it **Translate with AllKlaro**.
-2. Add **Get Contents of URL** → `https://<mac-ip>:8710/api/translate` →
-   Method **POST**, Request Body **JSON**, one field: `text` =
-   **Shortcut Input** (magic variable).
-3. Add **Get Dictionary Value** → key `translation`.
-4. Add **Show Content** (called **Show Result** before iOS 26), or Show
-   Notification if you prefer a banner.
-5. In the shortcut's ⓘ settings: enable **Show in Share Sheet** (input
-   type: Text), and set "If there's no input" → **Get Clipboard**.
+1. On the Mac, run **`Start AllKlaro (iPhone).command`** and note the URL
+   it prints, e.g. `https://192.168.1.42:8710`.
+2. On the iPhone, open that URL in Safari — the app must load.
+3. Still in Safari, open
+   `https://192.168.1.42:8710/api/translate?text=Hallo` (a GET twin of the
+   endpoint exists exactly for this). You should see JSON containing a
+   translation. If steps 2–3 fail, no Shortcut can work: check same
+   Wi-Fi, the printed IP, and the certificate (see troubleshooting).
 
-**WhatsApp flow** (WhatsApp offers Copy but no Share on message text):
-long-press the message → **Copy** (press-and-hold the text itself first to
-copy only part of it), then launch the shortcut — the clipboard fallback
-kicks in. Fast launchers: **Back Tap** (Settings → Accessibility → Touch →
-Back Tap → Double Tap → the shortcut: copy, tap the back of the phone,
-done), the Action Button, a Home Screen icon, or a Shortcuts widget.
-Silence the repeated paste prompt under Settings → Apps → Shortcuts →
-Paste from Other Apps → Allow. In apps whose text selection does offer
-Share (Safari, Mail), the share-sheet route works directly.
+**Build the shortcut** (Shortcuts app → **+**):
+
+1. Tap the name at the top → **Rename** → `Translate with AllKlaro`.
+2. Search and add **Get Contents of URL**. Tap the blue `URL` placeholder
+   and type the full URL: `https://<mac-ip>:8710/api/translate`.
+3. Tap the action's **expand arrow (▸ / "Show More")**:
+   - **Method** → **POST** (it defaults to GET — a GET here with no
+     `text` returns only an error).
+   - **Request Body** → **JSON**.
+   - **Add new field** → **Text**. Key: `text`. For the value, tap the
+     box, then in the bar above the keyboard tap **Shortcut Input** — it
+     must appear as a blue pill, not typed words. (No bar? Tap the wand /
+     "Select Variable" icon.)
+4. Add **Get Dictionary Value**. It should read *Get Value for key in
+   Contents of URL*; type `translation` as the key. If "in" doesn't say
+   **Contents of URL**, tap it and select that variable.
+5. Add **Show Content** (named **Show Result** before iOS 26). It should
+   show **Dictionary Value**; wire the variable if it's empty.
+6. Tap **ⓘ** (bottom of the editor) → enable **Show in Share Sheet**.
+   Closing that sheet reveals a **"Receive … input from"** header at the
+   very top of the shortcut. In that header:
+   - optionally limit the types to **Text**;
+   - tap **"If there's no input: Continue"** and change **Continue** →
+     **Get Clipboard**. ⚠️ This is the step that makes Back Tap / Home
+     Screen launches translate your *copied* text — without it they send
+     an empty request and show a blank result.
+7. Test by tapping the shortcut **inside the Shortcuts app** first, with
+   some German on the clipboard. Approve the one-time prompts: connect to
+   your Mac's address (Allow), Local Network access (Allow), paste from
+   WhatsApp (Allow — silence it for good under Settings → Apps →
+   Shortcuts → **Paste from Other Apps** → Allow).
+
+**Daily WhatsApp flow** (WhatsApp offers Copy but no Share on message
+text): long-press the message → **Copy** (press-and-hold the text itself
+first to copy only part of it), then launch the shortcut — the clipboard
+fallback kicks in. Fast launchers: **Back Tap** (Settings → Accessibility
+→ Touch → Back Tap → Double Tap → the shortcut), the Action Button, a
+Home Screen icon, or a Shortcuts widget. In apps whose text selection
+does offer Share (Safari, Mail), the share-sheet route works directly.
+
+**Troubleshooting:**
+
+- **Blank result** → the server answered with an error the dictionary
+  step drops. Temporarily add a second **Show Content** right after *Get
+  Contents of URL* showing **Contents of URL** — the raw JSON names the
+  problem (`"No text to translate."` = the clipboard fallback from step 6
+  isn't set).
+- **"Could not connect" / SSL error** → the self-signed certificate is
+  pinned to the Mac's IP at generation time. If your router handed the
+  Mac a new IP since then, delete the `certs/` folder, rerun the iPhone
+  launcher (it regenerates for the current IP), and reinstall via
+  `/cert`. Also confirm phone and Mac share one Wi-Fi network.
+- **Back Tap does nothing** → make sure the shortcut works when tapped in
+  the app first; Back Tap only launches what already runs. Thick cases
+  dampen it — tap firmly with a fingertip. Check Settings →
+  Accessibility → Touch → Back Tap still lists the shortcut.
+- **Local Network denied** → Settings → Privacy & Security → Local
+  Network → **Shortcuts** must be ON.
 
 ## ⚙️ Under the hood
 

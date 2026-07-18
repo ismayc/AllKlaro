@@ -1100,6 +1100,17 @@ async def translate_api(payload: dict):
             "translations": translations}
 
 
+@app.get("/api/translate")
+async def translate_api_get(text: str = "", mode: str = "",
+                            de_flavor: str = "", model: str = ""):
+    """GET twin of the POST endpoint, so the whole pipeline can be
+    smoke-tested from a phone browser's address bar:
+    https://<mac-ip>:8710/api/translate?text=Hallo — separates "server
+    unreachable" from "Shortcut built wrong" when debugging."""
+    return await translate_api({"text": text, "mode": mode,
+                                "de_flavor": de_flavor, "model": model})
+
+
 # ---------------------------------------------------------- word lookup
 
 _wikt_conns: dict[str, sqlite3.Connection] = {}

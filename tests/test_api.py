@@ -228,3 +228,10 @@ def test_api_translate_reports_ollama_down(dead_ollama):
     r = TestClient(server.app).post(
         "/api/translate", json={"text": "Hallo, wie geht's dir denn?"}).json()
     assert "available" in r["error"]
+
+
+def test_api_translate_get_variant_for_browser_smoke_tests(client, fake_ollama):
+    r = client.get("/api/translate",
+                   params={"text": "Wie geht es dir und der Familie?"}).json()
+    assert r["source"] == "de" and r["translation"] == "Refined translation."
+    assert "error" in client.get("/api/translate").json()
