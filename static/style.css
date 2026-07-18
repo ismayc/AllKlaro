@@ -120,7 +120,9 @@ main {
   background: var(--panel); border-top: 1px solid var(--border);
 }
 #typeBar input {
-  flex: 1; background: var(--bg); color: var(--text); font-size: 15px;
+  /* 16px minimum: iOS Safari auto-zooms into any smaller focused input,
+     leaving the page zoomed in after the keyboard closes. */
+  flex: 1; background: var(--bg); color: var(--text); font-size: 16px;
   border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px;
 }
 #typeBar input:focus { outline: none; border-color: var(--muted); }
@@ -158,6 +160,8 @@ main {
 }
 
 @media (max-width: 640px) {
+  /* Same iOS auto-zoom rule applies to focused selects. */
+  select { font-size: 16px; }
   header { padding: 8px 10px; gap: 8px; }
   .topbar { gap: 10px; }
   .mic-btn { padding: 8px 14px; font-size: 15px; }

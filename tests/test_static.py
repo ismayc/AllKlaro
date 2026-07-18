@@ -133,6 +133,18 @@ def test_layout_fits_mobile_viewport():
     assert "viewport-fit=cover" in HTML
 
 
+def test_type_input_does_not_trigger_ios_auto_zoom():
+    # iOS Safari zooms into any focused input under 16px and stays zoomed
+    # after the keyboard closes; the type bar and (on phones) the selects
+    # must be at least 16px.
+    css = (STATIC / "style.css").read_text()
+    typebar = re.search(r"#typeBar input \{[^}]*\}", css, re.S).group()
+    assert re.search(r"font-size:\s*1[6-9]px", typebar), \
+        "type input under 16px re-enables the iOS focus zoom"
+    mobile = css[css.index("@media (max-width: 640px)"):]
+    assert re.search(r"select \{[^}]*font-size:\s*1[6-9]px", mobile)
+
+
 def test_launchers_auto_reload_server_code():
     root = Path(__file__).parent.parent
     for name in ("Start AllKlaro.command", "Start AllKlaro (iPhone).command"):
