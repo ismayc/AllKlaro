@@ -46,6 +46,7 @@ by default) that sees the conversation's recent context.
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
 | ⌨️ **Type to translate** | A text box under the feed — type instead of speaking, mic not required; same context, corrections, and draft+refine pipeline |
 | 📖 **Gender lexicons** | Optional: compile dict.cc / FreeDict exports into loanword-gender dictionaries — "caipirinha" gets der/die/das and "problema" gets el/la injected |
+| 🔍 **Long-press dictionary** | Hold any word in the feed for its Wiktionary entry — gender with article, plural, IPA, meanings; inflected forms chain to their base word ("ging" → gehen) |
 
 ## 🚀 Quick start
 
@@ -148,6 +149,17 @@ conversation gets the full screen):
 - **Speak** voices: German `de-DE`, English `en-US`, Spanish `es-MX`
   (Latin American).
 - **About** — links to the website and repo.
+- **Long-press any word** — its dictionary entry slides up: gender with the
+  article, plural, IPA, and meanings. Inflected forms bring their base word
+  along ("ging" shows gehen too). Needs a one-time lexicon build:
+
+  ```bash
+  uv run python build_wiktionary_lexicon.py        # German + Spanish
+  ```
+
+  streams Wiktionary extracts from [kaikki.org](https://kaikki.org)
+  (CC BY-SA, ~95 MB per language) into `~/.cache/allklaro/`. Add `en` for
+  English lookups.
 - Tap a card's background for a **full-screen big-text view** to show the
   person you're talking to.
 - Settings persist; the WebSocket auto-reconnects; a wake-lock keeps the

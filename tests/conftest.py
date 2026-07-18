@@ -46,13 +46,18 @@ def no_user_gender_lexicon(tmp_path, monkeypatch):
                         {t: tmp_path / f"no-output-{t}.tsv"
                          for t in ("de", "es")})
     monkeypatch.setattr(server, "NOUN_FORMS_PATH", tmp_path / "no-forms.tsv")
+    monkeypatch.setattr(server, "WIKTIONARY_PATHS",
+                        {t: tmp_path / f"no-wikt-{t}.sqlite"
+                         for t in ("de", "en", "es")})
     server._gender_caches.clear()
     server._output_caches.clear()
     server._noun_forms_cache.update(mtime=None, map={})
+    server._wikt_conns.clear()
     yield
     server._gender_caches.clear()
     server._output_caches.clear()
     server._noun_forms_cache.update(mtime=None, map={})
+    server._wikt_conns.clear()
 
 
 @pytest.fixture

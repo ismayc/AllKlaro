@@ -79,6 +79,23 @@ def test_translations_are_copyable_without_selecting_text():
     assert re.search(r'btn\.textContent = "📋"', JS)
 
 
+def test_words_are_lookupable_on_long_press():
+    css = (STATIC / "style.css").read_text()
+    assert 'id="lookup"' in HTML and 'id="lookupBody"' in HTML
+    assert "#lookup.hidden" in css and ".lookup-card" in css
+    assert "/api/lookup" in JS
+    # Both the original line and finished translation rows get word spans.
+    assert "wordSpans(msg.text, msg.source)" in JS
+    assert "wordSpans(row.text, target)" in JS
+    # A long-press must not also fire tap-to-speak or the big-text overlay,
+    # and iOS's text-selection callout must not fight the gesture.
+    assert "attachLongPress" in JS and "pointerdown" in JS
+    assert "suppressClick" in JS
+    assert "-webkit-touch-callout" in css
+    # Missing lexicons surface the server's how-to-build message, not a crash.
+    assert re.search(r"data\.error", JS)
+
+
 def test_about_panel_links_to_site_and_repo():
     assert 'id="aboutBtn"' in HTML and 'id="about"' in HTML
     assert "https://ismayc.github.io/AllKlaro/" in HTML

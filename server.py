@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import zlib
 from difflib import SequenceMatcher
 from collections import deque
@@ -77,6 +78,13 @@ OUTPUT_GENDER_PATHS = {
 # Per-form German noun readings (case/number), built by build_noun_forms.py
 # from the Wiktionary-derived german-nouns CSV.
 NOUN_FORMS_PATH = Path.home() / ".cache" / "allklaro" / "de_noun_forms.tsv"
+# Tap-to-look-up dictionaries compiled from Wiktionary (kaikki.org) by
+# build_wiktionary_lexicon.py; optional — /api/lookup says how to build one.
+WIKTIONARY_PATHS = {
+    code: Path.home() / ".cache" / "allklaro" / f"wikt_{code}.sqlite"
+    for code in ("de", "en", "es")
+}
+LOOKUP_LIMIT = 6                   # entries returned per looked-up word
 GENDER_NOTE_LIMIT = 8              # max per-sentence dictionary notes
 
 VAD_BACKEND = os.environ.get("VAD_BACKEND", "silero")  # "silero" | "energy"
@@ -1036,6 +1044,55 @@ async def correction(payload: dict):
         if isinstance(model_translation, str) else "",
     })
     return {"ok": True, "count": len(load_corrections())}
+
+
+# ---------------------------------------------------------- word lookup
+
+_wikt_conns: dict[str, sqlite3.Connection] = {}
+
+
+def wiktionary_conn(lang: str) -> sqlite3.Connection | None:
+    conn = _wikt_conns.get(lang)
+    if conn is None and WIKTIONARY_PATHS[lang].exists():
+        conn = sqlite3.connect(WIKTIONARY_PATHS[lang], check_same_thread=False)
+        _wikt_conns[lang] = conn
+    return conn
+
+
+def wiktionary_entries(conn, word: str, limit: int = LOOKUP_LIMIT) -> list[dict]:
+    """All entries whose spelling matches `word` case-insensitively;
+    exact-case matches first (Tisch the noun before tisch- anything),
+    then base words before inflected forms."""
+    rows = conn.execute(
+        "SELECT word, pos, gender, ipa, plural, senses, lemma FROM entries "
+        "WHERE word_lc = ? ORDER BY (word = ?) DESC, (lemma = '') DESC LIMIT ?",
+        (word.lower(), word, limit)).fetchall()
+    return [{"word": w, "pos": pos, "gender": g, "ipa": ipa, "plural": pl,
+             "senses": json.loads(senses), "lemma": lemma}
+            for w, pos, g, ipa, pl, senses, lemma in rows]
+
+
+@app.get("/api/lookup")
+async def lookup(word: str = "", lang: str = "de"):
+    """Dictionary data for a long-pressed word in the feed."""
+    word = word.strip()
+    if lang not in WIKTIONARY_PATHS or not word or len(word) > 64:
+        return {"error": "Invalid lookup."}
+    conn = wiktionary_conn(lang)
+    if conn is None:
+        return {"error": f"No {lang} dictionary built yet — run: "
+                         f"uv run python build_wiktionary_lexicon.py {lang}"}
+    entries = wiktionary_entries(conn, word)
+    # Inflected forms chain to their base word ("ging" -> gehen), so the
+    # popup shows the lemma's meaning under the form's description.
+    fetched = {word.lower()}
+    for e in list(entries):
+        lemma = e["lemma"]
+        if lemma and lemma.lower() not in fetched:
+            fetched.add(lemma.lower())
+            entries.extend(le for le in wiktionary_entries(conn, lemma, limit=2)
+                           if not le["lemma"])
+    return {"entries": entries[:LOOKUP_LIMIT + 2]}
 
 
 SUMMARY_PROMPT = (

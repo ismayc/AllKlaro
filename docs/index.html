@@ -237,6 +237,10 @@
         <div class="feature"><h3 data-i18n="f_gloss_h">📚 Glossary</h3>
           <p data-i18n="f_gloss_p">Pin names and terms in <code>glossary.txt</code> — biases both
           recognition and translation.</p></div>
+        <div class="feature"><h3 data-i18n="f_lookup_h">🔍 Long-press dictionary</h3>
+          <p data-i18n="f_lookup_p">Hold any word for its Wiktionary entry — gender with article,
+          plural, IPA, and meanings; "ging" chains to gehen. Built locally
+          from free kaikki.org extracts.</p></div>
       </div>
     </div>
   </section>
@@ -353,6 +357,8 @@ uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
       f_focus_p: "Hält den neuesten Text in der Bildschirmmitte („Center latest“) statt am unteren Rand.",
       f_gloss_h: "📚 Glossar",
       f_gloss_p: "Namen und Begriffe in <code>glossary.txt</code> festlegen — beeinflusst Erkennung und Übersetzung.",
+      f_lookup_h: "🔍 Wörterbuch per langem Druck",
+      f_lookup_p: "Ein Wort gedrückt halten und den Wiktionary-Eintrag sehen — Genus mit Artikel, Plural, IPA und Bedeutungen; „ging“ führt zu gehen. Lokal aus freien kaikki.org-Daten gebaut.",
       qs_h2: "🚀 Schnellstart",
       qs_req: 'Du brauchst einen Apple-Silicon-Mac (M1+), empfohlen 16&nbsp;GB+ RAM, ~12&nbsp;GB freien Speicher und <a href="https://brew.sh">Homebrew</a>.',
       qs_note: 'Oder überspring Schritt 4 und doppelklicke <strong>Start AllKlaro.command</strong> im Finder — das startet bei Bedarf Ollama, dann den Server, und öffnet die Seite. Beim ersten Start werden die Whisper-Gewichte (~1,6&nbsp;GB) einmalig geladen; danach läuft alles offline. Um die <em>andere</em> Seite eines Calls zu übersetzen, installiere den kostenlosen <a href="https://existential.audio/blackhole/">BlackHole</a>-Loopback-Treiber — das README erklärt die einmalige Einrichtung.',
@@ -411,6 +417,8 @@ uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
       f_focus_p: "Mantiene el texto más reciente en el centro de la pantalla («Center latest») en lugar del borde inferior.",
       f_gloss_h: "📚 Glosario",
       f_gloss_p: "Fija nombres y términos en <code>glossary.txt</code> — influye en el reconocimiento y en la traducción.",
+      f_lookup_h: "🔍 Diccionario al mantener pulsado",
+      f_lookup_p: "Mantén pulsada cualquier palabra para ver su entrada de Wiktionary — género con artículo, plural, IPA y significados; «ging» lleva a gehen. Se compila localmente con datos libres de kaikki.org.",
       qs_h2: "🚀 Inicio rápido",
       qs_req: 'Necesitas un Mac con Apple Silicon (M1+), 16&nbsp;GB+ de RAM recomendados, ~12&nbsp;GB de disco libre y <a href="https://brew.sh">Homebrew</a>.',
       qs_note: 'O salta el paso 4 y haz doble clic en <strong>Start AllKlaro.command</strong> en el Finder — arranca Ollama si hace falta, inicia el servidor y abre la página. El primer arranque descarga los pesos de Whisper (~1,6&nbsp;GB) una sola vez; después todo funciona sin conexión. Para traducir el <em>otro</em> lado de una llamada, añade el controlador de loopback gratuito <a href="https://existential.audio/blackhole/">BlackHole</a> — el README explica la configuración, que se hace una sola vez.',

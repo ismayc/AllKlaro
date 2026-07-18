@@ -25,6 +25,11 @@ const controlsBtn = document.getElementById("controlsBtn");
 const aboutBtn = document.getElementById("aboutBtn");
 const aboutBox = document.getElementById("about");
 const aboutClose = document.getElementById("aboutClose");
+const lookupBox = document.getElementById("lookup");
+const lookupWord = document.getElementById("lookupWord");
+const lookupBody = document.getElementById("lookupBody");
+const lookupSpeak = document.getElementById("lookupSpeak");
+const lookupClose = document.getElementById("lookupClose");
 
 let ws = null, audioCtx = null;
 let streams = [], workletNodes = [];
@@ -220,7 +225,7 @@ function newCard(msg) {
   const speakerChip = callMode
     ? `<span class="speaker">${msg.speaker === "them" ? "Them" : "You"}</span>` : "";
   orig.innerHTML = speakerChip + langChip(msg.source);
-  orig.append(document.createTextNode(msg.text));
+  orig.append(wordSpans(msg.text, msg.source));
   orig.title = "Tap to hear it spoken";
   // Tapping a phrase speaks it aloud in that phrase's own language.
   orig.onclick = (e) => { e.stopPropagation(); speakText(msg.text, msg.source, true); };
@@ -287,7 +292,7 @@ async function copyText(text, btn) {
 function renderFinalRow(c, target) {
   const row = c.rows[target];
   row.el.innerHTML = langChip(target);
-  row.el.append(document.createTextNode(row.text));
+  row.el.append(wordSpans(row.text, target));
   const copyBtn = document.createElement("button");
   copyBtn.className = "copy-btn";
   copyBtn.title = "Copy this translation";
@@ -377,6 +382,113 @@ function speakText(text, lang, interrupt = false) {
   u.onend = u.onerror = () => { muted = false; };
   speechSynthesis.speak(u);
 }
+
+// ------------------------------------------------------------- word lookup
+
+// Long-press a word for its dictionary entry (Wiktionary lexicons built by
+// build_wiktionary_lexicon.py). A long-press must not also fire the tap
+// actions (speak / big-text), so the click that follows it is swallowed.
+const LONG_PRESS_MS = 500;
+let suppressClick = false;
+document.addEventListener("click", (e) => {
+  if (suppressClick) {
+    suppressClick = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }
+}, true);
+
+function attachLongPress(el, fn) {
+  let timer = null;
+  el.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return; // right-click has its own menu
+    clearTimeout(timer);
+    timer = setTimeout(() => { suppressClick = true; fn(); }, LONG_PRESS_MS);
+  });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) {
+    el.addEventListener(ev, () => clearTimeout(timer));
+  }
+}
+
+// Text -> fragment with each word in a long-pressable span.
+function wordSpans(text, lang) {
+  const frag = document.createDocumentFragment();
+  let last = 0;
+  for (const m of text.matchAll(/\p{L}[\p{L}\p{M}'’-]*/gu)) {
+    if (m.index > last) frag.append(text.slice(last, m.index));
+    const span = document.createElement("span");
+    span.className = "w";
+    span.textContent = m[0];
+    attachLongPress(span, () => openLookup(m[0], lang));
+    frag.append(span);
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) frag.append(text.slice(last));
+  return frag;
+}
+
+const ARTICLES = { de: { m: "der", f: "die", n: "das" },
+                   es: { m: "el", f: "la" } };
+let lookupCurrent = null;
+
+async function openLookup(word, lang) {
+  lookupCurrent = { word, lang };
+  lookupWord.textContent = word;
+  lookupBody.textContent = "Looking up…";
+  lookupBox.classList.remove("hidden");
+  let data;
+  try {
+    const r = await fetch(`/api/lookup?${new URLSearchParams({ word, lang })}`);
+    data = await r.json();
+  } catch {
+    data = { error: "Lookup failed — is the server running?" };
+  }
+  if (lookupCurrent?.word !== word) return; // superseded by a newer press
+  renderLookup(data, lang);
+}
+
+function renderLookup(data, lang) {
+  lookupBody.innerHTML = "";
+  if (data.error || !data.entries?.length) {
+    const p = document.createElement("p");
+    p.className = "lookup-miss";
+    p.textContent = data.error || "No dictionary entry found.";
+    lookupBody.append(p);
+    return;
+  }
+  for (const e of data.entries) {
+    const div = document.createElement("div");
+    div.className = "lookup-entry";
+    const head = document.createElement("div");
+    head.className = "lookup-headline";
+    head.textContent =
+      [ARTICLES[lang]?.[e.gender], e.word].filter(Boolean).join(" ");
+    div.append(head);
+    const meta = [e.pos, e.gender, e.ipa, e.plural && `pl. ${e.plural}`]
+      .filter(Boolean).join(" · ");
+    if (meta) {
+      const m = document.createElement("div");
+      m.className = "lookup-meta";
+      m.textContent = meta;
+      div.append(m);
+    }
+    const ol = document.createElement("ol");
+    for (const s of e.senses) {
+      const li = document.createElement("li");
+      li.textContent = s;
+      ol.append(li);
+    }
+    div.append(ol);
+    lookupBody.append(div);
+  }
+}
+
+lookupClose.onclick = () => lookupBox.classList.add("hidden");
+lookupBox.onclick = (e) => { // tap the backdrop (not the sheet) to dismiss
+  if (e.target === lookupBox) lookupBox.classList.add("hidden");
+};
+lookupSpeak.onclick = () =>
+  lookupCurrent && speakText(lookupCurrent.word, lookupCurrent.lang, true);
 
 // Live partial text: bottom bar normally; in focus mode an in-feed card so
 // the incoming speech sits near mid-screen with the translations.
