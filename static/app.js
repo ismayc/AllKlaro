@@ -32,7 +32,8 @@ let running = false, callMode = false, muted = false;
 let wakeLock = null, reconnectDelay = 500;
 let lastSummary = "";
 const cards = new Map(); // utterance id -> card state
-const TTS_LANG = { de: "de-DE", en: "en-US", es: "es-ES" };
+// es-MX: Chester's Spanish-speaking contacts are Latin American.
+const TTS_LANG = { de: "de-DE", en: "en-US", es: "es-MX" };
 
 // ------------------------------------------------------------------- settings
 

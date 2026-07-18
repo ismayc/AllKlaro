@@ -129,3 +129,8 @@ def test_home_screen_web_app_is_configured():
     assert (STATIC / "icon-180.png").exists()
     assert 'apple-mobile-web-app-capable' in HTML   # standalone, no browser UI
     assert 'apple-mobile-web-app-title" content="AllKlaro"' in HTML
+
+
+def test_spanish_speech_uses_latin_american_voice():
+    assert '"es-MX"' in JS
+    assert '"es-ES"' not in JS
