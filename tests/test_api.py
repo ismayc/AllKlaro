@@ -190,3 +190,41 @@ def test_index_stamps_asset_versions_for_cache_busting(client):
     assert "__BUILD__" not in html
     assert re.search(r'/static/app\.js\?v=\d+', html)
     assert re.search(r'/static/style\.css\?v=\d+', html)
+
+# ---------------------------------------------------- /api/translate (Shortcut)
+
+
+def test_api_translate_stateless(client, fake_ollama):
+    r = client.post("/api/translate",
+                    json={"text": "Wie geht es dir und der Familie?"}).json()
+    assert r["source"] == "de" and r["target"] == "en"
+    assert r["translation"] == "Refined translation."
+    assert r["translations"] == {"en": "Refined translation."}
+    # Stateless: just the system prompt and the sentence, no history turns.
+    assert len(fake_ollama["chat"]["messages"]) == 2
+
+
+def test_api_translate_forced_mode_carries_flavor(client, fake_ollama):
+    r = client.post("/api/translate",
+                    json={"text": "See you tomorrow!", "mode": "en-de",
+                          "de_flavor": "berlin"}).json()
+    assert (r["source"], r["target"]) == ("en", "de")
+    assert "Berlinerisch" in fake_ollama["chat"]["messages"][0]["content"]
+
+
+def test_api_translate_multi_target_mode(client, fake_ollama):
+    r = client.post("/api/translate",
+                    json={"text": "Hello there!", "mode": "en-de+es"}).json()
+    assert set(r["translations"]) == {"de", "es"}
+    assert r["target"] == "de"
+
+
+def test_api_translate_rejects_empty_text(client):
+    assert "error" in client.post("/api/translate", json={"text": "   "}).json()
+    assert "error" in client.post("/api/translate", json={}).json()
+
+
+def test_api_translate_reports_ollama_down(dead_ollama):
+    r = TestClient(server.app).post(
+        "/api/translate", json={"text": "Hallo, wie geht's dir denn?"}).json()
+    assert "available" in r["error"]

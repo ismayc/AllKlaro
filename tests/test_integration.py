@@ -274,3 +274,12 @@ async def test_real_ollama_hessian_flavor_produces_dialect():
         "en", "de", server.DEFAULT_MODEL, flavor="hessian")
     assert any(m in text.lower() for m in (" net ", "net,", "net.", "gell",
                                            "isch ", "aach", "ebbes"))
+
+
+async def test_real_api_translate_endpoint():
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    r = await server.translate_api(
+        {"text": "Kannste morjen ooch bei uns vorbeikommen, dit wär jut."})
+    assert r["source"] == "de" and r["target"] == "en"
+    assert "tomorrow" in r["translation"].lower()

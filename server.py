@@ -1068,6 +1068,38 @@ async def correction(payload: dict):
     return {"ok": True, "count": len(load_corrections())}
 
 
+@app.post("/api/translate")
+async def translate_api(payload: dict):
+    """Stateless one-shot translation for external callers — built for an
+    iOS Shortcut ("Translate with AllKlaro" in the share sheet), so reading
+    a WhatsApp message needs no app switch. Same pipeline as typed input,
+    minus the conversation context."""
+    text = payload.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return {"error": "No text to translate."}
+    text = text.strip()[:2000]
+    mode = payload.get("mode") or "auto-de-en"
+    model = payload.get("model") or DEFAULT_MODEL
+    flavor = payload.get("de_flavor")
+    flavor = flavor if flavor in FLAVOR_NOTES else ""
+    pair = mode_pair(mode)
+    detected = detect_language(text, pair) if pair else (lang_hint(mode) or "de")
+    source, targets = resolve_targets(mode, detected)
+    translations = {}
+    for target in targets:
+        out = await translate_once(text, source, target, model, flavor=flavor)
+        if out is None:
+            return {"error": "Translation failed — are Ollama and the model "
+                             f"{model!r} available?"}
+        if not (target == "de" and flavor):  # guard assumes standard German
+            out, _ = await enforce_agreement(text, source, target, model,
+                                             None, out)
+        translations[target] = out
+    return {"source": source, "target": targets[0],
+            "translation": translations[targets[0]],
+            "translations": translations}
+
+
 # ---------------------------------------------------------- word lookup
 
 _wikt_conns: dict[str, sqlite3.Connection] = {}
@@ -1487,6 +1519,16 @@ def lang_hint(mode: str) -> str | None:
     return src if src in LANG_NAMES else None
 
 
+def mode_pair(mode: str) -> tuple[str, str] | None:
+    """The (a, b) pair of an "auto-a-b" mode; None for forced directions."""
+    m = "auto-de-en" if mode == "auto" else mode
+    parts = m.split("-")
+    if (parts[0] == "auto" and len(parts) == 3
+            and all(p in LANG_NAMES for p in parts[1:])):
+        return parts[1], parts[2]
+    return None
+
+
 def normalize_text(text: str) -> str:
     return re.sub(r"[\W_]+", "", text.lower())
 
@@ -1586,12 +1628,7 @@ async def ws_endpoint(ws: WebSocket):
         return " ".join(parts)[:400] or None
 
     def auto_pair() -> tuple[str, str] | None:
-        m = "auto-de-en" if mode == "auto" else mode
-        parts = m.split("-")
-        if parts[0] == "auto" and len(parts) == 3 and all(
-                p in LANG_NAMES for p in parts[1:]):
-            return parts[1], parts[2]
-        return None
+        return mode_pair(mode)
 
     async def handle_utterance(audio: np.ndarray, my_uid: int, speaker: str,
                                spec_task=None):

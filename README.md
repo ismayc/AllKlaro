@@ -192,6 +192,35 @@ Management**, then enable it under **Settings → General → About →
 Certificate Trust Settings**. Re-add to the home screen afterwards; this
 also removes the warning page for good.
 
+### 📲 iOS Shortcut: translate straight from the share sheet
+
+`POST /api/translate` is a stateless endpoint made for Apple Shortcuts, so
+a WhatsApp message can be translated without switching apps:
+
+```json
+{"text": "Kannste morjen ooch vorbeikommen?",
+ "mode": "auto-de-en",          // optional, this is the default
+ "de_flavor": "berlin"}         // optional: berlin | hessian
+```
+
+returns `{"source": "de", "target": "en", "translation": "...",
+"translations": {"en": "..."}}`.
+
+One-time setup in the Shortcuts app (server must be running in phone mode):
+
+1. New Shortcut → name it **Translate with AllKlaro**.
+2. Add **Get Contents of URL** → `https://<mac-ip>:8710/api/translate` →
+   Method **POST**, Request Body **JSON**, one field: `text` =
+   **Shortcut Input** (magic variable).
+3. Add **Get Dictionary Value** → key `translation`.
+4. Add **Show Result** (or Show Notification).
+5. In the shortcut's ⓘ settings: enable **Show in Share Sheet** (input
+   type: Text), and set "If there's no input" → **Get Clipboard**.
+
+Then: select text in WhatsApp → Share → **Translate with AllKlaro**, or
+copy it and run the shortcut from the home screen — the clipboard fallback
+kicks in.
+
 ## ⚙️ Under the hood
 
 The speed and correctness machinery, for the curious:
