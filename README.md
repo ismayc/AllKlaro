@@ -210,14 +210,18 @@ returns `{"source": "de", "target": "en", "translation": "...",
 **Step 0 — prove the server is reachable** (do this before touching
 Shortcuts; it isolates the two things that can fail):
 
-1. On the Mac, run **`Start AllKlaro (iPhone).command`** and note the URL
-   it prints, e.g. `https://192.168.1.42:8710`.
-2. On the iPhone, open that URL in Safari — the app must load.
-3. Still in Safari, open
-   `https://192.168.1.42:8710/api/translate?text=Hallo` (a GET twin of the
-   endpoint exists exactly for this). You should see JSON containing a
-   translation. If steps 2–3 fail, no Shortcut can work: check same
-   Wi-Fi, the printed IP, and the certificate (see troubleshooting).
+1. On the Mac, run **`Start AllKlaro (iPhone).command`**. It prints your
+   Mac's actual address, the exact Shortcut URL, and a browser smoke-test
+   URL. ⚠️ Every address below written as `<mac-ip>` means *that* printed
+   IP — it is different on every network, so never copy an address from
+   an example.
+2. On the iPhone, open `https://<mac-ip>:8710` in Safari — the app must
+   load.
+3. Still in Safari, open the printed smoke-test URL
+   (`https://<mac-ip>:8710/api/translate?text=Hallo`). You should see
+   JSON containing a translation. If steps 2–3 fail, no Shortcut can
+   work: check same Wi-Fi, the printed IP, and the certificate (see
+   troubleshooting).
 
 **Build the shortcut** (Shortcuts app → **+**):
 
