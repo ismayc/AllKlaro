@@ -174,3 +174,9 @@ def test_cert_endpoint_serves_certificate(client, tmp_path, monkeypatch):
 def test_cert_endpoint_404_without_phone_mode(client, tmp_path, monkeypatch):
     monkeypatch.setattr(server, "CERT_PATH", tmp_path / "missing.pem")
     assert client.get("/cert").status_code == 404
+
+def test_static_assets_must_be_revalidated_not_cached(client):
+    # iOS home-screen apps replay stale cached JS for days otherwise —
+    # shipped features would silently vanish on the phone after updates.
+    for path in ("/", "/static/app.js", "/static/style.css"):
+        assert client.get(path).headers.get("cache-control") == "no-cache", path

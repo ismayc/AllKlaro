@@ -946,12 +946,27 @@ app = FastAPI(lifespan=lifespan)
 # ------------------------------------------------------------------- endpoints
 
 
+class NoCacheStaticFiles(StaticFiles):
+    """Static files that browsers must revalidate on every load.
+
+    Without this, iOS home-screen web apps keep replaying a cached app.js
+    long after the server has newer code — features silently "disappear"
+    until the cache happens to expire. no-cache still allows ETag 304s,
+    so repeat loads stay cheap on the LAN."""
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 @app.get("/")
 async def index():
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html",
+                        headers={"Cache-Control": "no-cache"})
 
 
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+app.mount("/static", NoCacheStaticFiles(directory=STATIC_DIR), name="static")
 
 CERT_PATH = Path(__file__).parent / "certs" / "cert.pem"
 

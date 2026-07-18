@@ -397,6 +397,9 @@ document.addEventListener("click", (e) => {
     e.preventDefault();
   }
 }, true);
+// iOS often skips the click after a long-press entirely; the flag must not
+// stay armed and swallow the next genuine tap (📋, ✏️, tap-to-speak).
+document.addEventListener("pointerdown", () => { suppressClick = false; }, true);
 
 function attachLongPress(el, fn) {
   let timer = null;

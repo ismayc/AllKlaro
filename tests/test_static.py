@@ -91,6 +91,9 @@ def test_words_are_lookupable_on_long_press():
     # and iOS's text-selection callout must not fight the gesture.
     assert "attachLongPress" in JS and "pointerdown" in JS
     assert "suppressClick" in JS
+    # A long-press with no follow-up click (common on iOS) must not leave
+    # the flag armed to swallow the next genuine tap.
+    assert re.search(r'"pointerdown", \(\) => \{ suppressClick = false', JS)
     assert "-webkit-touch-callout" in css
     # Missing lexicons surface the server's how-to-build message, not a crash.
     assert re.search(r"data\.error", JS)
