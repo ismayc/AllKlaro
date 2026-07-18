@@ -163,6 +163,14 @@ The speed and correctness machinery, for the curious:
   blocklist of stock hallucinations ("Untertitelung des ZDF…").
 - **VAD hysteresis** — starting speech needs Silero probability > 0.5,
   continuing only > 0.35, so quiet word-endings don't chop sentences.
+- **Declension guard** — with the gender lexicons built, every final
+  translation is scanned for article/gender combinations that are wrong in
+  *every* case and number ("das Termin", "eine Termin", "la problema") and
+  for impossible adjective endings ("ein schöne Tag"). Violations trigger
+  one corrective re-ask with the dictionary fact stated; the retry is used
+  only if it verifies clean. Ambiguous forms (der/die/den have plural or
+  cross-gender readings) are deliberately unchecked — near-zero false
+  positives by construction.
 
 ## 📖 Gender lexicons (optional)
 

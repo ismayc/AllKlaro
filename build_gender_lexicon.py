@@ -38,6 +38,9 @@ from pathlib import Path
 
 OUT_DIR = Path.home() / ".cache" / "allklaro"
 TARGETS = {"de": "de_noun_genders.tsv", "es": "es_noun_genders.tsv"}
+# Output-side maps: target-language noun -> gender, used to verify the
+# model's *output* for impossible article/gender combinations.
+OUTPUT_FILES = {"de": "de_output_genders.tsv", "es": "es_output_genders.tsv"}
 TARGET_GENDERS = {"de": {"m", "f", "n"}, "es": {"m", "f"}}
 
 LANG_CODES = {"eng": "en", "deu": "de", "spa": "es"}
@@ -195,6 +198,29 @@ def build_lexicons(pairs):
     return lexicons
 
 
+def build_output_maps(pairs):
+    """Every unambiguous target-language noun gender the dictionaries know:
+    {target: {word.lower(): (display form, gender)}}. Unlike the source-keyed
+    lexicons this needs no same-spelling pair — it describes the output side
+    directly, so it also covers nouns that never appear in the source."""
+    seen = {}
+    for la, wa, ga, lb, wb, gb in pairs:
+        for lang, word, genders in ((la, wa, ga), (lb, wb, gb)):
+            if lang not in TARGETS or not genders or not WORD_RE.match(word):
+                continue
+            entry = seen.setdefault((lang, word.lower()),
+                                    {"display": word, "genders": set()})
+            entry["genders"] |= genders
+            if word[:1].isupper() and not entry["display"][:1].isupper():
+                entry["display"] = word    # prefer the capitalized form
+    maps = {t: {} for t in TARGETS}
+    for (lang, lower), entry in seen.items():
+        genders = entry["genders"]
+        if len(genders) == 1 and genders <= TARGET_GENDERS[lang]:
+            maps[lang][lower] = (entry["display"], genders.pop())
+    return maps
+
+
 # -------------------------------------------------------------------- inputs
 
 
@@ -227,26 +253,28 @@ def read_input(path: Path):
             yield from parse_dictcc(f)
 
 
+def write_map(mapping, filename, label):
+    if not mapping:                    # don't clobber a previous build
+        print(f"{label}: no entries from these inputs, file untouched")
+        return
+    with open(OUT_DIR / filename, "w", encoding="utf-8") as f:
+        for key in sorted(mapping):
+            word, gender = mapping[key]
+            f.write(f"{key}\t{word}\t{gender}\n")
+    print(f"{label}: {len(mapping)} noun genders -> {OUT_DIR / filename}")
+
+
 def main():
     if len(sys.argv) < 2:
         sys.exit(__doc__)
-
-    def all_pairs():
-        for arg in sys.argv[1:]:
-            yield from read_input(Path(arg))
-
-    lexicons = build_lexicons(all_pairs())
+    pairs = [p for arg in sys.argv[1:] for p in read_input(Path(arg))]
+    lexicons = build_lexicons(pairs)
+    output_maps = build_output_maps(pairs)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     for target, filename in TARGETS.items():
-        lexicon = lexicons.get(target, {})
-        if not lexicon:                # don't clobber a previous build
-            print(f"{target}: no entries from these inputs, file untouched")
-            continue
-        with open(OUT_DIR / filename, "w", encoding="utf-8") as f:
-            for key in sorted(lexicon):
-                word, gender = lexicon[key]
-                f.write(f"{key}\t{word}\t{gender}\n")
-        print(f"{target}: {len(lexicon)} noun genders -> {OUT_DIR / filename}")
+        write_map(lexicons.get(target, {}), filename, f"{target} source-keyed")
+    for target, filename in OUTPUT_FILES.items():
+        write_map(output_maps.get(target, {}), filename, f"{target} output-side")
 
 
 if __name__ == "__main__":

@@ -229,3 +229,13 @@ def test_real_end_to_end_websocket(tmp_path):
     translated = "".join(m["text"] for m in msgs
                          if m["type"] == "translation_delta").lower()
     assert "week" in translated
+
+
+async def test_real_agreement_guard_fixes_declension(output_gender_map):
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    output_gender_map([("Margarita", "f")])
+    final, changed = await server.enforce_agreement(
+        "I'd like a margarita, please.", "en", "de", server.DEFAULT_MODEL,
+        [], "Ich hätte gerne einen Margarita, bitte.")
+    assert changed and "eine Margarita" in final

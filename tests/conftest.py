@@ -42,9 +42,27 @@ def no_user_gender_lexicon(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "GENDER_LEXICON_PATHS",
                         {t: tmp_path / f"no-lexicon-{t}.tsv"
                          for t in ("de", "es")})
+    monkeypatch.setattr(server, "OUTPUT_GENDER_PATHS",
+                        {t: tmp_path / f"no-output-{t}.tsv"
+                         for t in ("de", "es")})
     server._gender_caches.clear()
+    server._output_caches.clear()
     yield
     server._gender_caches.clear()
+    server._output_caches.clear()
+
+
+@pytest.fixture
+def output_gender_map(no_user_gender_lexicon, tmp_path, monkeypatch):
+    """Write a small output-side gender map: write(entries, target="de")."""
+    def write(entries, target="de"):
+        path = tmp_path / f"output-{target}.tsv"
+        path.write_text("".join(f"{w.lower()}\t{w}\t{g}\n"
+                                for w, g in entries))
+        server.OUTPUT_GENDER_PATHS[target] = path
+        server._output_caches.clear()
+
+    return write
 
 
 @pytest.fixture

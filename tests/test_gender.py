@@ -190,3 +190,95 @@ def test_prompt_unchanged_when_nothing_matches(gender_lexicon):
     gender_lexicon([("caipirinha", "Caipirinha", "m")])
     msgs = server.translation_messages("Schönes Wetter.", "de", "en")
     assert "Dictionary genders" not in msgs[0]["content"]
+
+
+# ------------------------------------------------------- output maps & guard
+
+
+def test_output_maps_cover_both_sides_and_drop_ambiguity():
+    pairs = list(parse_dictcc([dictcc("margarita", "Margarita {m} {f}"),
+                               dictcc("appointment", "Termin {m}")]))
+    from build_gender_lexicon import build_output_maps
+    maps = build_output_maps(pairs)
+    # Termin never same-spells "appointment" (no source-keyed entry), but
+    # the output map still knows its gender; ambiguous Margarita is dropped.
+    assert maps["de"]["termin"] == ("Termin", "m")
+    assert "margarita" not in maps["de"]
+
+
+def test_agreement_flags_impossible_german_combinations(output_gender_map):
+    output_gender_map([("Margarita", "f"), ("Termin", "m"), ("Meeting", "n")])
+    # einen + feminine, das + feminine, eine + masculine, das + masculine:
+    assert server.agreement_issues("Ich hätte gerne einen Margarita.", "de")
+    assert server.agreement_issues("Das Margarita ist gut.", "de")
+    assert server.agreement_issues("Ich habe eine Termin.", "de")
+    assert server.agreement_issues("Das Termin ist morgen.", "de")
+    assert server.agreement_issues("Mit einem Margarita feiern wir.", "de")
+    # The message carries the corrective fact for the retry prompt.
+    (issue,) = server.agreement_issues("Das Termin ist morgen.", "de")
+    assert "masculine" in issue and "der Termin" in issue
+
+
+def test_agreement_accepts_all_valid_german_cases(output_gender_map):
+    output_gender_map([("Margarita", "f"), ("Termin", "m"), ("Meeting", "n"),
+                       ("Lehrer", "m"), ("Fenster", "n")])
+    for ok in (
+        "Die Margarita schmeckt gut.",           # nominative feminine
+        "Mit der Margarita stoßen wir an.",      # dative feminine ("der"!)
+        "Wegen einer Margarita bleiben wir.",    # genitive feminine
+        "Ich hätte gerne eine Margarita.",
+        "Der Termin ist morgen.",
+        "Ich habe einen Termin.",                # accusative masculine
+        "Das Meeting beginnt gleich.",
+        "Die Lehrer sind da.",                   # plural via "die" (unchecked)
+        "Der Fenster wegen bleiben wir.",        # genitive plural via "der"
+        "Ein bisschen Ruhe täte gut.",           # measure construction
+        "Wir treffen uns um ein Uhr.",           # time idiom exception
+    ):
+        assert server.agreement_issues(ok, "de") == [], ok
+
+
+def test_agreement_checks_adjective_endings(output_gender_map):
+    output_gender_map([("Tag", "m"), ("Haus", "n")])
+    assert server.agreement_issues("Das war ein schöne Tag.", "de")
+    assert server.agreement_issues("Das ist das schönes Haus.", "de")
+    for ok in ("Das war ein schöner Tag.",
+               "Das ist das schöne Haus.",
+               "In einem schönen Haus wohnen wir.",
+               "Ein rosa Haus steht da.",):      # undeclinable color adj
+        assert server.agreement_issues(ok, "de") == [], ok
+
+
+def test_agreement_spanish_articles(output_gender_map):
+    output_gender_map([("problema", "m"), ("casa", "f"), ("agua", "f")],
+                      target="es")
+    assert server.agreement_issues("La problema es difícil.", "es")
+    assert server.agreement_issues("Es un casa bonita.", "es")
+    for ok in ("El problema es difícil.",
+               "La casa es bonita.",
+               "El agua está fría.",):           # stressed a- feminine
+        assert server.agreement_issues(ok, "es") == [], ok
+
+
+def test_agreement_silent_without_output_map():
+    assert server.agreement_issues("Das Margarita ist gut.", "de") == []
+
+
+async def test_enforce_agreement_retries_and_verifies(output_gender_map,
+                                                      fake_ollama):
+    output_gender_map([("Margarita", "f")])
+    # Violating candidate -> corrective call; fake returns a clean text.
+    final, changed = await server.enforce_agreement(
+        "I'd like a margarita.", "en", "de", "gemma3:12b", [],
+        "Ich hätte gerne einen Margarita.")
+    assert changed and final == "Refined translation."
+    revise_turn = fake_ollama["chat"]["messages"][-1]
+    assert "feminine" in revise_turn["content"]  # facts reached the model
+
+
+async def test_enforce_agreement_no_issues_no_call(output_gender_map,
+                                                   fake_ollama):
+    output_gender_map([("Margarita", "f")])
+    final, changed = await server.enforce_agreement(
+        "x", "en", "de", "gemma3:12b", [], "Ich hätte gerne eine Margarita.")
+    assert not changed and "chat" not in fake_ollama  # zero extra latency

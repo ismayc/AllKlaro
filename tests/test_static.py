@@ -17,7 +17,7 @@ def test_every_js_element_lookup_exists_in_html():
 
 
 def test_html_references_existing_static_assets():
-    for ref in re.findall(r'/static/([\w.]+)', HTML):
+    for ref in re.findall(r'/static/([\w.-]+)', HTML):
         assert (STATIC / ref).exists(), f"index.html references missing {ref}"
     # The audio worklet is loaded from JS, not HTML.
     assert "worklet.js" in JS and (STATIC / "worklet.js").exists()
@@ -122,3 +122,10 @@ def test_launchers_auto_reload_server_code():
     root = Path(__file__).parent.parent
     for name in ("Start AllKlaro.command", "Start AllKlaro (Phone).command"):
         assert "--reload" in (root / name).read_text(), f"{name} lost --reload"
+
+
+def test_home_screen_web_app_is_configured():
+    assert 'rel="apple-touch-icon" href="/static/icon-180.png"' in HTML
+    assert (STATIC / "icon-180.png").exists()
+    assert 'apple-mobile-web-app-capable' in HTML   # standalone, no browser UI
+    assert 'apple-mobile-web-app-title" content="AllKlaro"' in HTML

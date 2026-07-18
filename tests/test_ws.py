@@ -486,3 +486,17 @@ def test_typed_garbage_is_ignored(client, stub_transcribe):
         speak(ws)
         msgs = collect_until(ws)
     assert any(m["type"] == "final" for m in msgs)  # still fully functional
+
+
+def test_single_pass_agreement_fix_sends_revision(client, stub_transcribe,
+                                                  fake_ollama, monkeypatch):
+    import server as srv
+    # Deterministic guard: flag the streamed text, accept the retry.
+    monkeypatch.setattr(srv, "agreement_issues",
+                        lambda text, target: (['"How" is wrong.']
+                                              if "How" in text else []))
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        msgs = collect_until(ws, stop_types=("translation_revised", "error"))
+    revised = next(m for m in msgs if m["type"] == "translation_revised")
+    assert revised["texts"] == {"en": "Refined translation."}

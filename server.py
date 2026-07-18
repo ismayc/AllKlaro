@@ -67,6 +67,12 @@ GENDER_LEXICON_PATHS = {
     "de": Path.home() / ".cache" / "allklaro" / "de_noun_genders.tsv",
     "es": Path.home() / ".cache" / "allklaro" / "es_noun_genders.tsv",
 }
+# Output-side maps (target-language noun -> gender) for verifying the
+# model's own output; also built by build_gender_lexicon.py.
+OUTPUT_GENDER_PATHS = {
+    "de": Path.home() / ".cache" / "allklaro" / "de_output_genders.tsv",
+    "es": Path.home() / ".cache" / "allklaro" / "es_output_genders.tsv",
+}
 GENDER_NOTE_LIMIT = 8              # max per-sentence dictionary notes
 
 VAD_BACKEND = os.environ.get("VAD_BACKEND", "silero")  # "silero" | "energy"
@@ -169,6 +175,132 @@ def gender_notes(text: str, target: str) -> str | None:
         return None
     return ("Dictionary genders for nouns in this sentence — authoritative, "
             "overriding any general rule above: " + "; ".join(notes) + ".")
+
+
+_output_caches: dict[str, dict] = {}   # target -> {"mtime", "map"}
+
+
+def load_output_genders(target: str) -> dict[str, tuple[str, str]]:
+    """target-language noun (lowercased) -> (display form, gender m/f/n)."""
+    path = OUTPUT_GENDER_PATHS.get(target)
+    if path is None:
+        return {}
+    cache = _output_caches.setdefault(target, {"mtime": None, "map": {}})
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        cache.update(mtime=None, map={})
+        return {}
+    if mtime != cache["mtime"]:
+        entries = {}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            parts = line.split("\t")
+            if len(parts) == 3 and parts[2] in "mfn":
+                entries[parts[0]] = (parts[1], parts[2])
+        cache.update(mtime=mtime, map=entries)
+    return cache["map"]
+
+
+# ------------------------------------------------------- agreement checking
+#
+# Article forms that are unambiguously SINGULAR, mapped to the genders they
+# can never modify in ANY case. This sidesteps case analysis entirely:
+# "das <feminine>" is wrong in every reading, while ambiguous forms (der =
+# masc nom / fem dat / gen plural; die/den have plural readings) are left
+# unchecked. Conservative by construction — near-zero false positives.
+
+DE_IMPOSSIBLE = {
+    "das": "mf", "dem": "f", "des": "f",
+    "ein": "f", "einen": "fn", "einem": "f", "einer": "mn",
+    "eine": "mn", "eines": "f",
+    "kein": "f", "keinem": "f", "keines": "f",
+    "dieses": "f", "diesem": "f", "jedes": "f", "jedem": "f",
+}
+ES_IMPOSSIBLE = {"el": "f", "un": "f", "la": "m", "una": "m"}
+# After these article forms, mixed adjective declension allows exactly one
+# ending set ("ein schöne Tag" is impossible in every reading).
+DE_ADJ_ENDINGS = {
+    "das": ("e",), "dem": ("en",), "des": ("en",),
+    "ein": ("er", "es"), "eine": ("e",), "einen": ("en",),
+    "einem": ("en",), "einer": ("en",), "eines": ("en",),
+    "kein": ("er", "es"), "keinem": ("en",), "keines": ("en",),
+}
+# Measure/quantity constructions carry their own agreement ("ein bisschen
+# Ruhe" is correct despite Ruhe being feminine) — skip the whole phrase.
+MEASURE_WORDS = {"paar", "bisschen", "wenig", "viel", "etwas", "mehr", "poco"}
+UNDECLINED_ADJS = {"rosa", "lila", "prima", "super", "extra", "klasse",
+                   "orange", "beige"}
+AGREEMENT_EXCEPTIONS = {("ein", "uhr")}   # "um ein Uhr" (telling time)
+GENDER_NAMES = {"m": "masculine", "f": "feminine", "n": "neuter"}
+NOM_ARTICLE = {"de": {"m": "der", "f": "die", "n": "das"},
+               "es": {"m": "el", "f": "la"}}
+
+DE_NP_RE = re.compile(
+    r"\b(?i:(das|dem|des|einen|einem|einer|eines|eine|ein|kein|keinem"
+    r"|keines|dieses|diesem|jedes|jedem))\s+"
+    r"(?:([a-zäöüß-]+)\s+)?(?:([a-zäöüß-]+)\s+)?"
+    r"([A-ZÄÖÜ][A-Za-zÄÖÜäöüß-]*)")
+ES_NP_RE = re.compile(
+    r"\b(?i:(el|la|una|un))\s+(?:([a-záéíóúñü-]+)\s+)?([a-záéíóúñü-]+)")
+
+
+def agreement_issues(text: str, target: str) -> list[str]:
+    """Provably-wrong article/adjective agreement in translated text, as
+    human-readable facts suitable for a corrective prompt. Empty when the
+    output map is missing or nothing matches."""
+    genders = load_output_genders(target)
+    if not genders:
+        return []
+    issues = []
+    if target == "de":
+        for m in DE_NP_RE.finditer(text):
+            art = m.group(1).lower()
+            mids = [w for w in (m.group(2), m.group(3)) if w]
+            noun = m.group(4)
+            if ((art, noun.lower()) in AGREEMENT_EXCEPTIONS
+                    or any(w in MEASURE_WORDS for w in mids)):
+                continue
+            entry = genders.get(noun.lower())
+            if not entry:
+                continue
+            display, g = entry
+            if g in DE_IMPOSSIBLE[art]:
+                issues.append(
+                    f'"{m.group(1)} {noun}" is wrong — {display} is '
+                    f'{GENDER_NAMES[g]}: {NOM_ARTICLE["de"][g]} {display}.')
+            elif (mids and art in DE_ADJ_ENDINGS
+                    and mids[-1] not in UNDECLINED_ADJS
+                    and not any(mids[-1].endswith(e)
+                                for e in DE_ADJ_ENDINGS[art])):
+                endings = " or ".join(f"-{e}" for e in DE_ADJ_ENDINGS[art])
+                issues.append(
+                    f'"{m.group(1)} {mids[-1]} {noun}" is wrong — after '
+                    f'"{art}" the adjective must end in {endings}.')
+    elif target == "es":
+        for m in ES_NP_RE.finditer(text):
+            art = m.group(1).lower()
+            # Spanish adjectives are postnominal, so the word right after
+            # the article is usually the noun — try it first ("la problema
+            # es" must check "problema", not "es").
+            words = [w for w in (m.group(2), m.group(3)) if w]
+            if any(w in MEASURE_WORDS for w in words):
+                continue
+            entry, noun = None, None
+            for noun in words:
+                entry = genders.get(noun.lower())
+                if entry:
+                    break
+            if not entry:
+                continue
+            display, g = entry
+            # "el agua / un arma" are correct for stressed a- feminines.
+            if art in ("el", "un") and g == "f" and noun[:1] in "aáh":
+                continue
+            if g in ES_IMPOSSIBLE[art]:
+                issues.append(
+                    f'"{m.group(1)} {noun}" is wrong — {display} is '
+                    f'{GENDER_NAMES[g]}: {NOM_ARTICLE["es"][g]} {display}.')
+    return issues
 
 
 # ------------------------------------------------------------------ corrections
@@ -751,15 +883,26 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
 
 
 async def translate_once(text: str, source: str, target: str, model: str,
-                         history: list[dict] | None = None) -> str | None:
+                         history: list[dict] | None = None,
+                         revise: tuple[str, str] | None = None) -> str | None:
     """One-shot, non-streaming translation; None on any failure.
 
     Used for the behind-the-scenes refinement pass, which replaces the fast
-    draft wholesale — streaming deltas would rewrite text mid-read.
+    draft wholesale — streaming deltas would rewrite text mid-read. With
+    `revise=(candidate, issues)` the model is instead asked to correct its
+    own earlier translation, with the offending facts spelled out.
     """
+    messages = translation_messages(text, source, target, history)
+    if revise:
+        candidate, issues = revise
+        messages.append({"role": "assistant", "content": candidate})
+        messages.append({"role": "user", "content": (
+            f"Your translation contains grammar errors: {issues} "
+            f"Output ONLY the corrected {LANG_NAMES[target]} translation "
+            f"of that same sentence.")})
     body = {
         "model": model,
-        "messages": translation_messages(text, source, target, history),
+        "messages": messages,
         "stream": False,
         "options": {"temperature": 0.0},
         "keep_alive": "60m",
@@ -778,6 +921,23 @@ async def translate_once(text: str, source: str, target: str, model: str,
         # worth interrupting the conversation for.
         log.warning("refinement failed: %s", exc)
         return None
+
+
+async def enforce_agreement(text: str, source: str, target: str, model: str,
+                            context: list[dict] | None,
+                            candidate: str) -> tuple[str, bool]:
+    """Returns (final text, changed). If the candidate contains impossible
+    article/gender combinations, re-ask once with the facts stated; the
+    retry is used only if it verifies clean — otherwise keep the original."""
+    issues = agreement_issues(candidate, target)
+    if not issues:
+        return candidate, False
+    log.info("agreement retry (%s): %s", target, " ".join(issues))
+    fixed = await translate_once(text, source, target, model, context,
+                                 revise=(candidate, " ".join(issues)))
+    if fixed and fixed != candidate and not agreement_issues(fixed, target):
+        return fixed, True
+    return candidate, False
 
 
 # ------------------------------------------------------------------- directions
@@ -1001,7 +1161,9 @@ async def ws_endpoint(ws: WebSocket):
     async def run_translations(my_uid, text, source, targets, t0, t1):
         # Two-tier translation: stream the fast draft model first so text
         # appears immediately, then re-translate with the main model
-        # behind the scenes and swap in its (better) answer.
+        # behind the scenes and swap in its (better) answer. Either way,
+        # the final text passes the declension guard (enforce_agreement)
+        # and is corrected once when it trips.
         draft = draft_model if draft_model and draft_model != model else None
         context = list(history)
         translations = await asyncio.gather(
@@ -1017,20 +1179,27 @@ async def ws_endpoint(ws: WebSocket):
                 "refining": bool(draft),
                 "transcribe_ms": int((t1 - t0) * 1000),
                 "translate_ms": int((loop.time() - t1) * 1000)})
-            if draft:
-                texts = {}
-                for t, drafted in zip(targets, translations):
+            texts = {}
+            for t, streamed in zip(targets, translations):
+                candidate = streamed
+                if draft:
                     refined = await translate_once(text, source, t,
                                                    model, context)
-                    if refined and refined != drafted:
-                        texts[t] = refined
-                # The refined text becomes the conversation context —
-                # unless the user already corrected this utterance.
-                if targets[0] in texts and my_uid not in corrected_uids:
-                    for h in history:
-                        if h.get("uid") == my_uid:
-                            h["translation"] = texts[targets[0]]
-                # Always sent (even empty): tells the UI refining ended.
+                    if refined:
+                        candidate = refined
+                final, _ = await enforce_agreement(text, source, t, model,
+                                                   context, candidate)
+                if final != streamed:
+                    texts[t] = final
+            # The final text becomes the conversation context — unless
+            # the user already corrected this utterance.
+            if targets[0] in texts and my_uid not in corrected_uids:
+                for h in history:
+                    if h.get("uid") == my_uid:
+                        h["translation"] = texts[targets[0]]
+            # With a draft, always sent (even empty) so the UI can clear
+            # the "refining…" hint; single-pass sends only real changes.
+            if draft or texts:
                 await safe_send(ws, {"type": "translation_revised",
                                      "id": my_uid, "texts": texts})
 
