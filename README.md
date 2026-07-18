@@ -213,7 +213,8 @@ One-time setup in the Shortcuts app (server must be running in phone mode):
    Method **POST**, Request Body **JSON**, one field: `text` =
    **Shortcut Input** (magic variable).
 3. Add **Get Dictionary Value** → key `translation`.
-4. Add **Show Result** (or Show Notification).
+4. Add **Show Content** (called **Show Result** before iOS 26), or Show
+   Notification if you prefer a banner.
 5. In the shortcut's ⓘ settings: enable **Show in Share Sheet** (input
    type: Text), and set "If there's no input" → **Get Clipboard**.
 
