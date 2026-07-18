@@ -166,11 +166,16 @@ The speed and correctness machinery, for the curious:
 - **Declension guard** — with the gender lexicons built, every final
   translation is scanned for article/gender combinations that are wrong in
   *every* case and number ("das Termin", "eine Termin", "la problema") and
-  for impossible adjective endings ("ein schöne Tag"). Violations trigger
-  one corrective re-ask with the dictionary fact stated; the retry is used
-  only if it verifies clean. Ambiguous forms (der/die/den have plural or
-  cross-gender readings) are deliberately unchecked — near-zero false
-  positives by construction.
+  for impossible adjective endings ("ein schöne Tag"). Where German case is
+  *computable* — after case-governing prepositions (mit/für/ohne/…) and in
+  gendered contractions (zum/zur/im/ins) — the guard checks the exact
+  required article: "mit die Frau" → der Frau, "für der Hund" → den Hund,
+  including possessive determiners ("ohne seinem Handy"). Violations
+  trigger one corrective re-ask with the dictionary fact stated; the retry
+  is used only if it verifies clean. Undecidable contexts are deliberately
+  unchecked (two-way prepositions like in/auf depend on motion semantics;
+  subject/object case needs parsing; genitive prepositions accept the
+  colloquial dative) — near-zero false positives by construction.
 
 ## 📖 Gender lexicons (optional)
 

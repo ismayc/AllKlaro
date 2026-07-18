@@ -215,6 +215,9 @@ DE_IMPOSSIBLE = {
     "eine": "mn", "eines": "f",
     "kein": "f", "keinem": "f", "keines": "f",
     "dieses": "f", "diesem": "f", "jedes": "f", "jedem": "f",
+    # Preposition+article contractions encode gender directly.
+    "beim": "f", "vom": "f", "zum": "f", "zur": "mn",
+    "am": "f", "im": "f", "ins": "mf", "ans": "mf",
 }
 ES_IMPOSSIBLE = {"el": "f", "un": "f", "la": "m", "una": "m"}
 # After these article forms, mixed adjective declension allows exactly one
@@ -224,7 +227,76 @@ DE_ADJ_ENDINGS = {
     "ein": ("er", "es"), "eine": ("e",), "einen": ("en",),
     "einem": ("en",), "einer": ("en",), "eines": ("en",),
     "kein": ("er", "es"), "keinem": ("en",), "keines": ("en",),
+    "beim": ("en",), "vom": ("en",), "zum": ("en",), "zur": ("en",),
+    "am": ("en",), "im": ("en",), "ins": ("e",), "ans": ("e",),
 }
+
+# ------------------------------------------------------ prepositional case
+#
+# These prepositions govern case unconditionally, so case IS computable
+# here — no parsing needed. Two-way prepositions (in/an/auf/über/unter/
+# neben/vor/hinter/zwischen) are deliberately absent: their case depends
+# on motion semantics ("in die Schule gehen" vs "in der Schule sein"),
+# which no regex can see. Genitive prepositions also accept the colloquial
+# dative that dominates spoken German.
+
+DE_PREP_CASE = {
+    "aus": {"dat"}, "bei": {"dat"}, "mit": {"dat"}, "nach": {"dat"},
+    "seit": {"dat"}, "von": {"dat"}, "zu": {"dat"}, "gegenüber": {"dat"},
+    "durch": {"acc"}, "für": {"acc"}, "gegen": {"acc"}, "ohne": {"acc"},
+    "um": {"acc"},
+    "während": {"gen", "dat"}, "wegen": {"gen", "dat"},
+    "trotz": {"gen", "dat"}, "anstatt": {"gen", "dat"}, "statt": {"gen", "dat"},
+}
+DE_DEF_ART = {
+    "nom": {"m": "der", "f": "die", "n": "das"},
+    "acc": {"m": "den", "f": "die", "n": "das"},
+    "dat": {"m": "dem", "f": "der", "n": "dem"},
+    "gen": {"m": "des", "f": "der", "n": "des"},
+}
+DE_EIN_ENDINGS = {
+    "nom": {"m": "", "f": "e", "n": ""},
+    "acc": {"m": "en", "f": "e", "n": ""},
+    "dat": {"m": "em", "f": "er", "n": "em"},
+    "gen": {"m": "es", "f": "er", "n": "es"},
+}
+DE_DEF_FORMS = {"der", "die", "das", "den", "dem", "des"}
+DE_POSS_RE = re.compile(r"^(ein|kein|mein|dein|sein|ihr|unser|euer|eur)"
+                        r"(e|en|em|er|es)?$")
+# Bare "sein"/"ihr" are verb/pronoun homonyms ("mit ihr Deutsch üben" =
+# with her, not her German) — only their inflected forms are safely
+# possessive determiners.
+DE_BARE_AMBIGUOUS = {"sein", "ihr"}
+
+DE_PREP_NP_RE = re.compile(
+    r"\b(?i:(gegenüber|während|anstatt|wegen|trotz|statt|durch|gegen|nach"
+    r"|ohne|seit|aus|bei|mit|von|für|um|zu))\s+"
+    r"([a-zäöüß]+)\s+(?:([a-zäöüß-]+)\s+)?(?:([a-zäöüß-]+)\s+)?"
+    r"([A-ZÄÖÜ][A-Za-zÄÖÜäöüß-]*)")
+
+
+def _prep_case_issue(prep, det, noun, display, g):
+    """The wrong-determiner complaint for a case-governing preposition, or
+    None when the determiner fits (or isn't one we can classify)."""
+    cases = DE_PREP_CASE[prep.lower()]
+    detl = det.lower()
+    if detl in DE_DEF_FORMS:
+        allowed = {DE_DEF_ART[c][g] for c in cases}
+        if detl in allowed:
+            return None
+        want = " or ".join(f'"{a}"' for a in sorted(allowed))
+    else:
+        m = DE_POSS_RE.match(detl)
+        if not m or detl in DE_BARE_AMBIGUOUS:
+            return None                # pronoun/quantifier/unknown — skip
+        endings = {DE_EIN_ENDINGS[c][g] for c in cases}
+        if (m.group(2) or "") in endings:
+            return None
+        stem = "euer" if m.group(1) == "eur" else m.group(1)
+        want = " or ".join(f'"{stem + e}"' for e in sorted(endings))
+    return (f'"{prep} {det} {noun}" is wrong — "{prep.lower()}" takes the '
+            f'{"/".join(sorted(cases))} case and {display} is '
+            f'{GENDER_NAMES[g]}, so it must be {want} {noun}.')
 # Measure/quantity constructions carry their own agreement ("ein bisschen
 # Ruhe" is correct despite Ruhe being feminine) — skip the whole phrase.
 MEASURE_WORDS = {"paar", "bisschen", "wenig", "viel", "etwas", "mehr", "poco"}
@@ -237,7 +309,8 @@ NOM_ARTICLE = {"de": {"m": "der", "f": "die", "n": "das"},
 
 DE_NP_RE = re.compile(
     r"\b(?i:(das|dem|des|einen|einem|einer|eines|eine|ein|kein|keinem"
-    r"|keines|dieses|diesem|jedes|jedem))\s+"
+    r"|keines|dieses|diesem|jedes|jedem"
+    r"|beim|vom|zum|zur|am|im|ins|ans))\s+"
     r"(?:([a-zäöüß-]+)\s+)?(?:([a-zäöüß-]+)\s+)?"
     r"([A-ZÄÖÜ][A-Za-zÄÖÜäöüß-]*)")
 ES_NP_RE = re.compile(
@@ -253,7 +326,27 @@ def agreement_issues(text: str, target: str) -> list[str]:
         return []
     issues = []
     if target == "de":
+        # Pass 1: case is known — a preposition governs it unconditionally.
+        flagged_spans = []
+        for m in DE_PREP_NP_RE.finditer(text):
+            prep, det, noun = m.group(1), m.group(2), m.group(5)
+            mids = [w for w in (m.group(3), m.group(4)) if w]
+            if ((det.lower(), noun.lower()) in AGREEMENT_EXCEPTIONS
+                    or any(w in MEASURE_WORDS for w in mids)
+                    or det.lower() in MEASURE_WORDS):
+                continue
+            entry = genders.get(noun.lower())
+            if not entry:
+                continue
+            issue = _prep_case_issue(prep, det, noun, *entry)
+            if issue:
+                issues.append(issue)
+                flagged_spans.append((m.start(), m.end()))
+        # Pass 2: case unknown — flag only combinations impossible in
+        # every case (skipping NPs pass 1 already complained about).
         for m in DE_NP_RE.finditer(text):
+            if any(s <= m.start() < e for s, e in flagged_spans):
+                continue
             art = m.group(1).lower()
             mids = [w for w in (m.group(2), m.group(3)) if w]
             noun = m.group(4)

@@ -282,3 +282,60 @@ async def test_enforce_agreement_no_issues_no_call(output_gender_map,
     final, changed = await server.enforce_agreement(
         "x", "en", "de", "gemma3:12b", [], "Ich hätte gerne eine Margarita.")
     assert not changed and "chat" not in fake_ollama  # zero extra latency
+
+
+# ------------------------------------------------------- prepositional case
+
+
+def test_preposition_determines_case(output_gender_map):
+    output_gender_map([("Frau", "f"), ("Termin", "m"), ("Handy", "n")])
+    # Wrong case after a case-governing preposition:
+    for bad in ("Ich tanze mit die Frau.",        # mit -> dative: der Frau
+                "Ich tanze mit dem Frau.",
+                "Das Geschenk ist für der Frau.",  # für -> acc: die Frau
+                "Wir kommen ohne dem Termin aus.",
+                "Ich rufe von das Handy an.",):
+        assert server.agreement_issues(bad, "de"), bad
+    # The message names the preposition's case and the required article.
+    (issue,) = server.agreement_issues("Ich tanze mit die Frau.", "de")
+    assert "dat" in issue and '"der" Frau' in issue
+
+
+def test_preposition_correct_cases_accepted(output_gender_map):
+    output_gender_map([("Frau", "f"), ("Termin", "m"), ("Handy", "n"),
+                       ("Uhr", "f"), ("Deutsch", "n")])
+    for ok in ("Ich tanze mit der Frau.",
+                "Das Geschenk ist für die Frau.",
+                "Wir reden nach dem Termin.",
+                "Ich komme ohne das Handy.",
+                "Wegen des Termins bleiben wir hier.",
+                "Wegen dem Termin bleiben wir hier.",   # colloquial dative
+                "Wir treffen uns um ein Uhr.",          # time idiom
+                "Ich möchte mit ihr Deutsch üben.",     # ihr = pronoun here
+                ):
+        assert server.agreement_issues(ok, "de") == [], ok
+
+
+def test_preposition_checks_possessive_determiners(output_gender_map):
+    output_gender_map([("Handy", "n"), ("Frau", "f")])
+    assert server.agreement_issues("Ich rufe mit mein Handy an.", "de")
+    assert server.agreement_issues("Er kommt ohne seinem Handy.", "de")
+    for ok in ("Ich rufe mit meinem Handy an.",
+               "Er kommt ohne sein Handy.",
+               "Sie tanzt mit ihrer Frau."):
+        assert server.agreement_issues(ok, "de") == [], ok
+
+
+def test_contractions_encode_gender(output_gender_map):
+    output_gender_map([("Frau", "f"), ("Termin", "m"), ("Kino", "n")])
+    assert server.agreement_issues("Wir gehen zur Termin.", "de")
+    assert server.agreement_issues("Ich bin beim Frau.", "de")
+    for ok in ("Wir gehen ins Kino.", "Ich bin beim Termin.",
+               "Sie geht zur Frau.", "Wir sind im Kino."):
+        assert server.agreement_issues(ok, "de") == [], ok
+
+
+def test_prep_and_impossible_passes_do_not_double_flag(output_gender_map):
+    output_gender_map([("Frau", "f")])
+    # "mit das Frau" violates both passes; one clear message is enough.
+    assert len(server.agreement_issues("Ich rede mit das Frau.", "de")) == 1
