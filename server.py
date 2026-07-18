@@ -1226,6 +1226,14 @@ FLAVOR_NOTES = {
         "gude as a greeting, babbeln (reden), -sch for -ch (isch, disch). "
         "Dialect flavor, not parody — keep it readable and never change "
         "the meaning."),
+    "worms": (
+        "Write the German translation in Wormser Platt, the Rhine-Hessian "
+        "dialect of Worms (Rhine Franconian, close to Palatine): isch "
+        "(ich), net (nicht), aach (auch), ebbes (etwas), mer (wir), alla "
+        "(well then / los), gugge (schauen), Woi (Wein), Grumbeere "
+        "(Kartoffeln), -scht for -st (bischt, hoscht), dropped final -n "
+        "on verbs (mer mache, se gehe), -che diminutives. Dialect flavor, "
+        "not parody — keep it readable and never change the meaning."),
 }
 
 

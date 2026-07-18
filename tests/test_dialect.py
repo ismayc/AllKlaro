@@ -48,3 +48,14 @@ def test_hints_are_deduplicated_and_capped():
     note = server.dialect_notes(text, "de")
     assert note.count('"ick"') == 1
     assert note.count("=") <= 10
+
+
+def test_wormser_platt_markers_are_recognized():
+    # Rheinhessisch/Wormser forms from WhatsApp messages get the same
+    # intended-meaning hints as spoken dialect.
+    note = server.dialect_notes(
+        "Alla, hoscht du die Grumbeere un de Woi geholt?", "de")
+    assert '"alla"' in note
+    assert '"hoscht" = hast' in note
+    assert '"grumbeere" = Kartoffeln (potatoes)' in note
+    assert '"woi" = Wein (wine)' in note

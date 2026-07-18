@@ -283,3 +283,14 @@ async def test_real_api_translate_endpoint():
         {"text": "Kannste morjen ooch bei uns vorbeikommen, dit wär jut."})
     assert r["source"] == "de" and r["target"] == "en"
     assert "tomorrow" in r["translation"].lower()
+
+
+async def test_real_ollama_worms_flavor_produces_dialect():
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    text = await server.stream_translation(
+        FakeWS(), 1, "Are you coming to the wine festival tomorrow?",
+        "en", "de", server.DEFAULT_MODEL, flavor="worms")
+    assert any(m in text.lower() for m in ("woi", "morje", "kummst", "aach",
+                                           " net", "bischt", "hoscht", "alla",
+                                           "gell"))

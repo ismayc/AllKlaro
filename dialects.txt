@@ -55,6 +55,22 @@ Stöffche = Apfelwein (apple cider)
 Handkäs = Handkäse (sour-milk cheese)
 Bembel = Apfelwein-Krug (cider jug)
 
+# --- Rheinhessisch / Wormser Platt (Rhine Franconian; isch/aach/ebbes
+# --- shared with the Hessisch entries above)
+alla = also / los geht's (well then / come on)
+gugge = gucken (to look)
+guggemol = guck mal (look)
+Grumbeere = Kartoffeln (potatoes)
+Grumbeer = Kartoffel (potato)
+Woi = Wein (wine)
+bischt = bist
+bischd = bist
+hoscht = hast
+hoschd = hast
+dabber = schnell (quick)
+Worschd = Wurst (sausage)
+Dorschd = Durst (thirst)
+
 # --- Ambiguous: standard words that are often mis-heard dialect
 ? des = das
 ? nett = net (nicht)

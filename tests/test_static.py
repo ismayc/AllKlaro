@@ -159,6 +159,7 @@ def test_draft_model_control_is_wired():
 def test_german_flavor_and_paste_are_wired():
     assert 'id="deFlavor"' in HTML
     assert 'value="berlin"' in HTML and 'value="hessian"' in HTML
+    assert 'value="worms"' in HTML
     assert re.search(r"de_flavor:\s*flavorSel\.value", JS)  # reaches the server
     assert re.search(r"deFlavor:\s*flavorSel\.value", JS)   # persisted setting
     # Paste-and-translate: one tap from a WhatsApp copy to a translation,

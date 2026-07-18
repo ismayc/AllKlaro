@@ -252,7 +252,8 @@ def test_detect_language_tie_goes_to_first_candidate():
 
 
 def test_flavor_note_added_for_german_target():
-    for flavor, marker in (("berlin", "ick (ich)"), ("hessian", "isch (ich)")):
+    for flavor, marker in (("berlin", "ick (ich)"), ("hessian", "isch (ich)"),
+                           ("worms", "Grumbeere")):
         system = translation_messages("Hello", "en", "de",
                                       flavor=flavor)[0]["content"]
         assert marker in system

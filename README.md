@@ -45,7 +45,7 @@ by default) that sees the conversation's recent context.
 | 🎯 **Focus mode** | Keep the newest text mid-screen ("Center latest") instead of at the bottom edge |
 | 🔎 **Big-text view** | Tap a card's background and the translation fills the screen — made for showing the person across the table |
 | 🗺️ **Dialect-aware** | Berlinerisch/Hessisch markers ("dit", "ebbes", "gell") are detected and the likely intended forms — including Whisper mis-hearings like "nett" for "net" (nicht) — are hinted to the translator; extend via `dialects.txt` |
-| 🎭 **German style** | Optional dialect output: translations into German come out in Berlinerisch or Hessisch — reply to your Berlin friends the way they write |
+| 🎭 **German style** | Optional dialect output: translations into German come out in Berlinerisch, Hessisch, or Wormser Platt — reply to your friends the way they write |
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
 | ⌨️ **Type to translate** | A text box under the feed — type instead of speaking, mic not required; same context, corrections, and draft+refine pipeline |
 | 📖 **Gender lexicons** | Optional: compile dict.cc / FreeDict exports into loanword-gender dictionaries — "caipirinha" gets der/die/das and "problema" gets el/la injected |
@@ -152,9 +152,10 @@ conversation gets the full screen):
   clipboard and translates it in one tap — made for text copied out of
   WhatsApp; dialect German in the paste gets the same `dialects.txt` hints
   as speech.
-- **German style** — Standard, Berlinerisch, or Hessisch: translations
-  *into* German come out in that dialect (the declension guard steps aside,
-  since "dit Haus" is not a mistake there).
+- **German style** — Standard, Berlinerisch, Hessisch, or Wormser Platt
+  (Rheinhessisch): translations *into* German come out in that dialect
+  (the declension guard steps aside, since "dit Haus" is not a mistake
+  there).
 - **Speak** voices: German `de-DE`, English `en-US`, Spanish `es-MX`
   (Latin American).
 - **About** — links to the website and repo.
@@ -200,7 +201,7 @@ a WhatsApp message can be translated without switching apps:
 ```json
 {"text": "Kannste morjen ooch vorbeikommen?",
  "mode": "auto-de-en",          // optional, this is the default
- "de_flavor": "berlin"}         // optional: berlin | hessian
+ "de_flavor": "berlin"}         // optional: berlin | hessian | worms
 ```
 
 returns `{"source": "de", "target": "en", "translation": "...",
