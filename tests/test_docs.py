@@ -26,7 +26,7 @@ def test_language_toggle_covers_de_and_es():
         missing = {k for k in keys if not re.search(rf"\b{k}:", block)}
         assert not missing, f"{lang} translation missing keys: {missing}"
     # Deep-linkable for sharing (?lang=de) and persisted across visits.
-    assert 'searchParams.get("lang")' in DOCS
+    assert "URLSearchParams" in DOCS and '.get("lang")' in DOCS
     assert "localStorage" in DOCS
     assert "documentElement.lang" in DOCS  # <html lang> follows the toggle
     # Spot-check the translations are actually there.
