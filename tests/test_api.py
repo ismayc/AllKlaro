@@ -230,6 +230,12 @@ def test_api_translate_reports_ollama_down(dead_ollama):
     assert "available" in r["error"]
 
 
+def test_api_translate_display_field_is_captioned(client, fake_ollama):
+    r = client.post("/api/translate",
+                    json={"text": "Wie geht es dir und der Familie?"}).json()
+    assert r["display"] == "🗣️ AllKlaro (DE → EN):\nRefined translation."
+
+
 def test_api_translate_get_variant_for_browser_smoke_tests(client, fake_ollama):
     r = client.get("/api/translate",
                    params={"text": "Wie geht es dir und der Familie?"}).json()

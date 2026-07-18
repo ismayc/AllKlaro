@@ -1095,9 +1095,12 @@ async def translate_api(payload: dict):
             out, _ = await enforce_agreement(text, source, target, model,
                                              None, out)
         translations[target] = out
+    # "display" is a ready-captioned version for Shortcuts to show as-is.
+    caption = f"🗣️ AllKlaro ({source.upper()} → {targets[0].upper()}):"
     return {"source": source, "target": targets[0],
             "translation": translations[targets[0]],
-            "translations": translations}
+            "translations": translations,
+            "display": f"{caption}\n{translations[targets[0]]}"}
 
 
 @app.get("/api/translate")

@@ -205,7 +205,9 @@ a WhatsApp message can be translated without switching apps:
 ```
 
 returns `{"source": "de", "target": "en", "translation": "...",
-"translations": {"en": "..."}}`.
+"translations": {"en": "..."}, "display": "🗣️ AllKlaro (DE → EN):\n..."}`
+— `display` is the translation with a ready-made caption, for Shortcuts
+that want a labeled result.
 
 **Step 0 — prove the server is reachable** (do this before touching
 Shortcuts; it isolates the two things that can fail):
@@ -226,7 +228,7 @@ Shortcuts; it isolates the two things that can fail):
 **Build the shortcut** (Shortcuts app → **+**):
 
 1. Tap the name at the top → **Rename** → `Translate with AllKlaro`.
-2. Search and add **Get Contents of URL**. Tap the blue `URL` placeholder
+2. Search Actions and add **Get Contents of URL**. Tap the blue `URL` placeholder
    and type the full URL: `https://<mac-ip>:8710/api/translate`.
 3. Tap the action's **expand arrow (▸ / "Show More")**:
    - **Method** → **POST** (it defaults to GET — a GET here with no
@@ -236,10 +238,11 @@ Shortcuts; it isolates the two things that can fail):
      box, then in the bar above the keyboard tap **Shortcut Input** — it
      must appear as a blue pill, not typed words. (No bar? Tap the wand /
      "Select Variable" icon.)
-4. Add **Get Dictionary Value**. It should read *Get Value for key in
-   Contents of URL*; type `translation` as the key. If "in" doesn't say
+4. In Search Actions, add **Get Dictionary Value**. It should read *Get Value for key in
+   Contents of URL*; type `translation` as the key — or `display` for the
+   captioned "🗣️ AllKlaro (DE → EN):" version. If "in" doesn't say
    **Contents of URL**, tap it and select that variable.
-5. Add **Show Content** (named **Show Result** before iOS 26). It should
+5. In Search Actions, add **Show Content** (named **Show Result** before iOS 26). It should
    show **Dictionary Value**; wire the variable if it's empty.
 6. Tap **ⓘ** (bottom of the editor) → enable **Show in Share Sheet**.
    Closing that sheet reveals a **"Receive … input from"** header at the
