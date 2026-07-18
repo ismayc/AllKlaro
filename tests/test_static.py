@@ -201,7 +201,8 @@ def test_type_input_does_not_trigger_ios_auto_zoom():
 
 def test_launchers_auto_reload_server_code():
     root = Path(__file__).parent.parent
-    for name in ("Start AllKlaro.command", "Start AllKlaro (iPhone).command"):
+    for name in ("Start AllKlaro.command", "Start AllKlaro (iPhone).command",
+                 "Start AllKlaro (Anywhere).command"):
         assert "--reload" in (root / name).read_text(), f"{name} lost --reload"
 
 

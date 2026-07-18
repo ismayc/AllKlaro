@@ -285,6 +285,32 @@ does offer Share (Safari, Mail), the share-sheet route works directly.
 - **Local Network denied** → Settings → Privacy & Security → Local
   Network → **Shortcuts** must be ON.
 
+## 🌍 Anywhere mode (Tailscale)
+
+Phone mode works on your Wi-Fi; **anywhere mode** works from any network
+— securely. AllKlaro has no login, so it must never be exposed to the
+public internet (no port forwarding!). Instead, [Tailscale](https://tailscale.com)
+(free for personal use) puts your Mac and phone on a private encrypted
+WireGuard network that follows you around:
+
+1. **Mac:** `brew install --cask tailscale-app`, open the Tailscale app,
+   sign in. **iPhone:** install the Tailscale app from the App Store,
+   sign in to the same account, allow the VPN profile.
+2. Run **`Start AllKlaro (Anywhere).command`** — it fronts the server
+   with Tailscale's HTTPS proxy (a real certificate: no `/cert` install,
+   no warnings) and prints your Mac's stable private URL, e.g.
+   `https://<your-mac>.<tailnet>.ts.net`. If Tailscale asks to enable
+   HTTPS certificates for your tailnet, follow the link it prints (a
+   one-time admin-console toggle).
+3. Point the iOS Shortcut at `https://<that-name>/api/translate`. The
+   name never changes — it works at home and away, and survives router
+   IP reshuffles that break the LAN phone mode URL.
+
+The MacBook must be on and awake while you're away: Settings → Battery →
+prevent automatic sleeping (or `caffeinate -s`), and expect Ollama to
+spin the fans when requests arrive. The Tailscale VPN toggle on the
+phone must be on — that's the tunnel.
+
 ## ⚙️ Under the hood
 
 The speed and correctness machinery, for the curious:
