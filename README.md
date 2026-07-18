@@ -219,9 +219,15 @@ One-time setup in the Shortcuts app (server must be running in phone mode):
 5. In the shortcut's ⓘ settings: enable **Show in Share Sheet** (input
    type: Text), and set "If there's no input" → **Get Clipboard**.
 
-Then: select text in WhatsApp → Share → **Translate with AllKlaro**, or
-copy it and run the shortcut from the home screen — the clipboard fallback
-kicks in.
+**WhatsApp flow** (WhatsApp offers Copy but no Share on message text):
+long-press the message → **Copy** (press-and-hold the text itself first to
+copy only part of it), then launch the shortcut — the clipboard fallback
+kicks in. Fast launchers: **Back Tap** (Settings → Accessibility → Touch →
+Back Tap → Double Tap → the shortcut: copy, tap the back of the phone,
+done), the Action Button, a Home Screen icon, or a Shortcuts widget.
+Silence the repeated paste prompt under Settings → Apps → Shortcuts →
+Paste from Other Apps → Allow. In apps whose text selection does offer
+Share (Safari, Mail), the share-sheet route works directly.
 
 ## ⚙️ Under the hood
 
