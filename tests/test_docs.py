@@ -9,9 +9,28 @@ README = (ROOT / "README.md").read_text()
 
 
 def test_docs_page_is_self_contained():
-    # GitHub Pages serves docs/ alone — no reaching into /static or external JS.
+    # GitHub Pages serves docs/ alone — no reaching into /static, and any
+    # script must be inline (no external sources).
     assert "/static/" not in DOCS
-    assert "<script" not in DOCS
+    assert not re.search(r"<script[^>]*\bsrc\s*=", DOCS)
+
+
+def test_language_toggle_covers_de_and_es():
+    # Toggle buttons + a translation entry for every data-i18n key.
+    for lang in ("en", "de", "es"):
+        assert f'data-lang="{lang}"' in DOCS
+    keys = set(re.findall(r'data-i18n="([^"]+)"', DOCS))
+    assert len(keys) > 30, "translatable regions vanished?"
+    for lang in ("de", "es"):
+        block = re.search(lang + r":\s*\{(.*?)\n    \},", DOCS, re.S).group(1)
+        missing = {k for k in keys if not re.search(rf"\b{k}:", block)}
+        assert not missing, f"{lang} translation missing keys: {missing}"
+    # Deep-linkable for sharing (?lang=de) and persisted across visits.
+    assert 'searchParams.get("lang")' in DOCS
+    assert "localStorage" in DOCS
+    assert "documentElement.lang" in DOCS  # <html lang> follows the toggle
+    # Spot-check the translations are actually there.
+    assert "Schnellstart" in DOCS and "Inicio rápido" in DOCS
 
 
 def test_docs_mentions_all_three_languages():

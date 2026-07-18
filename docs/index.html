@@ -37,6 +37,23 @@
     .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
     a { color: var(--en); }
 
+    /* ---------------------------------------------------- language toggle */
+    .lang-toggle { position: fixed; top: 14px; right: 14px; display: flex;
+      gap: 6px; z-index: 5; }
+    .lang-toggle button {
+      font-size: 12px; font-weight: 700; letter-spacing: .06em;
+      padding: 5px 11px; border-radius: 20px; cursor: pointer;
+      background: var(--panel); color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .lang-toggle button:hover { border-color: var(--muted); }
+    .lang-toggle button.active[data-lang="en"] {
+      color: var(--en); border-color: var(--en); background: rgba(62,207,142,.15); }
+    .lang-toggle button.active[data-lang="de"] {
+      color: var(--de); border-color: var(--de); background: rgba(79,163,255,.15); }
+    .lang-toggle button.active[data-lang="es"] {
+      color: var(--es); border-color: var(--es); background: rgba(245,166,35,.15); }
+
     /* ------------------------------------------------------------- hero */
     .hero { text-align: center; padding: 72px 0 48px; }
     .logo {
@@ -118,43 +135,49 @@
       color: var(--muted); font-size: 14px; text-align: center;
     }
     @media (max-width: 640px) {
-      .hero { padding: 48px 0 36px; }
+      .hero { padding: 60px 0 36px; }
       section { padding: 40px 0; }
     }
   </style>
 </head>
 <body>
 
+  <nav class="lang-toggle" aria-label="Page language">
+    <button data-lang="en" class="active">EN</button>
+    <button data-lang="de">DE</button>
+    <button data-lang="es">ES</button>
+  </nav>
+
   <div class="wrap hero">
     <div class="logo">🗣️ AllKlaro</div>
-    <div class="tagline">Live, fully-local speech translation<br />between German, English, and Spanish.</div>
-    <p class="word-play"><b class="en">All</b> (EN) + <b class="de">Klaro!</b> (DE) +
+    <div class="tagline" data-i18n="tagline">Live, fully-local speech translation<br />between German, English, and Spanish.</div>
+    <p class="word-play" data-i18n="wordplay"><b class="en">All</b> (EN) + <b class="de">Klaro!</b> (DE) +
       <b class="es">claro</b> (ES) — everything understood, in all three languages.</p>
-    <p class="sub">Someone speaks German or Spanish on your call — two seconds later the
+    <p class="sub" data-i18n="sub">Someone speaks German or Spanish on your call — two seconds later the
       English translation is streaming onto your screen, color-coded by speaker and
       language. You answer in English; they get German or Spanish back.
       Nothing ever leaves your machine.</p>
     <div class="cta-row">
-      <a class="btn primary" href="#quickstart">Get started</a>
-      <a class="btn ghost" href="https://github.com/ismayc/AllKlaro">View on GitHub</a>
+      <a class="btn primary" href="#quickstart" data-i18n="cta_start">Get started</a>
+      <a class="btn ghost" href="https://github.com/ismayc/AllKlaro" data-i18n="cta_github">View on GitHub</a>
     </div>
     <div class="chips">
-      <span class="chip">🔒 <b class="en">100% local</b> — no cloud, no accounts</span>
+      <span class="chip" data-i18n="chip_local">🔒 <b class="en">100% local</b> — no cloud, no accounts</span>
       <span class="chip">🍎 Apple Silicon GPU</span>
-      <span class="chip">🧪 100+ tests</span>
+      <span class="chip" data-i18n="chip_tests">🧪 100+ tests</span>
     </div>
 
     <div class="demo" aria-hidden="true">
       <div class="card de">
-        <div class="orig"><span class="speaker">Them</span><span class="lang de">DE</span>Könnten wir den Termin auf nächste Woche verschieben?</div>
+        <div class="orig"><span class="speaker" data-i18n="them">Them</span><span class="lang de">DE</span>Könnten wir den Termin auf nächste Woche verschieben?</div>
         <div class="trans"><span class="lang en">EN</span>Could we move the appointment to next week?</div>
       </div>
       <div class="card en">
-        <div class="orig"><span class="speaker">You</span><span class="lang en">EN</span>Sure — does Tuesday morning work for you?</div>
+        <div class="orig"><span class="speaker" data-i18n="you">You</span><span class="lang en">EN</span>Sure — does Tuesday morning work for you?</div>
         <div class="trans"><span class="lang de">DE</span>Klar — passt Dienstagvormittag für Sie?</div>
       </div>
       <div class="card es">
-        <div class="orig"><span class="speaker">Them</span><span class="lang es">ES</span>Perfecto, nos vemos el martes entonces.</div>
+        <div class="orig"><span class="speaker" data-i18n="them2">Them</span><span class="lang es">ES</span>Perfecto, nos vemos el martes entonces.</div>
         <div class="trans"><span class="lang en">EN</span>Perfect, see you on Tuesday then<span class="cursor">▍</span></div>
       </div>
     </div>
@@ -164,57 +187,61 @@
 
   <section id="features">
     <div class="wrap">
-      <h2>✨ What it does</h2>
+      <h2 data-i18n="features_h2">✨ What it does</h2>
       <div class="grid">
-        <div class="feature"><h3>🔄 Auto direction</h3>
-          <p>Detects each utterance's language and translates to the other —
+        <div class="feature"><h3 data-i18n="f_auto_h">🔄 Auto direction</h3>
+          <p data-i18n="f_auto_p">Detects each utterance's language and translates to the other —
           DE↔EN, ES↔EN, ES↔DE — or force a direction, including
           German&nbsp;→&nbsp;English&nbsp;+&nbsp;Spanish at once.</p></div>
-        <div class="feature"><h3>📞 Call mode</h3>
-          <p>Captures your mic and the meeting as separate <em>You / Them</em>
+        <div class="feature"><h3 data-i18n="f_call_h">📞 Call mode</h3>
+          <p data-i18n="f_call_p">Captures your mic and the meeting as separate <em>You / Them</em>
           channels via BlackHole; echoes picked up twice are dropped automatically.</p></div>
-        <div class="feature"><h3>🗣️ Tap to hear</h3>
-          <p>Tap any phrase to hear it spoken in its own language — great for
+        <div class="feature"><h3 data-i18n="f_tap_h">🗣️ Tap to hear</h3>
+          <p data-i18n="f_tap_p">Tap any phrase to hear it spoken in its own language — great for
           pronunciation practice.</p></div>
-        <div class="feature"><h3>🧠 Context-aware</h3>
-          <p>Translations see the recent conversation, so pronouns and topics
+        <div class="feature"><h3 data-i18n="f_ctx_h">🧠 Context-aware</h3>
+          <p data-i18n="f_ctx_p">Translations see the recent conversation, so pronouns and topics
           resolve correctly.</p></div>
-        <div class="feature"><h3>🧩 German-aware pausing</h3>
-          <p>Verb-final sentences chopped by a short pause are re-joined and
+        <div class="feature"><h3 data-i18n="f_pause_h">🧩 German-aware pausing</h3>
+          <p data-i18n="f_pause_p">Verb-final sentences chopped by a short pause are re-joined and
           re-translated whole.</p></div>
-        <div class="feature"><h3>⚡ Draft + refine</h3>
-          <p>A small model streams a translation instantly; the main model
+        <div class="feature"><h3 data-i18n="f_draft_h">⚡ Draft + refine</h3>
+          <p data-i18n="f_draft_p">A small model streams a translation instantly; the main model
           re-translates behind the scenes and swaps in its better answer.</p></div>
-        <div class="feature"><h3>✏️ Correctable</h3>
-          <p>Edit any translation in place — corrections are saved locally and
+        <div class="feature"><h3 data-i18n="f_correct_h">✏️ Correctable</h3>
+          <p data-i18n="f_correct_p">Edit any translation in place — corrections are saved locally and
           steer future translations of similar sentences.</p></div>
-        <div class="feature"><h3>📖 Learner tools</h3>
-          <p>One-click summary with a vocabulary list, and Markdown export for
+        <div class="feature"><h3 data-i18n="f_learn_h">📖 Learner tools</h3>
+          <p data-i18n="f_learn_p">One-click summary with a vocabulary list, and Markdown export for
           later review.</p></div>
-        <div class="feature"><h3>📱 Phone mode</h3>
-          <p>Serve over LAN HTTPS and use your iPhone's mic for in-person
-          conversations.</p></div>
-        <div class="feature"><h3>🎯 Focus mode</h3>
-          <p>Keep the newest text mid-screen ("Center latest") instead of at the
-          bottom edge.</p></div>
-        <div class="feature"><h3>📚 Glossary</h3>
-          <p>Pin names and terms in <code>glossary.txt</code> — biases both
-          recognition and translation.</p></div>
-        <div class="feature"><h3>⌨️ Type to translate</h3>
-          <p>A text box under the feed — type instead of speaking; same
+        <div class="feature"><h3 data-i18n="f_type_h">⌨️ Type to translate</h3>
+          <p data-i18n="f_type_p">A text box under the feed — type instead of speaking; same
           context and refinement pipeline, mic not required.</p></div>
-        <div class="feature"><h3>📖 Gender lexicons</h3>
-          <p>Compile dict.cc / FreeDict exports into gender dictionaries —
+        <div class="feature"><h3 data-i18n="f_gender_h">📖 Gender lexicons</h3>
+          <p data-i18n="f_gender_p">Compile dict.cc / FreeDict exports into gender dictionaries —
           "caipirinha" gets der/die/das and "problema" gets el/la injected
           automatically.</p></div>
+        <div class="feature"><h3 data-i18n="f_dialect_h">🗺️ Dialect-aware</h3>
+          <p data-i18n="f_dialect_p">Berlin and Hessian forms ("dit", "ebbes", "gell") are detected
+          and hinted to the translator — including typical speech-recognition
+          mishearings of them.</p></div>
+        <div class="feature"><h3 data-i18n="f_phone_h">📱 Phone mode</h3>
+          <p data-i18n="f_phone_p">Serve over LAN HTTPS and use your iPhone's mic for in-person
+          conversations.</p></div>
+        <div class="feature"><h3 data-i18n="f_focus_h">🎯 Focus mode</h3>
+          <p data-i18n="f_focus_p">Keep the newest text mid-screen ("Center latest") instead of at the
+          bottom edge.</p></div>
+        <div class="feature"><h3 data-i18n="f_gloss_h">📚 Glossary</h3>
+          <p data-i18n="f_gloss_p">Pin names and terms in <code>glossary.txt</code> — biases both
+          recognition and translation.</p></div>
       </div>
     </div>
   </section>
 
   <section id="quickstart">
     <div class="wrap">
-      <h2>🚀 Quick start</h2>
-      <p class="note" style="margin: 0 0 16px">You need an Apple Silicon Mac (M1+),
+      <h2 data-i18n="qs_h2">🚀 Quick start</h2>
+      <p class="note" style="margin: 0 0 16px" data-i18n="qs_req">You need an Apple Silicon Mac (M1+),
         16&nbsp;GB+ RAM recommended, ~12&nbsp;GB free disk, and
         <a href="https://brew.sh">Homebrew</a>.</p>
       <pre><span class="c"># 1. Install uv (Python manager) and Ollama (runs the translation model)</span>
@@ -231,7 +258,7 @@ uv sync
 
 <span class="c"># 4. Run it, then open http://127.0.0.1:8710</span>
 uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
-      <p class="note">Or skip step 4 and double-click <strong>Start AllKlaro.command</strong>
+      <p class="note" data-i18n="qs_note">Or skip step 4 and double-click <strong>Start AllKlaro.command</strong>
         in Finder — it starts Ollama if needed, starts the server, and opens the page.
         The first launch downloads the Whisper weights (~1.6&nbsp;GB) once; after that
         everything runs offline. To translate the <em>other</em> side of a call, add the
@@ -242,33 +269,33 @@ uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
 
   <section id="how">
     <div class="wrap">
-      <h2>⚙️ Under the hood</h2>
+      <h2 data-i18n="how_h2">⚙️ Under the hood</h2>
       <div class="grid">
-        <div class="feature"><h3>Speculative transcription</h3>
-          <p>Whisper starts ~320 ms into a pause and the result is discarded if
+        <div class="feature"><h3 data-i18n="h_spec_h">Speculative transcription</h3>
+          <p data-i18n="h_spec_p">Whisper starts ~320 ms into a pause and the result is discarded if
           speech resumes — partials never block real work.</p></div>
-        <div class="feature"><h3>Prompt caching</h3>
-          <p>Static system prompt + history as chat turns means Ollama
+        <div class="feature"><h3 data-i18n="h_cache_h">Prompt caching</h3>
+          <p data-i18n="h_cache_p">Static system prompt + history as chat turns means Ollama
           re-processes only the new sentence.</p></div>
-        <div class="feature"><h3>Continuous-speech splitting</h3>
-          <p>No pauses (videos, fast talkers)? Utterances split at natural
+        <div class="feature"><h3 data-i18n="h_split_h">Continuous-speech splitting</h3>
+          <p data-i18n="h_split_p">No pauses (videos, fast talkers)? Utterances split at natural
           micro-pauses after ~8 s instead of stalling.</p></div>
-        <div class="feature"><h3>Pair-constrained detection</h3>
-          <p>"Dutch" detected in a German↔English conversation triggers a
+        <div class="feature"><h3 data-i18n="h_pair_h">Pair-constrained detection</h3>
+          <p data-i18n="h_pair_p">"Dutch" detected in a German↔English conversation triggers a
           re-decode pinned to German.</p></div>
-        <div class="feature"><h3>Junk defense in depth</h3>
-          <p>Temperature-fallback ladder, compression-ratio and no-speech
+        <div class="feature"><h3 data-i18n="h_junk_h">Junk defense in depth</h3>
+          <p data-i18n="h_junk_p">Temperature-fallback ladder, compression-ratio and no-speech
           signals, a repetition-loop detector, and a blocklist of stock
           Whisper hallucinations.</p></div>
-        <div class="feature"><h3>VAD hysteresis</h3>
-          <p>Starting speech needs Silero probability &gt; 0.5, continuing only
+        <div class="feature"><h3 data-i18n="h_vad_h">VAD hysteresis</h3>
+          <p data-i18n="h_vad_p">Starting speech needs Silero probability &gt; 0.5, continuing only
           &gt; 0.35, so quiet word-endings don't chop sentences.</p></div>
       </div>
     </div>
   </section>
 
   <footer>
-    <div class="wrap">
+    <div class="wrap" data-i18n="footer">
       <a href="https://github.com/ismayc/AllKlaro">GitHub</a> ·
       <a href="https://github.com/ismayc/AllKlaro#-troubleshooting">Troubleshooting</a> ·
       Built with <a href="https://github.com/ml-explore/mlx-examples">mlx-whisper</a>,
@@ -276,6 +303,153 @@ uv run uvicorn server:app --host 127.0.0.1 --port 8710</pre>
       <a href="https://ollama.com">Ollama</a>.
     </div>
   </footer>
+
+  <script>
+  // English lives in the markup; DE/ES swap in via [data-i18n]. Links for
+  // friends: https://ismayc.github.io/AllKlaro/?lang=de (or ?lang=es).
+  const I18N = {
+    de: {
+      tagline: "Live-Sprachübersetzung, komplett lokal —<br />zwischen Deutsch, Englisch und Spanisch.",
+      wordplay: '<b class="en">All</b> (EN) + <b class="de">Klaro!</b> (DE) + <b class="es">claro</b> (ES) — alles verstanden, in allen drei Sprachen.',
+      sub: "Jemand spricht Deutsch oder Spanisch in deinem Call — zwei Sekunden später läuft die englische Übersetzung über deinen Bildschirm, farblich nach Sprecher und Sprache markiert. Du antwortest auf Englisch; die Gegenseite bekommt Deutsch oder Spanisch. Nichts verlässt jemals deinen Rechner.",
+      cta_start: "Loslegen",
+      cta_github: "Auf GitHub ansehen",
+      chip_local: '🔒 <b class="en">100 % lokal</b> — keine Cloud, keine Konten',
+      chip_tests: "🧪 Über 100 Tests",
+      them: "Die andere Seite", you: "Du", them2: "Die andere Seite",
+      features_h2: "✨ Was es kann",
+      f_auto_h: "🔄 Automatische Richtung",
+      f_auto_p: "Erkennt die Sprache jeder Äußerung und übersetzt in die jeweils andere — DE↔EN, ES↔EN, ES↔DE — oder mit fester Richtung, auch Deutsch&nbsp;→&nbsp;Englisch&nbsp;+&nbsp;Spanisch gleichzeitig.",
+      f_call_h: "📞 Call-Modus",
+      f_call_p: "Nimmt dein Mikrofon und das Meeting als getrennte Kanäle (<em>Du / Gegenseite</em>) über BlackHole auf; doppelt eingefangene Echos werden automatisch verworfen.",
+      f_tap_h: "🗣️ Antippen und anhören",
+      f_tap_p: "Tippe einen Satz an, um ihn in seiner eigenen Sprache zu hören — ideal zum Üben der Aussprache.",
+      f_ctx_h: "🧠 Kontextbewusst",
+      f_ctx_p: "Die Übersetzungen kennen den bisherigen Gesprächsverlauf — Pronomen und Themen werden richtig aufgelöst.",
+      f_pause_h: "🧩 Deutsch-bewusste Pausen",
+      f_pause_p: "Sätze mit dem Verb am Ende, die eine kurze Pause zerteilt hat, werden wieder zusammengefügt und als Ganzes neu übersetzt.",
+      f_draft_h: "⚡ Entwurf + Feinschliff",
+      f_draft_p: "Ein kleines Modell streamt sofort eine Übersetzung; das Hauptmodell übersetzt im Hintergrund erneut und tauscht seine bessere Fassung ein.",
+      f_correct_h: "✏️ Korrigierbar",
+      f_correct_p: "Bearbeite jede Übersetzung direkt — Korrekturen werden lokal gespeichert und lenken künftige Übersetzungen ähnlicher Sätze.",
+      f_learn_h: "📖 Lern-Werkzeuge",
+      f_learn_p: "Zusammenfassung samt Vokabelliste mit einem Klick, dazu Markdown-Export zum späteren Wiederholen.",
+      f_type_h: "⌨️ Tippen statt sprechen",
+      f_type_p: "Ein Textfeld unter dem Verlauf — tippen statt sprechen; gleicher Kontext, gleiche Pipeline, kein Mikrofon nötig.",
+      f_gender_h: "📖 Genus-Lexika",
+      f_gender_p: "dict.cc-/FreeDict-Exporte werden zu Genus-Wörterbüchern kompiliert — „Caipirinha“ bekommt automatisch der/die/das, „problema“ el/la.",
+      f_dialect_h: "🗺️ Dialekt-bewusst",
+      f_dialect_p: "Berlinerische und hessische Formen („dit“, „ebbes“, „gell“) werden erkannt und dem Übersetzer als Hinweis mitgegeben — samt typischer Verhörer der Spracherkennung.",
+      f_phone_h: "📱 Handy-Modus",
+      f_phone_p: "Per HTTPS im WLAN bereitstellen und das iPhone-Mikrofon für Gespräche vor Ort nutzen.",
+      f_focus_h: "🎯 Fokus-Modus",
+      f_focus_p: "Hält den neuesten Text in der Bildschirmmitte („Center latest“) statt am unteren Rand.",
+      f_gloss_h: "📚 Glossar",
+      f_gloss_p: "Namen und Begriffe in <code>glossary.txt</code> festlegen — beeinflusst Erkennung und Übersetzung.",
+      qs_h2: "🚀 Schnellstart",
+      qs_req: 'Du brauchst einen Apple-Silicon-Mac (M1+), empfohlen 16&nbsp;GB+ RAM, ~12&nbsp;GB freien Speicher und <a href="https://brew.sh">Homebrew</a>.',
+      qs_note: 'Oder überspring Schritt 4 und doppelklicke <strong>Start AllKlaro.command</strong> im Finder — das startet bei Bedarf Ollama, dann den Server, und öffnet die Seite. Beim ersten Start werden die Whisper-Gewichte (~1,6&nbsp;GB) einmalig geladen; danach läuft alles offline. Um die <em>andere</em> Seite eines Calls zu übersetzen, installiere den kostenlosen <a href="https://existential.audio/blackhole/">BlackHole</a>-Loopback-Treiber — das README erklärt die einmalige Einrichtung.',
+      how_h2: "⚙️ Unter der Haube",
+      h_spec_h: "Spekulative Transkription",
+      h_spec_p: "Whisper startet ~320 ms nach Pausenbeginn; das Ergebnis wird verworfen, wenn das Sprechen weitergeht — Zwischenstände blockieren nie die eigentliche Arbeit.",
+      h_cache_h: "Prompt-Caching",
+      h_cache_p: "Statischer System-Prompt + Verlauf als Chat-Runden: Ollama verarbeitet nur den neuen Satz erneut.",
+      h_split_h: "Teilen ohne Pausen",
+      h_split_p: "Keine Pausen (Videos, schnelle Sprecher)? Äußerungen werden nach ~8 s an natürlichen Mikro-Pausen geteilt, statt zu stocken.",
+      h_pair_h: "Paar-beschränkte Erkennung",
+      h_pair_p: "Wird in einem Deutsch↔Englisch-Gespräch „Niederländisch“ erkannt, wird neu dekodiert — festgenagelt auf Deutsch.",
+      h_junk_h: "Mehrstufige Müllabwehr",
+      h_junk_p: "Temperatur-Leiter, Kompressions- und No-Speech-Signale, ein Detektor für Wiederholungsschleifen und eine Sperrliste bekannter Whisper-Halluzinationen.",
+      h_vad_h: "VAD-Hysterese",
+      h_vad_p: "Sprechbeginn braucht Silero-Wahrscheinlichkeit &gt; 0,5, Weitersprechen nur &gt; 0,35 — leise Wortenden zerhacken keine Sätze.",
+      footer: '<a href="https://github.com/ismayc/AllKlaro">GitHub</a> · <a href="https://github.com/ismayc/AllKlaro#-troubleshooting">Fehlerbehebung</a> · Gebaut mit <a href="https://github.com/ml-explore/mlx-examples">mlx-whisper</a>, <a href="https://github.com/snakers4/silero-vad">Silero VAD</a> und <a href="https://ollama.com">Ollama</a>.',
+    },
+    es: {
+      tagline: "Traducción de voz en vivo, totalmente local —<br />entre alemán, inglés y español.",
+      wordplay: '<b class="en">All</b> (EN) + <b class="de">Klaro!</b> (DE) + <b class="es">claro</b> (ES) — todo entendido, en los tres idiomas.',
+      sub: "Alguien habla alemán o español en tu llamada — dos segundos después la traducción al inglés va apareciendo en tu pantalla, con colores según hablante e idioma. Tú respondes en inglés; la otra persona recibe alemán o español. Nada sale nunca de tu equipo.",
+      cta_start: "Comenzar",
+      cta_github: "Ver en GitHub",
+      chip_local: '🔒 <b class="en">100 % local</b> — sin nube, sin cuentas',
+      chip_tests: "🧪 Más de 100 pruebas",
+      them: "La otra persona", you: "Tú", them2: "La otra persona",
+      features_h2: "✨ Qué hace",
+      f_auto_h: "🔄 Dirección automática",
+      f_auto_p: "Detecta el idioma de cada frase y traduce al otro — DE↔EN, ES↔EN, ES↔DE — o fija una dirección, incluso alemán&nbsp;→&nbsp;inglés&nbsp;+&nbsp;español a la vez.",
+      f_call_h: "📞 Modo llamada",
+      f_call_p: "Captura tu micrófono y la reunión como canales separados (<em>Tú / Ellos</em>) mediante BlackHole; los ecos captados dos veces se descartan automáticamente.",
+      f_tap_h: "🗣️ Toca para escuchar",
+      f_tap_p: "Toca cualquier frase para oírla en su propio idioma — ideal para practicar la pronunciación.",
+      f_ctx_h: "🧠 Con contexto",
+      f_ctx_p: "Las traducciones ven la conversación reciente, así que los pronombres y los temas se resuelven correctamente.",
+      f_pause_h: "🧩 Pausas a la alemana",
+      f_pause_p: "Las frases con el verbo al final que una pausa corta partió se vuelven a unir y se retraducen completas.",
+      f_draft_h: "⚡ Borrador + refinado",
+      f_draft_p: "Un modelo pequeño muestra una traducción al instante; el modelo principal retraduce en segundo plano y coloca su versión mejorada.",
+      f_correct_h: "✏️ Corregible",
+      f_correct_p: "Edita cualquier traducción al momento — las correcciones se guardan localmente y guían futuras traducciones de frases parecidas.",
+      f_learn_h: "📖 Para estudiantes",
+      f_learn_p: "Resumen con lista de vocabulario en un clic y exportación a Markdown para repasar después.",
+      f_type_h: "⌨️ Escribe para traducir",
+      f_type_p: "Un cuadro de texto bajo la conversación — escribe en vez de hablar; mismo contexto y misma pipeline, sin micrófono.",
+      f_gender_h: "📖 Léxicos de género",
+      f_gender_p: "Los exportes de dict.cc/FreeDict se compilan en diccionarios de género — «caipirinha» recibe der/die/das y «problema» el/la automáticamente.",
+      f_dialect_h: "🗺️ Atento a dialectos",
+      f_dialect_p: "Las formas berlinesas y de Hesse («dit», «ebbes», «gell») se detectan y se le indican al traductor — incluidos los errores típicos del reconocimiento de voz.",
+      f_phone_h: "📱 Modo teléfono",
+      f_phone_p: "Sirve por HTTPS en tu red local y usa el micrófono del iPhone para conversaciones en persona.",
+      f_focus_h: "🎯 Modo enfoque",
+      f_focus_p: "Mantiene el texto más reciente en el centro de la pantalla («Center latest») en lugar del borde inferior.",
+      f_gloss_h: "📚 Glosario",
+      f_gloss_p: "Fija nombres y términos en <code>glossary.txt</code> — influye en el reconocimiento y en la traducción.",
+      qs_h2: "🚀 Inicio rápido",
+      qs_req: 'Necesitas un Mac con Apple Silicon (M1+), 16&nbsp;GB+ de RAM recomendados, ~12&nbsp;GB de disco libre y <a href="https://brew.sh">Homebrew</a>.',
+      qs_note: 'O salta el paso 4 y haz doble clic en <strong>Start AllKlaro.command</strong> en el Finder — arranca Ollama si hace falta, inicia el servidor y abre la página. El primer arranque descarga los pesos de Whisper (~1,6&nbsp;GB) una sola vez; después todo funciona sin conexión. Para traducir el <em>otro</em> lado de una llamada, añade el controlador de loopback gratuito <a href="https://existential.audio/blackhole/">BlackHole</a> — el README explica la configuración, que se hace una sola vez.',
+      how_h2: "⚙️ Por dentro",
+      h_spec_h: "Transcripción especulativa",
+      h_spec_p: "Whisper arranca ~320 ms tras empezar una pausa y el resultado se descarta si el habla continúa — los parciales nunca bloquean el trabajo real.",
+      h_cache_h: "Caché de prompts",
+      h_cache_p: "Prompt de sistema estático + historial como turnos de chat: Ollama solo reprocesa la frase nueva.",
+      h_split_h: "División sin pausas",
+      h_split_p: "¿Sin pausas (videos, hablantes rápidos)? Las frases se dividen en micro-pausas naturales tras ~8 s en lugar de atascarse.",
+      h_pair_h: "Detección limitada al par",
+      h_pair_p: "Si en una conversación alemán↔inglés se detecta «neerlandés», se vuelve a decodificar fijando el alemán.",
+      h_junk_h: "Defensa contra basura",
+      h_junk_p: "Escalera de temperatura, señales de compresión y de no-habla, detector de bucles de repetición y una lista de alucinaciones típicas de Whisper.",
+      h_vad_h: "Histéresis del VAD",
+      h_vad_p: "Empezar a hablar requiere probabilidad de Silero &gt; 0,5; continuar solo &gt; 0,35 — los finales suaves de palabra no cortan frases.",
+      footer: '<a href="https://github.com/ismayc/AllKlaro">GitHub</a> · <a href="https://github.com/ismayc/AllKlaro#-troubleshooting">Solución de problemas</a> · Hecho con <a href="https://github.com/ml-explore/mlx-examples">mlx-whisper</a>, <a href="https://github.com/snakers4/silero-vad">Silero VAD</a> y <a href="https://ollama.com">Ollama</a>.',
+    },
+  };
+
+  const enCache = {};
+  function setLang(lang) {
+    document.querySelectorAll("[data-i18n]").forEach((el) => {
+      const key = el.dataset.i18n;
+      if (!(key in enCache)) enCache[key] = el.innerHTML;
+      el.innerHTML = lang === "en" ? enCache[key]
+                                   : (I18N[lang]?.[key] ?? enCache[key]);
+    });
+    document.documentElement.lang = lang;
+    document.querySelectorAll(".lang-toggle button").forEach((b) =>
+      b.classList.toggle("active", b.dataset.lang === lang));
+    try { localStorage.setItem("allklaro-lang", lang); } catch {}
+    const url = new URL(location);
+    url.searchParams.set("lang", lang);
+    history.replaceState(null, "", url);
+  }
+  document.querySelectorAll(".lang-toggle button").forEach((b) => {
+    b.onclick = () => setLang(b.dataset.lang);
+  });
+  const KNOWN = ["en", "de", "es"];
+  const fromUrl = new URLSearchParams(location.search).get("lang");
+  let saved = null;
+  try { saved = localStorage.getItem("allklaro-lang"); } catch {}
+  const browser = (navigator.language || "").slice(0, 2);
+  setLang(KNOWN.includes(fromUrl) ? fromUrl
+          : KNOWN.includes(saved) ? saved
+          : KNOWN.includes(browser) ? browser : "en");
+  </script>
 
 </body>
 </html>
