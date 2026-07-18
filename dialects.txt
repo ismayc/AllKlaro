@@ -56,7 +56,10 @@ Handkäs = Handkäse (sour-milk cheese)
 Bembel = Apfelwein-Krug (cider jug)
 
 # --- Rheinhessisch / Wormser Platt (Rhine Franconian; isch/aach/ebbes
-# --- shared with the Hessisch entries above)
+# --- shared with the Hessisch entries above). "nää" is the signature
+# --- Wormser word per Stadt Worms ("Worms mit eigenem Dialekt", 2014).
+nää = nein (no)
+redde = reden (to talk)
 alla = also / los geht's (well then / come on)
 gugge = gucken (to look)
 guggemol = guck mal (look)

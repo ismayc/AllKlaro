@@ -1227,13 +1227,15 @@ FLAVOR_NOTES = {
         "Dialect flavor, not parody — keep it readable and never change "
         "the meaning."),
     "worms": (
-        "Write the German translation in Wormser Platt, the Rhine-Hessian "
-        "dialect of Worms (Rhine Franconian, close to Palatine): isch "
+        "Write the German translation in Wormser Platt, the city dialect "
+        "of Worms (Rheinhessisch, Rhine Franconian — its signature word "
+        "is nää for nein): nää (nein — always nää, never nee), isch "
         "(ich), net (nicht), aach (auch), ebbes (etwas), mer (wir), alla "
-        "(well then / los), gugge (schauen), Woi (Wein), Grumbeere "
-        "(Kartoffeln), -scht for -st (bischt, hoscht), dropped final -n "
-        "on verbs (mer mache, se gehe), -che diminutives. Dialect flavor, "
-        "not parody — keep it readable and never change the meaning."),
+        "(well then / los), redde/babbeln (reden), gugge (schauen), Woi "
+        "(Wein), Grumbeere (Kartoffeln), "
+        "-scht for -st (bischt, hoscht), dropped final -n on verbs (mer "
+        "mache, se gehe), -che diminutives. Dialect flavor, not parody — "
+        "keep it readable and never change the meaning."),
 }
 
 

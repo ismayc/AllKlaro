@@ -59,3 +59,6 @@ def test_wormser_platt_markers_are_recognized():
     assert '"hoscht" = hast' in note
     assert '"grumbeere" = Kartoffeln (potatoes)' in note
     assert '"woi" = Wein (wine)' in note
+    # "nää" — the signature Wormser word per the Stadt Worms dialect page.
+    assert '"nää" = nein' in server.dialect_notes(
+        "Nää, dabber gehe mer heim.", "de")

@@ -293,4 +293,4 @@ async def test_real_ollama_worms_flavor_produces_dialect():
         "en", "de", server.DEFAULT_MODEL, flavor="worms")
     assert any(m in text.lower() for m in ("woi", "morje", "kummst", "aach",
                                            " net", "bischt", "hoscht", "alla",
-                                           "gell"))
+                                           "gell", "nää"))
