@@ -1,7 +1,7 @@
 #!/bin/zsh
-# Serves the translator on your LAN over HTTPS so a phone can use its mic
+# Serves the translator on your LAN over HTTPS so an iPhone can use its mic
 # (browsers require a secure context for microphone access off-localhost).
-# On the phone: open https://<this-mac-ip>:8710 and accept the cert warning.
+# On the iPhone: open https://<this-mac-ip>:8710 and accept the cert warning.
 cd "$(dirname "$0")"
 
 IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1)
@@ -22,9 +22,9 @@ if ! curl -s -o /dev/null http://127.0.0.1:11434/api/tags; then
 fi
 
 echo ""
-echo "  On your phone, open:  https://$IP:8710"
+echo "  On your iPhone, open:  https://$IP:8710"
 echo ""
-echo "  First time on a new phone? Install the certificate once so iOS"
+echo "  First time on a new iPhone? Install the certificate once so iOS"
 echo "  fully trusts the site (removes the warning and fixes the"
 echo "  home-screen icon): open https://$IP:8710/cert and allow the"
 echo "  download, then Settings > General > VPN & Device Management >"

@@ -135,7 +135,7 @@ def test_layout_fits_mobile_viewport():
 
 def test_launchers_auto_reload_server_code():
     root = Path(__file__).parent.parent
-    for name in ("Start AllKlaro.command", "Start AllKlaro (Phone).command"):
+    for name in ("Start AllKlaro.command", "Start AllKlaro (iPhone).command"):
         assert "--reload" in (root / name).read_text(), f"{name} lost --reload"
 
 

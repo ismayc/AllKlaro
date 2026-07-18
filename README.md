@@ -155,9 +155,9 @@ conversation gets the full screen):
 
 ## 📱 Phone mode (in-person conversations)
 
-Run **`Start AllKlaro (Phone).command`** — it generates a self-signed
+Run **`Start AllKlaro (iPhone).command`** — it generates a self-signed
 certificate (mic access requires HTTPS off-localhost) and serves on your LAN,
-printing the exact URL. On a phone on the same Wi-Fi: open
+printing the exact URL. On an iPhone on the same Wi-Fi: open
 `https://<mac-ip>:8710`, accept the certificate warning, press Start, allow
 the mic, and lay the phone between the speakers. ⚠️ This exposes the app to
 everyone on the network — use networks you trust.
