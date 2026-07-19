@@ -89,6 +89,11 @@ never moves, the wrong input device is selected.
 
 ## 🧠 Recommended models
 
+**Recommendations as of 2026-07-19** — the open-model landscape shifts
+every few months, so treat this table as a snapshot that will need
+adjusting over time, not settled truth; the benchmark command below is
+how to re-decide.
+
 Measured with this repo's own probe suite (gender agreement, saved-
 correction reuse, context pronouns, dialect and address-form steering —
 the things that make AllKlaro AllKlaro), warm, on an Apple Silicon Mac:
@@ -101,6 +106,10 @@ the things that make AllKlaro AllKlaro), warm, on an Apple Silicon Mac:
 
 Probe scores (2026-07-19): `gemma3:12b` **12/12** — the only model that
 follows saved corrections *and* dialect/style instructions;
+`qwen2.5:32b-instruct` 10/12 — the strongest raw translation and worth
+its tier for high-stakes nuance, but it ignores injected dictionary-
+gender notes and writes generic rather than Wormser dialect, so prefer
+`gemma3:12b` as main if you lean on those features;
 `translategemma:12b` 10/12 — excellent translation fidelity but it is a
 strict-translator fine-tune that ignores your corrections and any style
 steering; `translategemma:4b` 8/12; `qwen2.5:7b-instruct` 9/12 but ~2.5×
@@ -108,8 +117,8 @@ faster, which is exactly the draft job. Earlier rounds rejected
 `qwen2.5:14b` (grammar) and all 3B-class general models (paraphrase too
 freely even as drafts).
 
-Model claims rot fast — benchmark any candidate yourself in one command
-(needs Ollama running and the model pulled):
+Benchmark any candidate yourself in one command (needs Ollama running
+and the model pulled):
 
 ```bash
 RUN_INTEGRATION=1 ALLKLARO_MODEL=<model> uv run pytest \
