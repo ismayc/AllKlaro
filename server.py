@@ -58,7 +58,9 @@ SENTENCE_END_RE = re.compile(r"[.!?…]['\")\]]?\s*$")
 
 WHISPER_REPO = "mlx-community/whisper-large-v3-turbo"
 OLLAMA_URL = "http://127.0.0.1:11434"
-DEFAULT_MODEL = "gemma3:12b"
+# ALLKLARO_MODEL also lets the integration suite benchmark any model:
+#   RUN_INTEGRATION=1 ALLKLARO_MODEL=<name> uv run pytest tests/test_integration.py
+DEFAULT_MODEL = os.environ.get("ALLKLARO_MODEL", "gemma3:12b")
 GLOSSARY_PATH = Path(__file__).parent / "glossary.txt"
 DIALECTS_PATH = Path(__file__).parent / "dialects.txt"
 CORRECTIONS_PATH = Path(__file__).parent / "corrections.jsonl"

@@ -5,6 +5,13 @@ import server
 from conftest import FakeWS
 
 
+def test_default_model_is_env_overridable():
+    # ALLKLARO_MODEL turns the integration suite into a model benchmark.
+    import inspect
+    src = inspect.getsource(server)
+    assert 'os.environ.get("ALLKLARO_MODEL"' in src
+
+
 def test_models_listed_and_embeddings_filtered(client):
     data = client.get("/api/models").json()
     assert data["default"] == server.DEFAULT_MODEL
