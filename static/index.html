@@ -58,6 +58,15 @@
         <option value="worms">Wormser Platt</option>
       </select>
     </div>
+    <div class="control" title="How 'you' is rendered in German and Spanish translations — English hides the difference, so pin it when you know who you're talking to">
+      <label for="address">Address (you)</label>
+      <select id="address">
+        <option value="" selected>Auto</option>
+        <option value="informal">du / tú (informal)</option>
+        <option value="formal">Sie / usted (formal)</option>
+        <option value="plural">ihr / ustedes (plural)</option>
+      </select>
+    </div>
     <div class="control" title="The model whose translation you keep — bigger is better; with a draft model set, its speed only affects how soon the refined text lands">
       <label for="model">Model</label>
       <select id="model"></select>

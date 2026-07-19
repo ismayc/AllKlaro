@@ -4,6 +4,7 @@ const micBtn = document.getElementById("micBtn");
 const micLabel = document.getElementById("micLabel");
 const modeSel = document.getElementById("mode");
 const flavorSel = document.getElementById("deFlavor");
+const addressSel = document.getElementById("address");
 const deviceSel = document.getElementById("device");
 const modelSel = document.getElementById("model");
 const draftSel = document.getElementById("draftModel");
@@ -52,6 +53,7 @@ function saveSettings() {
   localStorage.setItem(CFG_KEY, JSON.stringify({
     mode: modeSel.value,
     deFlavor: flavorSel.value,
+    address: addressSel.value,
     model: modelSel.value,
     draft: draftSel.value,
     deviceLabel: deviceSel.selectedOptions[0]?.textContent || "",
@@ -72,6 +74,10 @@ if (saved.mode && [...modeSel.options].some((o) => o.value === saved.mode)) {
 if (saved.deFlavor &&
     [...flavorSel.options].some((o) => o.value === saved.deFlavor)) {
   flavorSel.value = saved.deFlavor;
+}
+if (saved.address &&
+    [...addressSel.options].some((o) => o.value === saved.address)) {
+  addressSel.value = saved.address;
 }
 if (saved.pause) pauseSlider.value = saved.pause;
 pauseVal.textContent = pauseSlider.value;
@@ -199,12 +205,14 @@ function sendConfig() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "config", mode: modeSel.value,
                              de_flavor: flavorSel.value,
+                             address: addressSel.value,
                              model: modelSel.value, draft_model: draftSel.value,
                              pause_ms: +pauseSlider.value }));
   }
 }
 modeSel.onchange = () => { sendConfig(); saveSettings(); };
 flavorSel.onchange = () => { sendConfig(); saveSettings(); };
+addressSel.onchange = () => { sendConfig(); saveSettings(); };
 modelSel.onchange = () => { sendConfig(); saveSettings(); };
 draftSel.onchange = () => { sendConfig(); saveSettings(); };
 deviceSel.onchange = async () => {

@@ -524,3 +524,22 @@ def test_unknown_flavor_falls_back_to_standard_german(client, stub_transcribe,
         collect_until(ws)
     system = fake_ollama["chat"]["messages"][0]["content"]
     assert "dialect" not in system.lower()
+
+
+def test_address_config_reaches_the_translation_prompt(client, stub_transcribe,
+                                                       fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "en-de",
+                                 "model": "gemma3:12b",
+                                 "address": "formal"}))
+        ws.send_text(json.dumps({"type": "text", "text": "See you tomorrow!"}))
+        collect_until(ws)
+    system = fake_ollama["chat"]["messages"][0]["content"]
+    assert '"Sie"' in system
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "en-de",
+                                 "model": "gemma3:12b",
+                                 "address": "royal-we"}))
+        ws.send_text(json.dumps({"type": "text", "text": "See you tomorrow!"}))
+        collect_until(ws)
+    assert "Address the listener" not in fake_ollama["chat"]["messages"][0]["content"]

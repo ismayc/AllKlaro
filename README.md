@@ -46,6 +46,7 @@ by default) that sees the conversation's recent context.
 | 🔎 **Big-text view** | Tap a card's background and the translation fills the screen — made for showing the person across the table |
 | 🗺️ **Dialect-aware** | Berlinerisch/Hessisch markers ("dit", "ebbes", "gell") are detected and the likely intended forms — including Whisper mis-hearings like "nett" for "net" (nicht) — are hinted to the translator; extend via `dialects.txt` |
 | 🎭 **German style** | Optional dialect output: translations into German come out in Berlinerisch, Hessisch, or Wormser Platt — reply to your friends the way they write |
+| 🤝 **Address form** | Pin how "you" comes out — du/Sie/ihr in German, tú/usted/ustedes in Spanish — or leave it on Auto and let context decide |
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
 | ⌨️ **Type to translate** | A text box under the feed — type instead of speaking, mic not required; same context, corrections, and draft+refine pipeline |
 | 📖 **Gender lexicons** | Optional: compile dict.cc / FreeDict exports into loanword-gender dictionaries — "caipirinha" gets der/die/das and "problema" gets el/la injected |
@@ -156,6 +157,10 @@ conversation gets the full screen):
   (Rheinhessisch): translations *into* German come out in that dialect
   (the declension guard steps aside, since "dit Haus" is not a mistake
   there).
+- **Address (you)** — English hides whether "you" is du, Sie, or ihr (tú,
+  usted, or ustedes). Auto lets the conversation context decide; pin it
+  when you know who you're talking to. Also accepted by `/api/translate`
+  as `"address": "informal" | "formal" | "plural"`.
 - **Speak** voices: German `de-DE`, English `en-US`, Spanish `es-MX`
   (Latin American).
 - **About** — links to the website and repo.
@@ -201,7 +206,8 @@ a WhatsApp message can be translated without switching apps:
 ```json
 {"text": "Kannste morjen ooch vorbeikommen?",
  "mode": "auto-de-en",          // optional, this is the default
- "de_flavor": "berlin"}         // optional: berlin | hessian | worms
+ "de_flavor": "berlin",         // optional: berlin | hessian | worms
+ "address": "informal"}         // optional: informal | formal | plural
 ```
 
 returns `{"source": "de", "target": "en", "translation": "...",

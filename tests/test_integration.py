@@ -294,3 +294,18 @@ async def test_real_ollama_worms_flavor_produces_dialect():
     assert any(m in text.lower() for m in ("woi", "morje", "kummst", "aach",
                                            " net", "bischt", "hoscht", "alla",
                                            "gell", "nää"))
+
+
+async def test_real_ollama_address_forms_are_followed():
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    text = "Can you send me the photos when you have time?"
+    formal = await server.stream_translation(
+        FakeWS(), 1, text, "en", "de", server.DEFAULT_MODEL, address="formal")
+    assert "Sie" in formal and " du " not in f" {formal} "
+    informal = await server.stream_translation(
+        FakeWS(), 1, text, "en", "de", server.DEFAULT_MODEL, address="informal")
+    assert "du" in informal.lower() and "Sie" not in informal
+    plural_es = await server.stream_translation(
+        FakeWS(), 1, text, "en", "es", server.DEFAULT_MODEL, address="plural")
+    assert "puedes" not in plural_es.lower()

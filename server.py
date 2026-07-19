@@ -1082,18 +1082,21 @@ async def translate_api(payload: dict):
     model = payload.get("model") or DEFAULT_MODEL
     flavor = payload.get("de_flavor")
     flavor = flavor if flavor in FLAVOR_NOTES else ""
+    address = payload.get("address")
+    address = address if address in VALID_ADDRESS else ""
     pair = mode_pair(mode)
     detected = detect_language(text, pair) if pair else (lang_hint(mode) or "de")
     source, targets = resolve_targets(mode, detected)
     translations = {}
     for target in targets:
-        out = await translate_once(text, source, target, model, flavor=flavor)
+        out = await translate_once(text, source, target, model, flavor=flavor,
+                                   address=address)
         if out is None:
             return {"error": "Translation failed — are Ollama and the model "
                              f"{model!r} available?"}
         if not (target == "de" and flavor):  # guard assumes standard German
             out, _ = await enforce_agreement(text, source, target, model,
-                                             None, out)
+                                             None, out, address)
         translations[target] = out
     # "display" is a ready-captioned version for Shortcuts to show as-is.
     caption = f"🗣️ AllKlaro ({source.upper()} → {targets[0].upper()}):"
@@ -1105,13 +1108,15 @@ async def translate_api(payload: dict):
 
 @app.get("/api/translate")
 async def translate_api_get(text: str = "", mode: str = "",
-                            de_flavor: str = "", model: str = ""):
+                            de_flavor: str = "", model: str = "",
+                            address: str = ""):
     """GET twin of the POST endpoint, so the whole pipeline can be
     smoke-tested from a phone browser's address bar:
     https://<mac-ip>:8710/api/translate?text=Hallo — separates "server
     unreachable" from "Shortcut built wrong" when debugging."""
     return await translate_api({"text": text, "mode": mode,
-                                "de_flavor": de_flavor, "model": model})
+                                "de_flavor": de_flavor, "model": model,
+                                "address": address})
 
 
 # ---------------------------------------------------------- word lookup
@@ -1253,9 +1258,36 @@ FLAVOR_NOTES = {
 }
 
 
+# How to render "you" in the target language. English collapses du/Sie/ihr
+# (and tú/usted/ustedes) into one word, so the model can only guess unless
+# the user pins it. Static per connection -> prefix-cache friendly.
+VALID_ADDRESS = ("informal", "formal", "plural")
+ADDRESS_NOTES = {
+    "de": {
+        "informal": ('Address the listener as informal singular "du" '
+                     '(dich/dir/dein), never "Sie".'),
+        "formal": ('Address the listener as formal "Sie" (Ihnen/Ihr), '
+                   'never "du" or "ihr".'),
+        "plural": ('"You" addresses several people here: use informal '
+                   'plural "ihr" (euch/euer), never "du" or "Sie".'),
+    },
+    "es": {
+        "informal": ('Address the listener as informal singular "tú" '
+                     '(te/ti/tu), never "usted".'),
+        "formal": ('Address the listener as formal "usted" (le/lo/su), '
+                   'never "tú".'),
+        "plural": ('Every "you" addresses a group: conjugate for "ustedes" '
+                   '(third-person plural — pueden, tienen, tengan, su). '
+                   'Example: "Can you help me?" → "¿Me pueden ayudar?". '
+                   'Singular forms like "puedes" or "podría" are wrong here.'),
+    },
+}
+
+
 def translation_messages(text: str, source: str, target: str,
                          history: list[dict] | None = None,
-                         flavor: str | None = None) -> list[dict]:
+                         flavor: str | None = None,
+                         address: str | None = None) -> list[dict]:
     """Static system prompt + history as chat turns.
 
     Keeping the system prompt constant and prepending history as normal
@@ -1279,6 +1311,9 @@ def translation_messages(text: str, source: str, target: str,
         system += "\n\n" + GRAMMAR_NOTES[target]
     if target == "de" and flavor in FLAVOR_NOTES:
         system += "\n\n" + FLAVOR_NOTES[flavor]
+    address_note = ADDRESS_NOTES.get(target, {}).get(address or "")
+    if address_note:
+        system += "\n\n" + address_note
     glossary = load_glossary()
     if glossary:
         system += ("\n\nGlossary — use these exact translations where "
@@ -1331,14 +1366,16 @@ async def safe_send(ws: WebSocket, payload: dict) -> bool:
 async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
                              target: str, model: str,
                              history: list[dict] | None = None,
-                             flavor: str | None = None) -> str | None:
+                             flavor: str | None = None,
+                             address: str | None = None) -> str | None:
     """Streams deltas to the client; returns the full translation, or None on error.
 
     The caller sends the closing `translation_done` message (with metrics).
     """
     payload = {
         "model": model,
-        "messages": translation_messages(text, source, target, history, flavor),
+        "messages": translation_messages(text, source, target, history,
+                                         flavor, address),
         "stream": True,
         "options": {"temperature": 0.0},
         "keep_alive": "60m",
@@ -1385,7 +1422,8 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
 async def translate_once(text: str, source: str, target: str, model: str,
                          history: list[dict] | None = None,
                          revise: tuple[str, str] | None = None,
-                         flavor: str | None = None) -> str | None:
+                         flavor: str | None = None,
+                         address: str | None = None) -> str | None:
     """One-shot, non-streaming translation; None on any failure.
 
     Used for the behind-the-scenes refinement pass, which replaces the fast
@@ -1393,7 +1431,8 @@ async def translate_once(text: str, source: str, target: str, model: str,
     `revise=(candidate, issues)` the model is instead asked to correct its
     own earlier translation, with the offending facts spelled out.
     """
-    messages = translation_messages(text, source, target, history, flavor)
+    messages = translation_messages(text, source, target, history,
+                                    flavor, address)
     if revise:
         candidate, issues = revise
         messages.append({"role": "assistant", "content": candidate})
@@ -1482,8 +1521,8 @@ async def _combined_issues(text: str, target: str) -> list[str]:
 
 
 async def enforce_agreement(text: str, source: str, target: str, model: str,
-                            context: list[dict] | None,
-                            candidate: str) -> tuple[str, bool]:
+                            context: list[dict] | None, candidate: str,
+                            address: str | None = None) -> tuple[str, bool]:
     """Returns (final text, changed). If the candidate contains impossible
     article/gender combinations (or LanguageTool findings, when enabled),
     re-ask once with the facts stated; the retry is used only if it
@@ -1493,7 +1532,8 @@ async def enforce_agreement(text: str, source: str, target: str, model: str,
         return candidate, False
     log.info("agreement retry (%s): %s", target, " ".join(issues))
     fixed = await translate_once(text, source, target, model, context,
-                                 revise=(candidate, " ".join(issues)))
+                                 revise=(candidate, " ".join(issues)),
+                                 address=address)
     if (fixed and fixed != candidate
             and not await _combined_issues(fixed, target)):
         return fixed, True
@@ -1625,7 +1665,8 @@ async def ws_endpoint(ws: WebSocket):
     mode = "auto-de-en"
     model = DEFAULT_MODEL
     draft_model = None               # fast first-pass model; None = single-pass
-    de_flavor = ""                   # "" standard | "berlin" | "hessian"
+    de_flavor = ""                   # "" standard | "berlin" | "hessian" | "worms"
+    address = ""                     # "" auto | "informal" | "formal" | "plural"
     corrected_uids: set[int] = set()  # user edits that refinement must not undo
     pause_frames = END_SILENCE_FRAMES
     uid = 0
@@ -1734,7 +1775,7 @@ async def ws_endpoint(ws: WebSocket):
         context = list(history)
         translations = await asyncio.gather(
             *(stream_translation(ws, my_uid, text, source, t,
-                                 draft or model, context, de_flavor)
+                                 draft or model, context, de_flavor, address)
               for t in targets))
         if all(t is not None for t in translations):
             history.append({"uid": my_uid, "source": source,
@@ -1751,7 +1792,8 @@ async def ws_endpoint(ws: WebSocket):
                 if draft:
                     refined = await translate_once(text, source, t,
                                                    model, context,
-                                                   flavor=de_flavor)
+                                                   flavor=de_flavor,
+                                                   address=address)
                     if refined:
                         candidate = refined
                 if t == "de" and de_flavor:
@@ -1761,7 +1803,8 @@ async def ws_endpoint(ws: WebSocket):
                     final = candidate
                 else:
                     final, _ = await enforce_agreement(text, source, t, model,
-                                                       context, candidate)
+                                                       context, candidate,
+                                                       address)
                 if final != streamed:
                     texts[t] = final
             # The final text becomes the conversation context — unless
@@ -1838,6 +1881,9 @@ async def ws_endpoint(ws: WebSocket):
                     if "de_flavor" in cfg:  # "" means standard German
                         de_flavor = (cfg["de_flavor"]
                                      if cfg["de_flavor"] in FLAVOR_NOTES else "")
+                    if "address" in cfg:  # "" lets context decide the you-form
+                        address = (cfg["address"]
+                                   if cfg["address"] in VALID_ADDRESS else "")
                     try:
                         pause_ms = int(cfg.get("pause_ms", pause_frames * FRAME_MS))
                         pause_frames = max(200, min(2000, pause_ms)) // FRAME_MS

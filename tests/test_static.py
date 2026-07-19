@@ -162,6 +162,11 @@ def test_german_flavor_and_paste_are_wired():
     assert 'value="worms"' in HTML
     assert re.search(r"de_flavor:\s*flavorSel\.value", JS)  # reaches the server
     assert re.search(r"deFlavor:\s*flavorSel\.value", JS)   # persisted setting
+    # The you-form control covers German and Spanish targets.
+    assert 'id="address"' in HTML
+    for v in ("informal", "formal", "plural"):
+        assert f'value="{v}"' in HTML
+    assert re.search(r"address:\s*addressSel\.value", JS)
     # Paste-and-translate: one tap from a WhatsApp copy to a translation,
     # falling back to a focused input if clipboard access is refused.
     assert 'id="pasteBtn"' in HTML

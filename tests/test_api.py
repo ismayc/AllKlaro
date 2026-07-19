@@ -241,3 +241,10 @@ def test_api_translate_get_variant_for_browser_smoke_tests(client, fake_ollama):
                    params={"text": "Wie geht es dir und der Familie?"}).json()
     assert r["source"] == "de" and r["translation"] == "Refined translation."
     assert "error" in client.get("/api/translate").json()
+
+
+def test_api_translate_pins_the_address_form(client, fake_ollama):
+    client.post("/api/translate", json={"text": "Can you help me tomorrow?",
+                                        "mode": "en-es",
+                                        "address": "plural"})
+    assert '"ustedes"' in fake_ollama["chat"]["messages"][0]["content"]

@@ -266,3 +266,31 @@ def test_flavor_off_or_wrong_target_stays_standard():
     # Flavor styles German output only — translating TO English ignores it.
     assert "Berlinerisch" not in translation_messages(
         "Hallo", "de", "en", flavor="berlin")[0]["content"]
+
+
+# ------------------------------------------------------------- address forms
+
+
+def test_address_note_pins_the_you_form():
+    for target, form, marker in (
+            ("de", "informal", '"du"'), ("de", "formal", '"Sie"'),
+            ("de", "plural", '"ihr"'), ("es", "informal", '"tú"'),
+            ("es", "formal", '"usted"'), ("es", "plural", '"ustedes"')):
+        system = translation_messages("Can you help me?", "en", target,
+                                      address=form)[0]["content"]
+        assert marker in system, (target, form)
+
+
+def test_address_auto_or_english_target_adds_nothing():
+    assert '"du"' not in translation_messages(
+        "Can you help me?", "en", "de")[0]["content"]
+    # Translating TO English never needs a you-form note.
+    assert "Address the listener" not in translation_messages(
+        "Kannst du mir helfen?", "de", "en", address="formal")[0]["content"]
+
+
+def test_address_and_flavor_notes_compose():
+    system = translation_messages("Can you help me?", "en", "de",
+                                  flavor="berlin",
+                                  address="informal")[0]["content"]
+    assert "Berlinerisch" in system and '"du"' in system
