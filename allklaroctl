@@ -1,0 +1,77 @@
+#!/bin/zsh
+# allklaroctl — headless start/stop/status for the AllKlaro server.
+# Made for one-tap remote control: an iOS Shortcut runs
+#     ~/repos/AllKlaro/allklaroctl start
+# over SSH (Remote Login) through the Tailscale tunnel. Non-interactive
+# SSH sessions get a bare PATH, hence the explicit Homebrew entry.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+cd "$(dirname "$0")"
+
+TS="tailscale"
+command -v tailscale >/dev/null 2>&1 || TS="/Applications/Tailscale.app/Contents/MacOS/Tailscale"
+LOG=/tmp/allklaro-server.log
+
+up() { curl -s -o /dev/null --max-time 2 http://127.0.0.1:8710/; }
+
+status() {
+  if up; then
+    host=$("$TS" status --json 2>/dev/null | python3 -c \
+      'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' \
+      2>/dev/null)
+    echo "running — https://${host:-127.0.0.1:8710}"
+  else
+    echo "stopped"
+  fi
+}
+
+case "${1:-status}" in
+  start)
+    if up; then status; exit 0; fi
+    if ! curl -s -o /dev/null http://127.0.0.1:11434/api/tags; then
+      open -a Ollama 2>/dev/null || (nohup ollama serve >/dev/null 2>&1 &)
+      sleep 3
+    fi
+    # The tunnel needs the Tailscale app running; launch it if it isn't
+    # (sign-in persists, so this reconnects without interaction).
+    if ! "$TS" status >/dev/null 2>&1; then
+      open -a Tailscale 2>/dev/null
+      for i in {1..15}; do
+        "$TS" status >/dev/null 2>&1 && break
+        sleep 1
+      done
+    fi
+    # Tailscale HTTPS proxy (no-op if already configured / not signed in).
+    "$TS" serve --bg http://127.0.0.1:8710 >/dev/null 2>&1
+    # nohup: the server must outlive the SSH session that started it.
+    nohup uv run uvicorn server:app --host 127.0.0.1 --port 8710 --reload \
+      >> "$LOG" 2>&1 &
+    # Wait for readiness (first start prewarms Whisper) so the Shortcut
+    # reports real success, not a hopeful guess.
+    for i in {1..60}; do
+      up && break
+      sleep 2
+    done
+    status
+    ;;
+  stop)
+    if pkill -f "uvicorn server:app"; then
+      # The reload supervisor's worker takes a moment to release the port.
+      for i in {1..10}; do
+        up || break
+        sleep 1
+      done
+      up && echo "still shutting down" || echo "stopped"
+    else
+      echo "was not running"
+    fi
+    ;;
+  restart)
+    "$0" stop; sleep 1; exec "$0" start
+    ;;
+  status)
+    status
+    ;;
+  *)
+    echo "usage: allklaroctl start|stop|restart|status"; exit 1
+    ;;
+esac

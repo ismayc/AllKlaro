@@ -211,8 +211,18 @@ def test_type_input_does_not_trigger_ios_auto_zoom():
 def test_launchers_auto_reload_server_code():
     root = Path(__file__).parent.parent
     for name in ("Start AllKlaro.command", "Start AllKlaro (iPhone).command",
-                 "Start AllKlaro (Anywhere).command"):
+                 "Start AllKlaro (Anywhere).command", "allklaroctl"):
         assert "--reload" in (root / name).read_text(), f"{name} lost --reload"
+
+
+def test_remote_control_script_is_headless_ready():
+    ctl = (Path(__file__).parent.parent / "allklaroctl").read_text()
+    assert '"/opt/homebrew/bin' in ctl   # non-interactive SSH has a bare PATH
+    assert "nohup" in ctl                # server outlives the SSH session
+    for verb in ("start", "stop", "restart", "status"):
+        assert f"{verb})" in ctl
+    # A phone can't click the menu bar: Tailscale must self-launch.
+    assert "open -a Tailscale" in ctl
 
 
 def test_home_screen_web_app_is_configured():

@@ -360,6 +360,26 @@ prevent automatic sleeping (or `caffeinate -s`), and expect Ollama to
 spin the fans when requests arrive. The Tailscale VPN toggle on the
 phone must be on — that's the tunnel.
 
+### 🚦 Start the server from your phone
+
+`allklaroctl` is a headless start/stop script made to be run over SSH by
+an iOS Shortcut — it brings up Ollama, the Tailscale app, and the server,
+and waits until everything actually answers before reporting:
+
+1. On the Mac (once): System Settings → General → Sharing → **Remote
+   Login** ON (allow your user only).
+2. In Shortcuts: new shortcut → add **Run Script Over SSH** → Host: your
+   Mac's `….ts.net` name, Port 22, User: your macOS username,
+   Authentication: password (or an SSH key — Shortcuts can generate one;
+   paste its public key into `~/.ssh/authorized_keys` on the Mac).
+   Script: `~/repos/AllKlaro/allklaroctl start`
+3. Add **Show Content** so the reply ("running — https://…") is shown.
+4. Duplicate it with `stop` for a remote off-switch.
+
+Limits: SSH can wake a sleeping Mac on the same network in some setups,
+but it cannot power one on — for away-from-home starts the Mac must be
+awake (see the sleep settings above).
+
 ## ⚙️ Under the hood
 
 The speed and correctness machinery, for the curious:
