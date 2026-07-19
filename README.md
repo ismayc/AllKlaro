@@ -87,6 +87,35 @@ Press **Start**, allow the microphone, and talk. Each pause finalizes an
 utterance; the green level meter shows whether audio is arriving — if it
 never moves, the wrong input device is selected.
 
+## 🧠 Recommended models
+
+Measured with this repo's own probe suite (gender agreement, saved-
+correction reuse, context pronouns, dialect and address-form steering —
+the things that make AllKlaro AllKlaro), warm, on an Apple Silicon Mac:
+
+| Your RAM | Draft model | Main model |
+|---|---|---|
+| 16 GB | Off (or `qwen2.5:7b-instruct` if it fits) | `gemma3:12b` |
+| 24–32 GB (daily default) | `qwen2.5:7b-instruct` | `gemma3:12b` |
+| 32 GB+ (important calls) | `gemma3:12b` | `qwen2.5:32b-instruct` |
+
+Probe scores (2026-07-19): `gemma3:12b` **12/12** — the only model that
+follows saved corrections *and* dialect/style instructions;
+`translategemma:12b` 10/12 — excellent translation fidelity but it is a
+strict-translator fine-tune that ignores your corrections and any style
+steering; `translategemma:4b` 8/12; `qwen2.5:7b-instruct` 9/12 but ~2.5×
+faster, which is exactly the draft job. Earlier rounds rejected
+`qwen2.5:14b` (grammar) and all 3B-class general models (paraphrase too
+freely even as drafts).
+
+Model claims rot fast — benchmark any candidate yourself in one command
+(needs Ollama running and the model pulled):
+
+```bash
+RUN_INTEGRATION=1 ALLKLARO_MODEL=<model> uv run pytest \
+  tests/test_integration.py -k "ollama or api_translate" -q
+```
+
 ## 🎧 Capturing call audio (Zoom / Teams / Meet / videos)
 
 Out of the box AllKlaro hears your **microphone**. To translate the *other*
