@@ -162,6 +162,10 @@ def test_german_flavor_and_paste_are_wired():
     assert 'value="worms"' in HTML
     assert re.search(r"de_flavor:\s*flavorSel\.value", JS)  # reaches the server
     assert re.search(r"deFlavor:\s*flavorSel\.value", JS)   # persisted setting
+    assert 'id="esFlavor"' in HTML
+    assert 'value="mexico"' in HTML and 'value="barcelona"' in HTML
+    assert re.search(r"es_flavor:\s*esFlavorSel\.value", JS)
+    assert re.search(r"esFlavor:\s*esFlavorSel\.value", JS)
     # The you-form control covers German and Spanish targets.
     assert 'id="address"' in HTML
     for v in ("informal", "formal", "plural"):

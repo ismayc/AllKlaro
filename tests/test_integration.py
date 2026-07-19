@@ -309,3 +309,27 @@ async def test_real_ollama_address_forms_are_followed():
     plural_es = await server.stream_translation(
         FakeWS(), 1, text, "en", "es", server.DEFAULT_MODEL, address="plural")
     assert "puedes" not in plural_es.lower()
+
+
+async def test_real_ollama_mexican_flavor_produces_mexican_spanish():
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    text = await server.stream_translation(
+        FakeWS(), 1, "That's really cool! Call me on my cell phone later.",
+        "en", "es", server.DEFAULT_MODEL, flavor="mexico")
+    low = text.lower()
+    assert "celular" in low or "chido" in low or "padre" in low
+    assert "móvil" not in low and "vosotros" not in low
+
+
+async def test_real_ollama_barcelona_flavor_produces_peninsular_spanish():
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    text = await server.stream_translation(
+        FakeWS(), 1,
+        "Okay, can you all send me the photos on my phone later?",
+        "en", "es", server.DEFAULT_MODEL, flavor="barcelona",
+        address="plural")
+    low = text.lower()
+    assert "podéis" in low or "enviadme" in low or "móvil" in low or "vale" in low
+    assert "ustedes" not in low and "celular" not in low

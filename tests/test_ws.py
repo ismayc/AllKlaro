@@ -543,3 +543,14 @@ def test_address_config_reaches_the_translation_prompt(client, stub_transcribe,
         ws.send_text(json.dumps({"type": "text", "text": "See you tomorrow!"}))
         collect_until(ws)
     assert "Address the listener" not in fake_ollama["chat"]["messages"][0]["content"]
+
+
+def test_spanish_flavor_config_reaches_the_prompt(client, stub_transcribe,
+                                                  fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "en-es",
+                                 "model": "gemma3:12b",
+                                 "es_flavor": "mexico"}))
+        ws.send_text(json.dumps({"type": "text", "text": "That's cool!"}))
+        collect_until(ws)
+    assert "Mexican" in fake_ollama["chat"]["messages"][0]["content"]

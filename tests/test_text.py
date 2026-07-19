@@ -294,3 +294,20 @@ def test_address_and_flavor_notes_compose():
                                   flavor="berlin",
                                   address="informal")[0]["content"]
     assert "Berlinerisch" in system and '"du"' in system
+
+
+def test_spanish_flavor_notes_and_barcelona_plural_override():
+    mx = translation_messages("That's cool!", "en", "es",
+                              flavor="mexico")[0]["content"]
+    assert "Mexican" in mx and "chido" in mx and "vosotros" in mx
+    bcn = translation_messages("That's cool!", "en", "es",
+                               flavor="barcelona")[0]["content"]
+    assert "Barcelona" in bcn and "vosotros" in bcn
+    # Barcelona + plural address: vosotros beats the ustedes default.
+    both = translation_messages("Can you help me?", "en", "es",
+                                flavor="barcelona",
+                                address="plural")[0]["content"]
+    assert "podéis" in both and "¿Me podéis ayudar?" in both
+    # Flavors never leak across targets.
+    assert "chido" not in translation_messages(
+        "Hi", "en", "de", flavor="mexico")[0]["content"]

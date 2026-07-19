@@ -138,27 +138,34 @@ def glossary_whisper_terms() -> str:
 _dialects_cache = {"mtime": None, "map": {}}
 
 
-def load_dialects() -> dict[str, tuple[str, bool]]:
-    """dialects.txt: dialect token -> (standard gloss, ambiguous).
+def load_dialects() -> dict[str, dict[str, tuple[str, bool]]]:
+    """dialects.txt: language -> {dialect token -> (gloss, ambiguous)}.
 
-    Ambiguous entries ("? nett = net (nicht)") are real standard-German
-    words too; they are only hinted when the sentence also contains an
-    unambiguous dialect marker."""
+    A "[es]"-style line switches the language section (the file starts in
+    German for backward compatibility). Ambiguous entries ("? nett = net
+    (nicht)") are real standard words too; they are only hinted when the
+    sentence also contains an unambiguous dialect marker."""
     try:
         mtime = DIALECTS_PATH.stat().st_mtime
     except OSError:
         _dialects_cache.update(mtime=None, map={})
         return {}
     if mtime != _dialects_cache["mtime"]:
-        entries = {}
+        entries: dict[str, dict] = {}
+        lang = "de"
         for line in DIALECTS_PATH.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
+            section = re.fullmatch(r"\[(\w{2})\]", line)
+            if section:
+                lang = section.group(1)
+                continue
             ambiguous = line.startswith("?")
             term, _, standard = line.lstrip("? ").partition("=")
             if term.strip() and standard.strip():
-                entries[term.strip().lower()] = (standard.strip(), ambiguous)
+                entries.setdefault(lang, {})[term.strip().lower()] = (
+                    standard.strip(), ambiguous)
         _dialects_cache.update(mtime=mtime, map=entries)
     return _dialects_cache["map"]
 
@@ -172,9 +179,16 @@ def dialect_notes(text: str, source: str) -> str | None:
     transcripts WORSE in testing, so the fix lives here: name the likely
     intended forms and let the model translate the intended meaning.
     """
-    if source != "de":
+    intros = {
+        "de": ("The German speaker is using regional dialect (e.g. Berlin, "
+               "Hessian, or Rhine-Hessian), and speech recognition may have "
+               "mis-heard dialect words."),
+        "es": ("The Spanish speaker is using regional or colloquial forms "
+               "(e.g. Mexican or Catalonia Spanish)."),
+    }
+    if source not in intros:
         return None
-    lexicon = load_dialects()
+    lexicon = load_dialects().get(source)
     if not lexicon:
         return None
     hits, seen, marker = [], set(), False
@@ -189,10 +203,8 @@ def dialect_notes(text: str, source: str) -> str | None:
     if not marker:                     # ambiguous words alone prove nothing
         return None
     listed = "; ".join(f'"{t}" = {std}' for t, std in hits[:10])
-    return ("The German speaker is using regional dialect (e.g. Berlin or "
-            "Hessian), and speech recognition may have mis-heard dialect "
-            f"words. In this sentence: {listed}. Translate the intended "
-            "standard meaning naturally.")
+    return (f"{intros[source]} In this sentence: {listed}. Translate the "
+            "intended standard meaning naturally.")
 
 
 # ---------------------------------------------------------------- gender lexicon
@@ -1082,8 +1094,11 @@ async def translate_api(payload: dict):
     text = text.strip()[:2000]
     mode = payload.get("mode") or "auto-de-en"
     model = payload.get("model") or DEFAULT_MODEL
-    flavor = payload.get("de_flavor")
-    flavor = flavor if flavor in FLAVOR_NOTES else ""
+    flavors = {
+        lang: (payload.get(f"{lang}_flavor")
+               if payload.get(f"{lang}_flavor") in FLAVOR_NOTES[lang] else "")
+        for lang in FLAVOR_NOTES
+    }
     address = payload.get("address")
     address = address if address in VALID_ADDRESS else ""
     pair = mode_pair(mode)
@@ -1091,6 +1106,7 @@ async def translate_api(payload: dict):
     source, targets = resolve_targets(mode, detected)
     translations = {}
     for target in targets:
+        flavor = flavors.get(target, "")
         out = await translate_once(text, source, target, model, flavor=flavor,
                                    address=address)
         if out is None:
@@ -1110,14 +1126,15 @@ async def translate_api(payload: dict):
 
 @app.get("/api/translate")
 async def translate_api_get(text: str = "", mode: str = "",
-                            de_flavor: str = "", model: str = "",
-                            address: str = ""):
+                            de_flavor: str = "", es_flavor: str = "",
+                            model: str = "", address: str = ""):
     """GET twin of the POST endpoint, so the whole pipeline can be
     smoke-tested from a phone browser's address bar:
     https://<mac-ip>:8710/api/translate?text=Hallo — separates "server
     unreachable" from "Shortcut built wrong" when debugging."""
     return await translate_api({"text": text, "mode": mode,
-                                "de_flavor": de_flavor, "model": model,
+                                "de_flavor": de_flavor,
+                                "es_flavor": es_flavor, "model": model,
                                 "address": address})
 
 
@@ -1229,10 +1246,11 @@ GRAMMAR_NOTES = {
 }
 
 
-# Optional German output flavor (WhatsApp friends write Berlinerisch and
-# Hessisch; replying in kind is half the fun). Static per connection and
+# Optional output flavors (WhatsApp friends write Berlinerisch or Mexican
+# Spanish; replying in kind is half the fun). Static per connection and
 # inserted before the dynamic prompt parts, so prefix caching survives.
-FLAVOR_NOTES = {
+FLAVOR_NOTES: dict[str, dict[str, str]] = {"de": {}, "es": {}}
+FLAVOR_NOTES["de"] = {
     "berlin": (
         "Write the German translation in casual Berlin dialect "
         "(Berlinerisch), the way a Berliner actually talks: ick (ich), "
@@ -1257,6 +1275,27 @@ FLAVOR_NOTES = {
         "-scht for -st (bischt, hoscht), dropped final -n on verbs (mer "
         "mache, se gehe), -che diminutives. Dialect flavor, not parody — "
         "keep it readable and never change the meaning."),
+}
+FLAVOR_NOTES["es"] = {
+    "mexico": (
+        "Write the Spanish translation in casual Mexican Spanish: ustedes "
+        "(never vosotros), celular (not móvil), computadora (not "
+        "ordenador), carro (not coche), jugo (not zumo), platicar "
+        "(charlar), chamba (trabajo, colloquial), ahorita, ¿mande? for a "
+        "polite 'what?', and órale / qué padre / chido where the tone "
+        "fits. Example: \"That's really cool!\" → \"¡Está bien chido!\". "
+        "Natural Mexican phrasing, not a caricature — never change the "
+        "meaning."),
+    "barcelona": (
+        "Write the Spanish translation the way people speak Spanish in "
+        "Barcelona (Peninsular Spanish with a Catalan tinge): vosotros "
+        "for informal plural (podéis, tenéis), móvil (not celular), "
+        "ordenador (not computadora), coche (not carro), zumo (not "
+        "jugo), vale for okay, tío/tía as informal address, guay (cool), "
+        "currar (trabajar, colloquial), plegar (to finish work, from "
+        "Catalan). Example: \"Okay, see you guys later!\" → \"¡Vale, "
+        "hasta luego, tíos!\". Natural and readable, not parody — never "
+        "change the meaning."),
 }
 
 
@@ -1311,9 +1350,16 @@ def translation_messages(text: str, source: str, target: str,
     )
     if target in GRAMMAR_NOTES:
         system += "\n\n" + GRAMMAR_NOTES[target]
-    if target == "de" and flavor in FLAVOR_NOTES:
-        system += "\n\n" + FLAVOR_NOTES[flavor]
+    flavor_note = FLAVOR_NOTES.get(target, {}).get(flavor or "")
+    if flavor_note:
+        system += "\n\n" + flavor_note
     address_note = ADDRESS_NOTES.get(target, {}).get(address or "")
+    if target == "es" and address == "plural" and flavor == "barcelona":
+        # Barcelona style overrides the Latin American plural default.
+        address_note = ('Every "you" addresses a group: use Peninsular '
+                        '"vosotros" with second-person plural verbs '
+                        '(podéis, tenéis, tengáis). Example: "Can you '
+                        'help me?" → "¿Me podéis ayudar?".')
     if address_note:
         system += "\n\n" + address_note
     glossary = load_glossary()
@@ -1668,7 +1714,11 @@ async def ws_endpoint(ws: WebSocket):
     model = DEFAULT_MODEL
     draft_model = None               # fast first-pass model; None = single-pass
     de_flavor = ""                   # "" standard | "berlin" | "hessian" | "worms"
+    es_flavor = ""                   # "" standard | "mexico" | "barcelona"
     address = ""                     # "" auto | "informal" | "formal" | "plural"
+
+    def flavor_for(target: str) -> str:
+        return {"de": de_flavor, "es": es_flavor}.get(target, "")
     corrected_uids: set[int] = set()  # user edits that refinement must not undo
     pause_frames = END_SILENCE_FRAMES
     uid = 0
@@ -1777,7 +1827,8 @@ async def ws_endpoint(ws: WebSocket):
         context = list(history)
         translations = await asyncio.gather(
             *(stream_translation(ws, my_uid, text, source, t,
-                                 draft or model, context, de_flavor, address)
+                                 draft or model, context, flavor_for(t),
+                                 address)
               for t in targets))
         if all(t is not None for t in translations):
             history.append({"uid": my_uid, "source": source,
@@ -1794,7 +1845,7 @@ async def ws_endpoint(ws: WebSocket):
                 if draft:
                     refined = await translate_once(text, source, t,
                                                    model, context,
-                                                   flavor=de_flavor,
+                                                   flavor=flavor_for(t),
                                                    address=address)
                     if refined:
                         candidate = refined
@@ -1882,7 +1933,12 @@ async def ws_endpoint(ws: WebSocket):
                         draft_model = cfg["draft_model"] or None
                     if "de_flavor" in cfg:  # "" means standard German
                         de_flavor = (cfg["de_flavor"]
-                                     if cfg["de_flavor"] in FLAVOR_NOTES else "")
+                                     if cfg["de_flavor"] in FLAVOR_NOTES["de"]
+                                     else "")
+                    if "es_flavor" in cfg:  # "" means standard Spanish
+                        es_flavor = (cfg["es_flavor"]
+                                     if cfg["es_flavor"] in FLAVOR_NOTES["es"]
+                                     else "")
                     if "address" in cfg:  # "" lets context decide the you-form
                         address = (cfg["address"]
                                    if cfg["address"] in VALID_ADDRESS else "")

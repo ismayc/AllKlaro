@@ -1,13 +1,17 @@
-"""Dialect detection and translation hints (Berlinerisch / Hessisch)."""
+"""Dialect detection and translation hints (German and Spanish regions)."""
 import server
 
 
 def test_dialects_file_parses_with_ambiguity_flags():
     lex = server.load_dialects()
-    assert lex["ick"] == ("ich", False)          # unambiguous marker
-    assert lex["nochemol"][1] is False
-    assert lex["nett"][1] is True                # real standard word too
-    assert lex["des"][1] is True
+    assert lex["de"]["ick"] == ("ich", False)    # unambiguous marker
+    assert lex["de"]["nochemol"][1] is False
+    assert lex["de"]["nett"][1] is True          # real standard word too
+    assert lex["de"]["des"][1] is True
+    # The [es] section holds the Spanish regional entries.
+    assert lex["es"]["chido"][1] is False
+    assert lex["es"]["vale"][1] is True          # everyday standard word
+    assert "chido" not in lex["de"]              # sections don't bleed
 
 
 def test_markers_trigger_note_with_mishearing_hints():
@@ -62,3 +66,20 @@ def test_wormser_platt_markers_are_recognized():
     # "nää" — the signature Wormser word per the Stadt Worms dialect page.
     assert '"nää" = nein' in server.dialect_notes(
         "Nää, dabber gehe mer heim.", "de")
+
+
+def test_spanish_regional_markers_are_recognized():
+    note = server.dialect_notes(
+        "Órale güey, ¿me ayudas con la chamba ahorita?", "es")
+    assert '"chamba" = trabajo (job)' in note
+    assert '"ahorita"' in note
+    assert "Mexican" in note
+    barna = server.dialect_notes("Flipo tío, vale, plego ya.", "es")
+    assert '"plego"' in barna and '"tío"' in barna
+
+
+def test_spanish_ambiguous_words_alone_prove_nothing():
+    # "vale", "tío", "padre" are everyday standard Spanish — no note
+    # without an unambiguous regional marker in the same sentence.
+    assert server.dialect_notes("Vale, nos vemos mañana.", "es") is None
+    assert server.dialect_notes("Mi padre y mi tío llegan hoy.", "es") is None

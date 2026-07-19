@@ -4,6 +4,7 @@ const micBtn = document.getElementById("micBtn");
 const micLabel = document.getElementById("micLabel");
 const modeSel = document.getElementById("mode");
 const flavorSel = document.getElementById("deFlavor");
+const esFlavorSel = document.getElementById("esFlavor");
 const addressSel = document.getElementById("address");
 const deviceSel = document.getElementById("device");
 const modelSel = document.getElementById("model");
@@ -53,6 +54,7 @@ function saveSettings() {
   localStorage.setItem(CFG_KEY, JSON.stringify({
     mode: modeSel.value,
     deFlavor: flavorSel.value,
+    esFlavor: esFlavorSel.value,
     address: addressSel.value,
     model: modelSel.value,
     draft: draftSel.value,
@@ -74,6 +76,10 @@ if (saved.mode && [...modeSel.options].some((o) => o.value === saved.mode)) {
 if (saved.deFlavor &&
     [...flavorSel.options].some((o) => o.value === saved.deFlavor)) {
   flavorSel.value = saved.deFlavor;
+}
+if (saved.esFlavor &&
+    [...esFlavorSel.options].some((o) => o.value === saved.esFlavor)) {
+  esFlavorSel.value = saved.esFlavor;
 }
 if (saved.address &&
     [...addressSel.options].some((o) => o.value === saved.address)) {
@@ -205,6 +211,7 @@ function sendConfig() {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ type: "config", mode: modeSel.value,
                              de_flavor: flavorSel.value,
+                             es_flavor: esFlavorSel.value,
                              address: addressSel.value,
                              model: modelSel.value, draft_model: draftSel.value,
                              pause_ms: +pauseSlider.value }));
@@ -212,6 +219,7 @@ function sendConfig() {
 }
 modeSel.onchange = () => { sendConfig(); saveSettings(); };
 flavorSel.onchange = () => { sendConfig(); saveSettings(); };
+esFlavorSel.onchange = () => { sendConfig(); saveSettings(); };
 addressSel.onchange = () => { sendConfig(); saveSettings(); };
 modelSel.onchange = () => { sendConfig(); saveSettings(); };
 draftSel.onchange = () => { sendConfig(); saveSettings(); };

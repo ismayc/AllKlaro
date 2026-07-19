@@ -255,3 +255,10 @@ def test_api_translate_pins_the_address_form(client, fake_ollama):
                                         "mode": "en-es",
                                         "address": "plural"})
     assert '"ustedes"' in fake_ollama["chat"]["messages"][0]["content"]
+
+
+def test_api_translate_spanish_flavor(client, fake_ollama):
+    client.post("/api/translate", json={"text": "That's cool!",
+                                        "mode": "en-es",
+                                        "es_flavor": "barcelona"})
+    assert "Barcelona" in fake_ollama["chat"]["messages"][0]["content"]
