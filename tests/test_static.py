@@ -227,14 +227,30 @@ def test_remote_control_script_is_headless_ready():
     assert "open -a Tailscale" in ctl
 
 
-def test_readme_documents_vpn_prereq():
-    """The shortcut can't heal a down tunnel, so the phone must pre-connect."""
+def _phone_start_section():
     readme = (Path(__file__).parent.parent / "README.md").read_text()
     steps = readme[readme.index("### 🚦 Start the server from your phone"):]
-    steps = steps[:steps.index("## ⚙️ Under the hood")]
-    assert "**Set VPN**" in steps
-    assert steps.index("**Set VPN**") < steps.index("**Run Script Over SSH**"), \
-        "Set VPN must come before the SSH action, or the tunnel may be down"
+    return steps[:steps.index("## ⚙️ Under the hood")]
+
+
+def test_readme_documents_vpn_prereq():
+    """The shortcut can't heal a down tunnel, so the phone must pre-connect."""
+    steps = _phone_start_section()
+    assert "always-on" in steps
+    # The prereq has to be stated before the shortcut is built, not after.
+    assert steps.index("always-on") < steps.index("**Build the shortcut**")
+    assert "can't repair itself" in steps
+
+
+def test_readme_ssh_host_is_the_tailscale_ip():
+    """Shortcuts' SSH client can't resolve MagicDNS; the 100.x IP can."""
+    steps = _phone_start_section()
+    assert "tailscale ip -4" in steps
+    host = steps[steps.index("**Host:**"):]
+    host = host[:host.index("**Port:**")]
+    assert "**Tailscale IP**" in host and "100.x.y.z" in host
+    # ts.net may appear here, but only as the warning against using it.
+    assert "*not*" in host, "any ts.net mention must be a warning, not the host"
 
 
 def test_home_screen_web_app_is_configured():
