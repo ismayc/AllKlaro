@@ -221,8 +221,20 @@ def test_remote_control_script_is_headless_ready():
     assert "nohup" in ctl                # server outlives the SSH session
     for verb in ("start", "stop", "restart", "status"):
         assert f"{verb})" in ctl
-    # A phone can't click the menu bar: Tailscale must self-launch.
+    # Local .command runs have no menu bar clicker either. (This cannot
+    # rescue an SSH start — that arrives through the tunnel, so Tailscale
+    # was necessarily already up. See test_readme_documents_vpn_prereq.)
     assert "open -a Tailscale" in ctl
+
+
+def test_readme_documents_vpn_prereq():
+    """The shortcut can't heal a down tunnel, so the phone must pre-connect."""
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    steps = readme[readme.index("### 🚦 Start the server from your phone"):]
+    steps = steps[:steps.index("## ⚙️ Under the hood")]
+    assert "**Set VPN**" in steps
+    assert steps.index("**Set VPN**") < steps.index("**Run Script Over SSH**"), \
+        "Set VPN must come before the SSH action, or the tunnel may be down"
 
 
 def test_home_screen_web_app_is_configured():

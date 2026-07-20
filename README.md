@@ -363,18 +363,34 @@ phone must be on — that's the tunnel.
 ### 🚦 Start the server from your phone
 
 `allklaroctl` is a headless start/stop script made to be run over SSH by
-an iOS Shortcut — it brings up Ollama, the Tailscale app, and the server,
-and waits until everything actually answers before reporting:
+an iOS Shortcut — it brings up Ollama and the server, configures the
+Tailscale HTTPS proxy, and waits until everything actually answers before
+reporting:
 
 1. On the Mac (once): System Settings → General → Sharing → **Remote
    Login** ON (allow your user only).
-2. In Shortcuts: new shortcut → add **Run Script Over SSH** → Host: your
-   Mac's `….ts.net` name, Port 22, User: your macOS username,
-   Authentication: password (or an SSH key — Shortcuts can generate one;
-   paste its public key into `~/.ssh/authorized_keys` on the Mac).
+2. In Shortcuts: new shortcut → add **Set VPN** → your Tailscale
+   configuration → **On**. ⚠️ Don't skip this — see below.
+3. Add **Run Script Over SSH** → Host: your Mac's `….ts.net` name, Port
+   22, User: your macOS username, Authentication: password (or an SSH key
+   — Shortcuts can generate one; paste its public key into
+   `~/.ssh/authorized_keys` on the Mac).
    Script: `~/repos/AllKlaro/allklaroctl start`
-3. Add **Show Content** so the reply ("running — https://…") is shown.
-4. Duplicate it with `stop` for a remote off-switch.
+4. Add **Show Content** so the reply ("running — https://…") is shown.
+5. Duplicate it with `stop` for a remote off-switch.
+
+**Why step 2 matters — the tunnel can't repair itself.** The SSH action
+reaches the Mac *through* the tailnet, so Tailscale must already be up on
+both devices before a single line of `allklaroctl` runs. The script can't
+fix a down tunnel; it isn't running yet. When the phone's VPN toggle is
+off you get an opaque SSH connection error that looks like a broken
+*server*. The **Set VPN** step turns that into a non-event. (Tailscale's
+always-on / on-demand setting in the iOS app does the same job.)
+
+The Mac side needs no such step: Tailscale is set to start on login and
+`tailscale serve` persists its config, so an awake, logged-in Mac is
+always ready. The `open -a Tailscale` fallback inside `allklaroctl` is
+there for local runs from the `.command` launchers, where it *can* help.
 
 Limits: SSH can wake a sleeping Mac on the same network in some setups,
 but it cannot power one on — for away-from-home starts the Mac must be

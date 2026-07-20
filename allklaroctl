@@ -31,8 +31,9 @@ case "${1:-status}" in
       open -a Ollama 2>/dev/null || (nohup ollama serve >/dev/null 2>&1 &)
       sleep 3
     fi
-    # The tunnel needs the Tailscale app running; launch it if it isn't
-    # (sign-in persists, so this reconnects without interaction).
+    # Only reachable on local runs (the .command launchers): an SSH start
+    # arrives *through* the tunnel, so Tailscale was already up. Sign-in
+    # persists, so this reconnects without interaction.
     if ! "$TS" status >/dev/null 2>&1; then
       open -a Tailscale 2>/dev/null
       for i in {1..15}; do
