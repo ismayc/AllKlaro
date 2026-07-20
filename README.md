@@ -371,9 +371,22 @@ reporting:
 **Remote Login** ON (allow your user only). Then run `tailscale ip -4`
 and note the `100.x.y.z` address it prints — you'll need it below.
 
-**One-time setup, on the phone.** In the Tailscale iOS app, turn on
-always-on / connect-on-demand. ⚠️ Don't skip this — see *the tunnel
-can't repair itself*, below.
+**One-time setup, on the phone.** ⚠️ The tunnel must be up *before* the
+shortcut runs — see *the tunnel can't repair itself*, below. Two ways:
+
+- **Leave Tailscale connected** and just don't toggle it off. Tailscale
+  already installs a broad VPN On Demand policy of its own while it's
+  enabled, which keeps the VPN alive across reboots, crashes, and app
+  updates. Nothing to configure.
+- **Or make it explicit with rules:** Tailscale app → tap your profile
+  picture (top right) → **VPN On Demand** → enable it, and set **Wi-Fi**
+  and **Cellular** to **Always**. (Options are Always / Only On /
+  Except On / Never / Do Nothing, per interface.) ⚠️ Custom rules
+  *replace* Tailscale's automatic policy, so a wrong rule here can stop
+  the VPN connecting at all — if you only want "stay connected," the
+  first option is safer.
+
+No `VPN On Demand` item in the menu? Update the app from the App Store.
 
 **Build the shortcut** — one shortcut, named e.g. `StartAllKlaroServer`,
 containing these two actions in order:
@@ -400,7 +413,7 @@ script, and name it `StopAllKlaroServer` for a remote off-switch.
 before a single line of `allklaroctl` runs. The script can't fix a down
 tunnel; it isn't running yet. When the phone's VPN toggle is off you get
 an opaque SSH connection error that looks like a broken *server* —
-which is why the phone's always-on setting matters.
+which is why the phone-side setup above matters.
 
 If you'd rather connect per-shortcut than leave always-on enabled, add a
 **Set VPN** action above Run Script Over SSH and pick the Tailscale entry

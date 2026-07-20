@@ -236,9 +236,9 @@ def _phone_start_section():
 def test_readme_documents_vpn_prereq():
     """The shortcut can't heal a down tunnel, so the phone must pre-connect."""
     steps = _phone_start_section()
-    assert "always-on" in steps
+    assert "**VPN On Demand**" in steps
     # The prereq has to be stated before the shortcut is built, not after.
-    assert steps.index("always-on") < steps.index("**Build the shortcut**")
+    assert steps.index("**VPN On Demand**") < steps.index("**Build the shortcut**")
     assert "can't repair itself" in steps
 
 
