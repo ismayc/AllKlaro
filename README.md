@@ -386,12 +386,11 @@ containing these three actions in order:
    Needs Tailscale 1.36+ and iOS 15+.
 2. **Run Script Over SSH**
    - **Host:** the Mac's **Tailscale IP** from above (`100.x.y.z`).
-     Prefer the number over the `….ts.net` name here — MagicDNS names
-     are reported to work in this action, but they've been flaky enough
-     on iOS to be worth avoiding, and the IP always works. Unlike the
-     LAN `<mac-ip>` used by phone mode, this `100.x` address is assigned
-     by Tailscale and stays put across networks and router reboots, so
-     it's safe to type once and leave alone.
+     ⚠️ Use the number. The `….ts.net` MagicDNS name does not connect
+     here — that's tested, not theoretical, and no amount of retrying
+     changes it. Unlike the LAN `<mac-ip>` used by phone mode, this
+     `100.x` address is assigned by Tailscale and stays put across
+     networks and router reboots, so type it once and leave it alone.
    - **Port:** 22 — **User:** your macOS username
    - **Authentication:** password, or an SSH key (Shortcuts can generate
      one; paste its public key into `~/.ssh/authorized_keys` on the Mac)

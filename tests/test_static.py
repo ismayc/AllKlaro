@@ -248,7 +248,7 @@ def test_readme_ssh_host_is_the_tailscale_ip():
     host = steps[steps.index("**Host:**"):]
     host = host[:host.index("**Port:**")]
     assert "**Tailscale IP**" in host and "100.x.y.z" in host
-    assert "Prefer the number" in host
+    assert "Use the number" in host
 
 
 def test_home_screen_web_app_is_configured():
