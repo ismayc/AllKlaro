@@ -387,10 +387,14 @@ containing these three actions in order:
 2. **Run Script Over SSH**
    - **Host:** the Mac's **Tailscale IP** from above (`100.x.y.z`).
      ⚠️ Use the number. The `….ts.net` MagicDNS name does not connect
-     here — that's tested, not theoretical, and no amount of retrying
-     changes it. Unlike the LAN `<mac-ip>` used by phone mode, this
-     `100.x` address is assigned by Tailscale and stays put across
-     networks and router reboots, so type it once and leave it alone.
+     here — that's tested, not theoretical, and retrying won't change
+     it. This is *not* a DNS problem to go fix: the same name resolves
+     fine in Safari on the same phone (that's how Anywhere mode above
+     works), so it's specific to this action. Matches the still-open
+     [tailscale#12520](https://github.com/tailscale/tailscale/issues/12520).
+     Unlike the LAN `<mac-ip>` used by phone mode, this `100.x` address
+     is assigned by Tailscale and stays put across networks and router
+     reboots, so type it once and leave it alone.
    - **Port:** 22 — **User:** your macOS username
    - **Authentication:** password, or an SSH key (Shortcuts can generate
      one; paste its public key into `~/.ssh/authorized_keys` on the Mac)
