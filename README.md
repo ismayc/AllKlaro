@@ -371,39 +371,32 @@ reporting:
 **Remote Login** ON (allow your user only). Then run `tailscale ip -4`
 and note the `100.x.y.z` address it prints — you'll need it below.
 
-**One-time setup, on the phone.** ⚠️ The tunnel must be up *before* the
-shortcut runs — see *the tunnel can't repair itself*, below. Two ways:
-
-- **Leave Tailscale connected** and just don't toggle it off. Tailscale
-  already installs a broad VPN On Demand policy of its own while it's
-  enabled, which keeps the VPN alive across reboots, crashes, and app
-  updates. Nothing to configure.
-- **Or make it explicit with rules:** Tailscale app → tap your profile
-  picture (top right) → **VPN On Demand** → enable it, and set **Wi-Fi**
-  and **Cellular** to **Always**. (Options are Always / Only On /
-  Except On / Never / Do Nothing, per interface.) ⚠️ Custom rules
-  *replace* Tailscale's automatic policy, so a wrong rule here can stop
-  the VPN connecting at all — if you only want "stay connected," the
-  first option is safer.
-
-No `VPN On Demand` item in the menu? Update the app from the App Store.
+**One-time setup, on the phone.** Just the Tailscale app, signed in to
+the same account. No VPN settings to change: while Tailscale is enabled
+it installs its own broad VPN On Demand policy that keeps the tunnel
+alive across restarts, auto-updates, and crashes. The shortcut below
+reconnects it anyway, so leaving it connected is enough.
 
 **Build the shortcut** — one shortcut, named e.g. `StartAllKlaroServer`,
-containing these two actions in order:
+containing these three actions in order:
 
-1. **Run Script Over SSH**
+1. **Connect** (from Tailscale — search "Tailscale" in the action list).
+   Brings the tunnel up if it's down; a no-op if it's already up.
+   ⚠️ Don't skip it — see *the tunnel can't repair itself*, below.
+   Needs Tailscale 1.36+ and iOS 15+.
+2. **Run Script Over SSH**
    - **Host:** the Mac's **Tailscale IP** from above (`100.x.y.z`).
-     ⚠️ Use the number, *not* the `….ts.net` name — the Shortcuts SSH
-     client doesn't resolve MagicDNS, so the name fails to connect here
-     even though Safari resolves it fine. Unlike the LAN `<mac-ip>` used
-     by phone mode, this `100.x` address is assigned by Tailscale and
-     stays the same across networks and router reboots — type it once
-     and leave it alone.
+     Prefer the number over the `….ts.net` name here — MagicDNS names
+     are reported to work in this action, but they've been flaky enough
+     on iOS to be worth avoiding, and the IP always works. Unlike the
+     LAN `<mac-ip>` used by phone mode, this `100.x` address is assigned
+     by Tailscale and stays put across networks and router reboots, so
+     it's safe to type once and leave alone.
    - **Port:** 22 — **User:** your macOS username
    - **Authentication:** password, or an SSH key (Shortcuts can generate
      one; paste its public key into `~/.ssh/authorized_keys` on the Mac)
    - **Script:** `~/repos/AllKlaro/allklaroctl start`
-2. **Show Content** — displays the reply ("running — https://…").
+3. **Show Content** — displays the reply ("running — https://…").
 
 Then duplicate the whole shortcut, change `start` to `stop` in its
 script, and name it `StopAllKlaroServer` for a remote off-switch.
@@ -411,20 +404,15 @@ script, and name it `StopAllKlaroServer` for a remote off-switch.
 **The tunnel can't repair itself.** The SSH action reaches the Mac
 *through* the tailnet, so Tailscale must already be up on both devices
 before a single line of `allklaroctl` runs. The script can't fix a down
-tunnel; it isn't running yet. When the phone's VPN toggle is off you get
-an opaque SSH connection error that looks like a broken *server* —
-which is why the phone-side setup above matters.
+tunnel; it isn't running yet. That's the whole job of the **Connect**
+action in step 1 — without it, a phone with Tailscale toggled off gets
+an opaque SSH connection error that reads as a broken *server*.
 
-If you'd rather connect per-shortcut than leave always-on enabled, add a
-**Set VPN** action above Run Script Over SSH and pick the Tailscale entry
-from its dropdown. Tailscale installs a VPN profile (listed under
-Settings → General → VPN & Device Management), but iOS treats
-app-provided VPNs differently from personal ones and Tailscale may not
-be offered there — if it isn't, use always-on.
-
-The Mac side needs no such step: Tailscale is set to start on login and
-`tailscale serve` persists its config, so an awake, logged-in Mac is
-always ready. The `open -a Tailscale` fallback inside `allklaroctl` is
+The Mac side needs no equivalent step: Tailscale starts on login and
+`tailscale serve --bg` persists its config across reboots, so an awake,
+logged-in Mac is always ready. Note *logged-in* — the macOS client runs
+as the logged-in user, not as a system daemon, so it isn't up at the
+login window. The `open -a Tailscale` fallback inside `allklaroctl` is
 there for local runs from the `.command` launchers, where it *can* help.
 
 Limits: SSH can wake a sleeping Mac on the same network in some setups,

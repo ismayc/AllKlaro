@@ -234,12 +234,11 @@ def _phone_start_section():
 
 
 def test_readme_documents_vpn_prereq():
-    """The shortcut can't heal a down tunnel, so the phone must pre-connect."""
+    """The shortcut can't heal a down tunnel, so it must connect first itself."""
     steps = _phone_start_section()
-    assert "**VPN On Demand**" in steps
-    # The prereq has to be stated before the shortcut is built, not after.
-    assert steps.index("**VPN On Demand**") < steps.index("**Build the shortcut**")
     assert "can't repair itself" in steps
+    # Tailscale's own Connect action has to run before the SSH action.
+    assert steps.index("**Connect**") < steps.index("**Run Script Over SSH**")
 
 
 def test_readme_ssh_host_is_the_tailscale_ip():
@@ -249,8 +248,7 @@ def test_readme_ssh_host_is_the_tailscale_ip():
     host = steps[steps.index("**Host:**"):]
     host = host[:host.index("**Port:**")]
     assert "**Tailscale IP**" in host and "100.x.y.z" in host
-    # ts.net may appear here, but only as the warning against using it.
-    assert "*not*" in host, "any ts.net mention must be a warning, not the host"
+    assert "Prefer the number" in host
 
 
 def test_home_screen_web_app_is_configured():
