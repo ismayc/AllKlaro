@@ -13,5 +13,12 @@ testing/
 # Saved translation corrections (personal conversation content)
 corrections.jsonl
 
+# Local investigation write-ups. They live under docs/ for convenience, but
+# docs/ is the public GitHub Pages source — committing them would publish them.
+docs/findings/
+
+# Pipeline traces (see the README's "When it falls behind" section)
+allklaro-trace.jsonl
+
 # macOS
 .DS_Store
