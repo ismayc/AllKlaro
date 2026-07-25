@@ -1,7 +1,9 @@
 """End-to-end WebSocket flow with Whisper and Ollama doubled out."""
 import json
 
-from conftest import SPEECH_CHUNK, collect_until, speak
+import server
+from conftest import (SILENCE_CHUNK, SPEECH_CHUNK, collect_until, speak,
+                      trace_records)
 
 
 def test_full_flow_auto_german(client, stub_transcribe):
@@ -554,3 +556,116 @@ def test_spanish_flavor_config_reaches_the_prompt(client, stub_transcribe,
         ws.send_text(json.dumps({"type": "text", "text": "That's cool!"}))
         collect_until(ws)
     assert "Mexican" in fake_ollama["chat"]["messages"][0]["content"]
+
+
+# ------------------------------------------------------- pipeline instrumentation
+
+
+def test_trace_records_where_an_utterance_spent_its_time(client, stub_transcribe,
+                                                         fake_ollama, trace_file):
+    """One JSON line per utterance, carrying what the on-card latency omits."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en",
+                                 "model": "gemma3:12b"}))
+        speak(ws)
+        collect_until(ws)
+
+    records = trace_records(trace_file)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["outcome"] == "final"
+    assert rec["split"] == "pause"          # a normal, well-paced utterance
+    assert rec["speaker"] == "you"
+    assert rec["chunk_sec"] > 0
+    # The felt delay includes the chunk's own duration; the card's number
+    # does not. first_word_lag must therefore always exceed lag.
+    assert rec["first_word_lag_ms"] >= rec["lag_ms"]
+    assert rec["first_word_lag_ms"] >= rec["chunk_sec"] * 1000
+    for field in ("wait_ms", "transcribe_ms", "translate_ms", "whisper_queue",
+                  "in_flight", "partials_skipped", "spec", "uid", "t"):
+        assert field in rec, f"trace lost {field}"
+
+
+def test_trace_records_discards_too(client, stub_transcribe, fake_ollama,
+                                    trace_file):
+    """A dropped utterance still consumed the Whisper thread — it must show up,
+    or the trace understates the load during fast speech."""
+    stub_transcribe.result = {"text": "Untertitel der Amara.org-Community",
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en"}))
+        speak(ws)
+        collect_until(ws)
+
+    records = trace_records(trace_file)
+    assert [r["outcome"] for r in records] == ["discard_empty"]
+    assert "transcribe_ms" in records[0]
+
+
+def test_tracing_can_be_switched_off(client, stub_transcribe, fake_ollama,
+                                     trace_file, monkeypatch):
+    monkeypatch.setattr(server, "TRACE_PATH", "off")
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en"}))
+        speak(ws)
+        collect_until(ws)
+    assert not trace_file.exists()
+
+
+def test_stats_are_only_pushed_when_the_overlay_asks(client, stub_transcribe,
+                                                     fake_ollama, monkeypatch):
+    """Off by default: an idle phone on cellular should not carry telemetry."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en"}))
+        speak(ws)
+        msgs = collect_until(ws)
+    assert not [m for m in msgs if m["type"] == "stats"]
+
+    # A whole test utterance takes milliseconds, so the real half-second
+    # cadence would only ever emit the opening (idle) sample.
+    monkeypatch.setattr(server, "STATS_INTERVAL_SEC", 0)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en",
+                                 "stats": True}))
+        speak(ws, speech_chunks=40, silence_chunks=10)
+        msgs = collect_until(ws)
+    stats = [m for m in msgs if m["type"] == "stats"]
+    assert stats, "overlay asked for stats and got none"
+    for key in ("in_flight", "whisper_queue", "speech_sec", "partials_skipped"):
+        assert key in stats[0]
+    # While speech is still accumulating, the overlay must show it — that is
+    # the number explaining an empty screen mid-sentence.
+    assert max(s["speech_sec"] for s in stats) > 0
+
+
+def test_fast_talker_is_traced_as_soft_max(client, stub_transcribe, fake_ollama,
+                                           trace_file):
+    """The case that started this: continuous speech with only a micro-pause.
+
+    The chunk gets cut by the soft-max rule rather than by the speaker, and
+    its first word is older on screen than the card's own latency suggests.
+    """
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en",
+                                 "model": "gemma3:12b"}))
+        for _ in range(3):
+            ws.send_bytes(SILENCE_CHUNK)
+        for _ in range(40):            # ~5.1 s of unbroken speech
+            ws.send_bytes(SPEECH_CHUNK)
+        for _ in range(2):             # ~256 ms dip: a micro-pause, not a pause
+            ws.send_bytes(SILENCE_CHUNK)
+        for _ in range(30):            # past SOFT_MAX_SEC -> forced split
+            ws.send_bytes(SPEECH_CHUNK)
+        for _ in range(30):
+            ws.send_bytes(SILENCE_CHUNK)
+        collect_until(ws, limit=400)
+
+    records = trace_records(trace_file)
+    assert records, "a forced split must still be traced"
+    forced = records[0]
+    assert forced["split"] == "soft_max"
+    assert forced["chunk_sec"] > 4      # a long chunk nobody asked for
+    # The whole point of the metric: the card's latency omits the seconds the
+    # audio spent accumulating, so the felt delay is strictly larger.
+    assert (forced["first_word_lag_ms"]
+            > forced["transcribe_ms"] + forced["translate_ms"])

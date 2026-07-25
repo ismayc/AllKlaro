@@ -60,6 +60,21 @@ def no_user_gender_lexicon(tmp_path, monkeypatch):
     server._wikt_conns.clear()
 
 
+@pytest.fixture(autouse=True)
+def trace_file(tmp_path, monkeypatch):
+    """Tests must never append to the developer's real pipeline trace."""
+    path = tmp_path / "trace.jsonl"
+    monkeypatch.setattr(server, "TRACE_PATH", str(path))
+    return path
+
+
+def trace_records(path):
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in
+            path.read_text().splitlines() if line.strip()]
+
+
 @pytest.fixture
 def output_gender_map(no_user_gender_lexicon, tmp_path, monkeypatch):
     """Write a small output-side gender map: write(entries, target="de")."""

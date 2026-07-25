@@ -116,6 +116,25 @@ main {
   color: var(--muted); font-style: italic; font-size: 17px;
 }
 #partialBar.hidden { display: none; }
+/* Pipeline overlay — a diagnostic readout, deliberately unobtrusive:
+   pinned out of the reading column and click-through, so it never blocks a
+   tap on a card underneath it. */
+#pipeline {
+  position: fixed; right: 8px; bottom: 120px; z-index: 5;
+  pointer-events: none; display: grid; gap: 2px;
+  padding: 8px 10px; border-radius: 8px;
+  /* Nearly opaque plus a blur: at 82% the conversation text underneath read
+     straight through the digits and both became hard to follow. */
+  background: rgba(16, 20, 26, .94); border: 1px solid var(--border);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px;
+  color: var(--muted);
+}
+#pipeline.hidden { display: none; }
+#pipeline div { display: flex; gap: 10px; justify-content: space-between; }
+#pipeline b { color: var(--text); font-weight: 600; }
+#pipeline b.warm { color: var(--es); }
+#pipeline b.hot { color: var(--err); }
 #typeBar {
   display: flex; gap: 8px;
   /* Clear the iPhone home indicator when installed full-screen. */

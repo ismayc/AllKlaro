@@ -227,6 +227,61 @@ def test_remote_control_script_is_headless_ready():
     assert "open -a Tailscale" in ctl
 
 
+def test_pipeline_overlay_is_wired_and_off_by_default():
+    app_js = (STATIC / "app.js").read_text()
+    assert 'id="statsChk"' in HTML and 'id="pipeline"' in HTML
+    assert 'id="pipeline" class="hidden"' in HTML   # opt-in, not always-on
+    # Toggling it must tell the server, or no stats are ever pushed.
+    assert "stats: statsChk.checked" in app_js
+    assert 'msg.type === "stats"' in app_js
+    for field in ("pipeSpeech", "pipeFlight", "pipeQueue", "pipeSkipped",
+                  "pipeChunk", "pipeLag"):
+        assert f'id="{field}"' in HTML, f"overlay lost {field}"
+
+
+def test_pipeline_overlay_never_blocks_the_conversation():
+    """It floats over the feed, so it must be click-through and opaque enough
+    to read against card text underneath."""
+    css = (STATIC / "style.css").read_text()
+    block = re.search(r"#pipeline \{[^}]*\}", css, re.S).group()
+    assert "pointer-events: none" in block
+    alpha = float(re.search(r"rgba\(16, 20, 26, \.(\d+)\)", block).group(1)) / 100
+    assert alpha >= 0.9, "overlay too transparent — page text bleeds through"
+
+
+def test_anywhere_mode_serves_loopback_only():
+    """Why the LAN Shortcut URL dies the moment you switch to anywhere mode.
+
+    Both anywhere-mode entry points bind uvicorn to 127.0.0.1 and publish
+    it through `tailscale serve`, so nothing answers on <mac-ip>:8710 —
+    only the phone-mode launcher opens the LAN interface.
+    """
+    root = Path(__file__).parent.parent
+    for name in ("Start AllKlaro (Anywhere).command", "allklaroctl"):
+        text = (root / name).read_text()
+        assert "--host 127.0.0.1" in text, f"{name} no longer loopback-only"
+        assert "serve --bg http://127.0.0.1:8710" in text, \
+            f"{name} lost the Tailscale proxy that replaces the LAN address"
+    assert "--host 0.0.0.0" in (root / "Start AllKlaro (iPhone).command").read_text()
+
+
+def _shortcut_section():
+    readme = (Path(__file__).parent.parent / "README.md").read_text()
+    sect = readme[readme.index("### 📲 iOS Shortcut:"):]
+    return sect[:sect.index("## 🌍 Anywhere mode (Tailscale)")]
+
+
+def test_readme_warns_the_lan_shortcut_url_breaks_in_anywhere_mode():
+    """A stale LAN URL breaks every launcher of the shortcut (Back Tap
+    included) and reads like a dead server, so the fix must be findable
+    from the Shortcut section, not only from the anywhere-mode one."""
+    sect = _shortcut_section()
+    assert "anywhere mode" in sect         # the URL step points at it
+    fix = sect[sect.index("**Troubleshooting:**"):]
+    assert "ts.net/api/translate" in fix   # names the URL to switch to
+    assert "127.0.0.1" in fix              # and why the LAN one refuses
+
+
 def _phone_start_section():
     readme = (Path(__file__).parent.parent / "README.md").read_text()
     steps = readme[readme.index("### 🚦 Start the server from your phone"):]

@@ -94,6 +94,8 @@
     <label class="chk"><input type="checkbox" id="speakChk" /> Speak</label>
     <label class="chk" title="Keep the newest text near mid-screen instead of the bottom">
       <input type="checkbox" id="focusChk" /> Center latest</label>
+    <label class="chk" title="Show what the pipeline is doing — how much speech is still waiting to be cut into an utterance, how much work is queued, and how far behind the last card landed">
+      <input type="checkbox" id="statsChk" /> Pipeline</label>
     <button id="summarizeBtn" class="tool-btn">Summarize</button>
     <button id="exportBtn" class="tool-btn">Export</button>
     <button id="clearBtn" class="tool-btn" title="Clear the conversation">Clear</button>
@@ -111,6 +113,17 @@
 
   <div id="partialBar" class="hidden">
     <span class="pulse"></span><span id="partialText"></span>
+  </div>
+
+  <!-- Pipeline overlay: the numbers behind "it can't keep up". Read-only and
+       click-through so it never gets between a finger and a card. -->
+  <div id="pipeline" class="hidden">
+    <div><span>buffering</span><b id="pipeSpeech">0.0s</b></div>
+    <div><span>in flight</span><b id="pipeFlight">0</b></div>
+    <div><span>whisper q</span><b id="pipeQueue">0</b></div>
+    <div><span>partials lost</span><b id="pipeSkipped">0</b></div>
+    <div><span>last chunk</span><b id="pipeChunk">—</b></div>
+    <div><span>last lag</span><b id="pipeLag">—</b></div>
   </div>
 
   <form id="typeBar" title="Translate typed text — works without the microphone">

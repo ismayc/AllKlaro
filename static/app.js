@@ -12,6 +12,8 @@ const draftSel = document.getElementById("draftModel");
 const fontSize = document.getElementById("fontSize");
 const speakChk = document.getElementById("speakChk");
 const focusChk = document.getElementById("focusChk");
+const statsChk = document.getElementById("statsChk");
+const pipeline = document.getElementById("pipeline");
 const pauseSlider = document.getElementById("pause");
 const pauseVal = document.getElementById("pauseVal");
 const exportBtn = document.getElementById("exportBtn");
@@ -62,6 +64,7 @@ function saveSettings() {
     fontSize: fontSize.value,
     speak: speakChk.checked,
     focus: focusChk.checked,
+    stats: statsChk.checked,
     pause: pauseSlider.value,
     controlsHidden: controls.classList.contains("hidden"),
   }));
@@ -70,6 +73,7 @@ const saved = loadSettings();
 if (saved.fontSize) fontSize.value = saved.fontSize;
 if (saved.speak) speakChk.checked = true;
 if (saved.focus) { focusChk.checked = true; feed.classList.add("focus"); }
+if (saved.stats) { statsChk.checked = true; pipeline.classList.remove("hidden"); }
 if (saved.mode && [...modeSel.options].some((o) => o.value === saved.mode)) {
   modeSel.value = saved.mode;
 }
@@ -130,6 +134,47 @@ focusChk.onchange = () => {
   saveSettings();
   feed.scrollTop = feed.scrollHeight;
 };
+statsChk.onchange = () => {
+  pipeline.classList.toggle("hidden", !statsChk.checked);
+  sendConfig();   // the server only pushes stats while the overlay is open
+  saveSettings();
+};
+
+// ------------------------------------------------------- pipeline overlay
+//
+// "It falls behind when nobody pauses" has several possible causes that feel
+// identical from the outside: audio still buffering because no pause has come
+// yet, a backlog of utterances, a Whisper thread with a queue on it, or
+// partials being starved so the screen sits empty. Each gets its own number.
+const pipeSpeech = document.getElementById("pipeSpeech");
+const pipeFlight = document.getElementById("pipeFlight");
+const pipeQueue = document.getElementById("pipeQueue");
+const pipeSkipped = document.getElementById("pipeSkipped");
+const pipeChunk = document.getElementById("pipeChunk");
+const pipeLag = document.getElementById("pipeLag");
+
+function showStats(s) {
+  pipeSpeech.textContent = s.speech_sec.toFixed(1) + "s";
+  // Buffering past the soft-max split means continuous speech: the words
+  // already spoken cannot reach the screen until a micro-pause shows up.
+  pipeSpeech.className = s.speech_sec >= 8 ? "hot" : s.speech_sec >= 4 ? "warm" : "";
+  pipeFlight.textContent = s.in_flight;
+  pipeFlight.className = s.in_flight > 1 ? "warm" : "";
+  pipeQueue.textContent = s.whisper_queue;
+  pipeQueue.className = s.whisper_queue > 1 ? "hot" : "";
+  pipeSkipped.textContent = s.partials_skipped;
+  pipeSkipped.className = s.partials_skipped > 2 ? "warm" : "";
+  const last = s.last;
+  if (!last) return;
+  pipeChunk.textContent = `${last.chunk_sec}s ${last.split || "?"}`;
+  pipeChunk.className = last.split === "soft_max" || last.split === "hard_max"
+    ? "hot" : "";
+  // The felt delay: the age of the chunk's FIRST word when its card landed.
+  const felt = (last.first_word_lag_ms / 1000).toFixed(1);
+  pipeLag.textContent = `${felt}s`;
+  pipeLag.className = last.first_word_lag_ms >= 8000 ? "hot"
+    : last.first_word_lag_ms >= 4000 ? "warm" : "";
+}
 
 // ----------------------------------------------------------- models & devices
 
@@ -214,6 +259,7 @@ function sendConfig() {
                              es_flavor: esFlavorSel.value,
                              address: addressSel.value,
                              model: modelSel.value, draft_model: draftSel.value,
+                             stats: statsChk.checked,
                              pause_ms: +pauseSlider.value }));
   }
 }
@@ -583,6 +629,8 @@ function handleMessage(msg) {
       renderFinalRow(c, t);
       row.el.classList.add("revised"); // brief flash marks the swap
     }
+  } else if (msg.type === "stats") {
+    showStats(msg);
   } else if (msg.type === "discard") {
     clearPartial();
   } else if (msg.type === "error") {

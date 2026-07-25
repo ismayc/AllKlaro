@@ -120,6 +120,30 @@ def test_continuous_speech_soft_splits_at_micro_pause():
     assert any(u is not None for u in tail)
 
 
+def test_split_reason_distinguishes_pause_from_being_outpaced():
+    """The trace leans on split_reason to tell "someone finished a sentence"
+    apart from "nobody ever paused and we cut them off"."""
+    vad = VadSession()
+    feed_all(vad, [silence()] * 10 + [speech()] * 40 + [silence()] * 30)
+    assert vad.split_reason == "pause"
+
+    vad = VadSession(ScriptScorer([True] * 150 + [False] * 6 + [True] * 200))
+    frames = [speech()] * 150 + [silence()] * 6 + [speech()] * 200
+    emitted = [u for u in feed_all(vad, frames) if u is not None]
+    assert len(emitted) == 1
+    assert vad.split_reason == "soft_max"
+
+
+def test_split_reason_flags_the_mid_word_hard_cut():
+    # Voiced without any micro-pause: no soft split is possible, so the chunk
+    # survives to MAX_UTTERANCE_SEC and gets cut mid-word.
+    vad = VadSession(ScriptScorer([True] * 2000))
+    frames = [speech()] * 1000       # 1000 * 32 ms = 32 s > MAX_UTTERANCE_SEC
+    emitted = [u for u in feed_all(vad, frames) if u is not None]
+    assert len(emitted) == 1
+    assert vad.split_reason == "hard_max"
+
+
 def test_partial_window_is_bounded():
     vad = VadSession(ScriptScorer([True] * 500))
     for _ in range(240):  # keep under SOFT_MAX so no split interferes

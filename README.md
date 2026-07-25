@@ -278,7 +278,12 @@ Shortcuts; it isolates the two things that can fail):
 
 1. Tap the name at the top → **Rename** → `Translate with AllKlaro`.
 2. Search Actions and add **Get Contents of URL**. Tap the blue `URL` placeholder
-   and type the full URL: `https://<mac-ip>:8710/api/translate`.
+   and type the full URL: `https://<mac-ip>:8710/api/translate`. ⚠️ If you
+   also use [anywhere mode](#-anywhere-mode-tailscale), put its
+   `https://<your-mac>.<tailnet>.ts.net/api/translate` URL here instead —
+   that one works at home *and* away, and it survives the switch between
+   the two launchers. The LAN URL only works while the phone-mode
+   launcher is the one running.
 3. Tap the action's **expand arrow (▸ / "Show More")**:
    - **Method** → **POST** (it defaults to GET — a GET here with no
      `text` returns only an error).
@@ -312,8 +317,11 @@ text): long-press the message → **Copy** (press-and-hold the text itself
 first to copy only part of it), then launch the shortcut — the clipboard
 fallback kicks in. Fast launchers: **Back Tap** (Settings → Accessibility
 → Touch → Back Tap → Double Tap → the shortcut), the Action Button, a
-Home Screen icon, or a Shortcuts widget. In apps whose text selection
-does offer Share (Safari, Mail), the share-sheet route works directly.
+Home Screen icon, or a Shortcuts widget. Back Tap has two slots, Double
+Tap and Triple Tap, which suits the two shortcuts of anywhere mode: one
+to [start the server](#-start-the-server-from-your-phone), one to
+translate. In apps whose text selection does offer Share (Safari, Mail),
+the share-sheet route works directly.
 
 **Troubleshooting:**
 
@@ -322,6 +330,21 @@ does offer Share (Safari, Mail), the share-sheet route works directly.
   Contents of URL* showing **Contents of URL** — the raw JSON names the
   problem (`"No text to translate."` = the clipboard fallback from step 6
   isn't set).
+- **It worked at home, then stopped once you switched to anywhere mode**
+  → the shortcut still holds the LAN URL, and nothing answers there any
+  more. Both `Start AllKlaro (Anywhere).command` and `allklaroctl start`
+  run uvicorn on `127.0.0.1` and publish it through Tailscale, so
+  `<mac-ip>:8710` refuses the connection even though the server is up
+  and the Mac is on the same Wi-Fi. Fix it in one place: open the
+  shortcut, tap the URL in **Get Contents of URL**, and replace it with
+  `https://<your-mac>.<tailnet>.ts.net/api/translate` (the launcher and
+  `allklaroctl status` both print that name). Then leave it — that URL
+  is correct on every network.
+- **"Could not connect" on the anywhere URL** → the server is probably
+  stopped: in anywhere mode nothing starts it for you. Run the
+  `StartAllKlaroServer` shortcut first, or check from the Mac with
+  `./allklaroctl status`. Also confirm the phone's Tailscale VPN toggle
+  is on — that tunnel is the only route in.
 - **"Could not connect" / SSL error** → the self-signed certificate is
   pinned to the Mac's IP at generation time. If your router handed the
   Mac a new IP since then, delete the `certs/` folder, rerun the iPhone
@@ -353,7 +376,12 @@ WireGuard network that follows you around:
    one-time admin-console toggle).
 3. Point the iOS Shortcut at `https://<that-name>/api/translate`. The
    name never changes — it works at home and away, and survives router
-   IP reshuffles that break the LAN phone mode URL.
+   IP reshuffles that break the LAN phone mode URL. Already built the
+   shortcut against `<mac-ip>:8710`? Edit that one URL now rather than
+   later: this launcher binds the server to `127.0.0.1`, so the old LAN
+   address stops answering the moment you switch modes, and every
+   launcher of that shortcut — Back Tap, Action Button, share sheet —
+   fails with it until the URL is updated.
 
 The MacBook must be on and awake while you're away: Settings → Battery →
 prevent automatic sleeping (or `caffeinate -s`), and expect Ollama to
@@ -461,6 +489,58 @@ The speed and correctness machinery, for the curious:
   its grammar/agreement findings feed the same corrective re-ask,
   filtered to hard grammar rules so style opinions never trigger
   re-translations.
+
+## 📉 When it falls behind (pipeline instrumentation)
+
+Fast, unbroken speech is the case where the app visibly lags — and the
+per-card latency is no help there, because it times only a chunk's own
+transcribe+translate. It stays reassuringly small while the *first* words
+of a long chunk age off-screen. Three tools measure the rest.
+
+**The overlay.** Tick **Pipeline** in the settings to float a live readout
+over the conversation (off by default — nothing is pushed to the phone
+until you ask for it):
+
+| | |
+|---|---|
+| `buffering` | seconds of speech already said, still growing into a chunk. Nothing about it can reach the screen until a pause or a micro-pause cuts it. |
+| `in flight` | utterances being transcribed or translated right now |
+| `whisper q` | jobs queued on the Whisper thread — there is exactly one, and finals, speculations, and partials all share it |
+| `partials lost` | live partials skipped because the pipe was busy = blank screen while someone is still talking |
+| `last chunk` | length and why it was cut: `pause` (good), `soft_max` (cut at a micro-pause), `hard_max` (30 s limit, mid-word) |
+| `last lag` | how old the chunk's **first** word was when its card appeared |
+
+**The trace.** The server appends one JSON line per utterance to
+`/tmp/allklaro-trace.jsonl` (set `ALLKLARO_TRACE=off` to disable, or to a
+path to move it) with the same fields plus the per-stage timings.
+Summarize a session:
+
+```
+uv run python tools/trace_report.py --since 10m
+```
+
+It attributes the delay you actually feel across audio accumulation,
+queueing, transcription, and translation, so tuning starts from a
+measurement instead of a guess.
+
+**The replay harness.** Reproducing "someone talking fast" on demand is
+otherwise impossible — you can't talk fast on cue the same way twice.
+This synthesizes continuous German with macOS `say` and streams it into
+`/ws` exactly as the browser does, at realtime pace:
+
+```
+uv run python tools/replay.py                 # ~53 s of unbroken speech
+uv run python tools/replay.py --rate 300      # faster talker
+uv run python tools/replay.py --pace 1.5      # 1.5x realtime: deliberate overload
+uv run python tools/replay.py --audio talk.m4a  # a real recording instead
+```
+
+Because the input is identical run to run, a parameter change (`SOFT_MAX_SEC`,
+`PARTIAL_INTERVAL_SEC`, the pause slider, a different draft model) can be
+compared honestly. Synthetic speech is *more* relentless than a human —
+`say` leaves fewer sub-200 ms gaps than real speakers do — so treat it as
+the hard end of the range, and confirm against the overlay in a real
+conversation.
 
 ## 📖 Gender lexicons (optional)
 

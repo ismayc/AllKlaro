@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import sqlite3
+import time
 import zlib
 from difflib import SequenceMatcher
 from collections import deque
@@ -51,6 +52,7 @@ MERGE_MAX_CHARS = 300              # never grow merged utterances beyond this
 ECHO_WINDOW_SEC = 6.0              # cross-channel duplicate suppression window
 ECHO_MIN_CHARS = 16                # never dedupe short phrases ("Genau!") —
                                    # people legitimately repeat those
+STATS_INTERVAL_SEC = 0.5           # how often the pipeline overlay is updated
 
 # A transcript that ends mid-sentence (no terminal punctuation) is a merge
 # candidate — crucial for German, where the meaning-carrying verb comes last.
@@ -107,6 +109,32 @@ HALLUCINATION_RE = re.compile(
 # mlx is not thread-safe across simultaneous calls -> serialize all transcription.
 whisper_executor = ThreadPoolExecutor(max_workers=1)
 STATIC_DIR = Path(__file__).parent / "static"
+
+# ------------------------------------------------------------------- tracing
+#
+# One JSON line per finalized utterance, so "it can't keep up with a fast
+# talker" becomes a number. The per-card latency in the UI only covers a
+# chunk's own transcribe+translate, which stays reassuringly small even while
+# the *first* words of an 8 s chunk age off-screen; these records carry the
+# whole story instead: how long the audio sat accumulating, how much work was
+# already queued on the single Whisper thread, and why the chunk was cut.
+# `tools/trace_report.py` summarizes the file. ALLKLARO_TRACE=off disables it.
+TRACE_PATH = os.environ.get("ALLKLARO_TRACE", "/tmp/allklaro-trace.jsonl")
+
+# Transcriptions queued or running on the single Whisper thread. Depth, not
+# duration, is what a fast talker actually creates.
+whisper_pending = 0
+
+
+def trace(record: dict) -> None:
+    """Append one trace record. Instrumentation must never break a session."""
+    if not TRACE_PATH or TRACE_PATH == "off":
+        return
+    try:
+        with open(TRACE_PATH, "a") as fh:
+            fh.write(json.dumps(record) + "\n")
+    except OSError:
+        log.debug("trace write failed", exc_info=True)
 
 
 _glossary_cache = {"mtime": None, "lines": []}
@@ -771,6 +799,27 @@ def transcribe(audio: np.ndarray, language: str | None,
     )
 
 
+def submit_transcribe(loop, audio: np.ndarray, language: str | None,
+                      prompt: str | None = None):
+    """Queue a transcription on the single Whisper thread, keeping count.
+
+    Every caller goes through here — final utterances, speculations, and live
+    partials all compete for the same worker, and `whisper_pending` is the
+    only place that competition is visible.
+    """
+    global whisper_pending
+    whisper_pending += 1
+    fut = loop.run_in_executor(whisper_executor, transcribe, audio,
+                               language, prompt)
+    fut.add_done_callback(_transcribe_finished)
+    return fut
+
+
+def _transcribe_finished(_fut) -> None:
+    global whisper_pending
+    whisper_pending -= 1
+
+
 # ------------------------------------------------------------------ VAD scorers
 
 
@@ -877,6 +926,11 @@ class VadSession:
         self.split_at = None  # frame index of the last micro-pause boundary
         self.early_event = None   # audio ready for speculative transcription
         self.speculating = False  # a speculation is plausibly still valid
+        # Why the last utterance was cut: "pause" (the speaker stopped),
+        # "soft_max" (continuous speech, cut at a micro-pause), or "hard_max"
+        # (cut mid-word). A run dominated by soft_max is the app being
+        # outpaced — that is the case worth measuring.
+        self.split_reason = None
 
     def feed(self, frame: np.ndarray) -> np.ndarray | None:
         """Feed one frame; returns a finished utterance (float32) or None."""
@@ -915,6 +969,7 @@ class VadSession:
             self.speculating = True
         if self.silence_run >= self.end_silence or seconds > MAX_UTTERANCE_SEC:
             utterance = np.concatenate(self.speech)
+            hard = seconds > MAX_UTTERANCE_SEC
             self.in_speech = False
             self.speech = []
             self.voiced_run = 0
@@ -922,6 +977,7 @@ class VadSession:
             self.speculating = False
             if seconds - self.silence_run * FRAME_MS / 1000 < MIN_UTTERANCE_SEC:
                 return None
+            self.split_reason = "hard_max" if hard else "pause"
             return utterance.astype(np.float32) / 32768.0
         if seconds > SOFT_MAX_SEC and self.split_at:
             # Continuous speech (a video, a fast talker) never yields a full
@@ -929,6 +985,7 @@ class VadSession:
             utterance = np.concatenate(self.speech[:self.split_at])
             self.speech = self.speech[self.split_at:]
             self.split_at = None
+            self.split_reason = "soft_max"
             return utterance.astype(np.float32) / 32768.0
         return None
 
@@ -1727,6 +1784,12 @@ async def ws_endpoint(ws: WebSocket):
     # Last finalized utterance, for merging sentence fragments cut mid-pause.
     prev = None                      # {"uid","text","source","speaker","t_end"}
     recent_finals: deque = deque(maxlen=8)  # for cross-channel echo dedupe
+    # --- pipeline instrumentation (see trace() and the "stats" message) ---
+    stats_on = False                 # client wants the live pipeline overlay
+    in_flight = 0                    # utterances being transcribed/translated
+    partials_skipped = 0             # partials dropped because the pipe was busy
+    last_stats = 0.0
+    last_done = None                 # summary of the last finished utterance
 
     def channel(tag: int) -> dict:
         if tag not in channels:
@@ -1748,30 +1811,38 @@ async def ws_endpoint(ws: WebSocket):
         return mode_pair(mode)
 
     async def handle_utterance(audio: np.ndarray, my_uid: int, speaker: str,
-                               spec_task=None):
-        nonlocal busy, prev
+                               spec_task=None, meta: dict | None = None):
+        nonlocal busy, prev, in_flight, last_done
         busy = True
+        in_flight += 1
         t0 = loop.time()
+        meta = meta if meta is not None else {"uid": my_uid, "t_emit": t0}
+        # Time spent queued behind other utterances before this one even
+        # started — invisible in the per-card latency.
+        meta["wait_ms"] = int((t0 - meta["t_emit"]) * 1000)
+        meta["in_flight"] = in_flight
+        meta["outcome"] = "error"
         try:
             if spec_task is not None:
                 result = await spec_task  # transcription began during the pause
             else:
-                result = await loop.run_in_executor(
-                    whisper_executor, transcribe, audio, lang_hint(mode),
-                    whisper_prompt())
+                result = await submit_transcribe(loop, audio, lang_hint(mode),
+                                                 whisper_prompt())
             detected = result.get("language", "de")
             pair = auto_pair()
             if pair and detected not in pair:
                 # Whisper picked a language outside the active pair (e.g. Dutch
                 # for German speech) — the decode itself is wrong. Redo it
                 # pinned to the pair's primary language.
-                result = await loop.run_in_executor(
-                    whisper_executor, transcribe, audio, pair[0],
-                    whisper_prompt())
+                meta["redo"] = True   # a second full decode on the one thread
+                result = await submit_transcribe(loop, audio, pair[0],
+                                                 whisper_prompt())
                 detected = pair[0]
             t1 = loop.time()
+            meta["transcribe_ms"] = int((t1 - t0) * 1000)
             text = clean_transcript(result)
             if not text or HALLUCINATION_RE.match(text):
+                meta["outcome"] = "discard_empty"
                 await safe_send(ws, {"type": "discard", "id": my_uid})
                 return
             norm = normalize_text(text)
@@ -1780,6 +1851,7 @@ async def ws_endpoint(ws: WebSocket):
                     and is_echo(norm, r["norm"]) for r in recent_finals):
                 # Same speech heard on the other channel moments ago: the mic
                 # picked up the call audio (or vice versa). Drop the echo.
+                meta["outcome"] = "discard_echo"
                 await safe_send(ws, {"type": "discard", "id": my_uid})
                 return
             source, targets = resolve_targets(mode, detected)
@@ -1808,16 +1880,33 @@ async def ws_endpoint(ws: WebSocket):
                          "targets": targets, "speaker": speaker}
             if replaces is not None:
                 final_msg["replaces"] = replaces
+                meta["merged"] = True
             await safe_send(ws, final_msg)
-            await run_translations(my_uid, text, source, targets, t0, t1)
+            meta["outcome"] = "final"
+            meta["chars"] = len(text)
+            await run_translations(my_uid, text, source, targets, t0, t1, meta)
         except Exception as exc:
             log.exception("transcription failed")
             await safe_send(ws, {"type": "error", "id": my_uid,
                                  "message": f"Transcription failed: {exc}"})
         finally:
             busy = False
+            in_flight -= 1
+            # Age of this chunk's *last* word when its translation landed...
+            meta["lag_ms"] = int((loop.time() - meta["t_emit"]) * 1000)
+            # ...and of its first, which is the delay a listener actually
+            # feels: everything above plus the time the chunk spent growing.
+            meta["first_word_lag_ms"] = (meta["lag_ms"]
+                                         + int(meta.get("chunk_sec", 0) * 1000))
+            meta.pop("t_emit", None)
+            last_done = {k: meta.get(k) for k in
+                         ("chunk_sec", "split", "spec", "wait_ms", "lag_ms",
+                          "first_word_lag_ms", "outcome")}
+            trace(meta)
 
-    async def run_translations(my_uid, text, source, targets, t0, t1):
+    async def run_translations(my_uid, text, source, targets, t0, t1,
+                               meta: dict | None = None):
+        meta = meta if meta is not None else {}
         # Two-tier translation: stream the fast draft model first so text
         # appears immediately, then re-translate with the main model
         # behind the scenes and swap in its (better) answer. Either way,
@@ -1834,11 +1923,13 @@ async def ws_endpoint(ws: WebSocket):
             history.append({"uid": my_uid, "source": source,
                             "target": targets[0], "text": text,
                             "translation": translations[0]})
+            t2 = loop.time()
+            meta["translate_ms"] = int((t2 - t1) * 1000)
             await safe_send(ws, {
                 "type": "translation_done", "id": my_uid,
                 "refining": bool(draft),
                 "transcribe_ms": int((t1 - t0) * 1000),
-                "translate_ms": int((loop.time() - t1) * 1000)})
+                "translate_ms": int((t2 - t1) * 1000)})
             texts = {}
             for t, streamed in zip(targets, translations):
                 candidate = streamed
@@ -1871,6 +1962,9 @@ async def ws_endpoint(ws: WebSocket):
             if draft or texts:
                 await safe_send(ws, {"type": "translation_revised",
                                      "id": my_uid, "texts": texts})
+            # The refine pass runs after the card is already on screen, but it
+            # still occupies Ollama while the next utterance waits its turn.
+            meta["refine_ms"] = int((loop.time() - t2) * 1000)
 
     async def handle_text(text, my_uid):
         """Typed input: same translation pipeline, no audio machinery —
@@ -1891,13 +1985,17 @@ async def ws_endpoint(ws: WebSocket):
                                  "message": f"Translation failed: {exc}"})
 
     async def maybe_partial():
-        nonlocal last_partial, busy
+        nonlocal last_partial, busy, partials_skipped
         now = loop.time()
         # Never let a partial queue in front of real work: skip while an
         # utterance is being handled or a speculation is in flight.
         if busy or now - last_partial < PARTIAL_INTERVAL_SEC:
+            # Only a busy pipe counts as starvation; the interval is by design.
+            if busy and now - last_partial >= PARTIAL_INTERVAL_SEC:
+                partials_skipped += 1
             return
         if any(c["vad"].speculating for c in channels.values()):
+            partials_skipped += 1
             return
         audio = next((c["vad"].current_audio() for c in channels.values()
                       if c["vad"].in_speech), None)
@@ -1906,9 +2004,8 @@ async def ws_endpoint(ws: WebSocket):
         last_partial = now
         busy = True
         try:
-            result = await loop.run_in_executor(
-                whisper_executor, transcribe, audio, lang_hint(mode),
-                whisper_prompt())
+            result = await submit_transcribe(loop, audio, lang_hint(mode),
+                                             whisper_prompt())
             text = clean_transcript(result)
             if text and not HALLUCINATION_RE.match(text):
                 await safe_send(ws, {"type": "partial", "text": text})
@@ -1929,6 +2026,8 @@ async def ws_endpoint(ws: WebSocket):
                 if isinstance(cfg, dict) and cfg.get("type") == "config":
                     mode = cfg.get("mode", mode)
                     model = cfg.get("model", model)
+                    if "stats" in cfg:  # live pipeline overlay on/off
+                        stats_on = bool(cfg["stats"])
                     if "draft_model" in cfg:  # "" means draft pass off
                         draft_model = cfg["draft_model"] or None
                     if "de_flavor" in cfg:  # "" means standard German
@@ -1986,9 +2085,9 @@ async def ws_endpoint(ws: WebSocket):
                     early = vad.early_event
                     vad.early_event = None
                     ch["spec"] = {"len": len(early),
-                                  "task": loop.run_in_executor(
-                                      whisper_executor, transcribe, early,
-                                      lang_hint(mode), whisper_prompt())}
+                                  "task": submit_transcribe(
+                                      loop, early, lang_hint(mode),
+                                      whisper_prompt())}
                 if utterance is not None:
                     spec = ch.pop("spec", None)
                     expected = (spec["len"] + (vad.end_silence
@@ -1996,12 +2095,39 @@ async def ws_endpoint(ws: WebSocket):
                                 if spec else -1)
                     spec_task = spec["task"] if len(utterance) == expected else None
                     uid += 1
+                    # A miss means that speculation is still occupying the one
+                    # Whisper thread with a result nobody will read.
+                    meta = {"t": round(time.time(), 3), "uid": uid,
+                            "t_emit": loop.time(),
+                            "speaker": SPEAKERS[tag],
+                            "chunk_sec": round(len(utterance) / SAMPLE_RATE, 2),
+                            "split": vad.split_reason,
+                            "spec": ("hit" if spec_task else
+                                     "miss" if spec else "none"),
+                            "whisper_queue": whisper_pending,
+                            "partials_skipped": partials_skipped}
+                    partials_skipped = 0
                     await safe_send(ws, {"type": "segment_start", "id": uid,
                                          "speaker": SPEAKERS[tag]})
                     asyncio.create_task(
                         handle_utterance(utterance, uid, SPEAKERS[tag],
-                                         spec_task))
+                                         spec_task, meta))
             if any(c["vad"].in_speech for c in channels.values()):
                 asyncio.create_task(maybe_partial())
+            now = loop.time()
+            if stats_on and now - last_stats >= STATS_INTERVAL_SEC:
+                last_stats = now
+                # Audio already spoken that is still growing into a chunk —
+                # nothing about it can reach the screen until it is cut.
+                speech_sec = max(
+                    (len(c["vad"].speech) * FRAME_MS / 1000
+                     for c in channels.values() if c["vad"].in_speech),
+                    default=0.0)
+                await safe_send(ws, {"type": "stats",
+                                     "in_flight": in_flight,
+                                     "whisper_queue": whisper_pending,
+                                     "speech_sec": round(speech_sec, 1),
+                                     "partials_skipped": partials_skipped,
+                                     "last": last_done})
     except WebSocketDisconnect:
         pass
