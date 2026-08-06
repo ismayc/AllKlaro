@@ -480,6 +480,120 @@ def test_typed_text_shares_history_with_speech(client, stub_transcribe,
     assert users.count("Wie geht es dir?") == 2  # history turn + new sentence
 
 
+# ------------------------------------------- overriding the detected language
+
+
+def test_typed_source_pin_skips_detection(client, stub_transcribe,
+                                          fake_ollama):
+    """The type bar's language pin. "Happy birthday!" is English, but pinning
+    German must be obeyed without argument — the point of the pin is that the
+    user knows something the detector doesn't."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "text", "text": "Happy birthday!",
+                                 "source": "de"}))
+        msgs = collect_until(ws)
+    final = next(m for m in msgs if m["type"] == "final")
+    assert final["source"] == "de" and final["target"] == "en"
+    assert "conf" not in final           # nothing was detected
+    # ...so the chip must not claim it detected anything either.
+    assert final["chosen"] is True
+
+
+def test_pin_outside_the_active_pair_is_ignored(client, stub_transcribe,
+                                                fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en"}))
+        ws.send_text(json.dumps({"type": "text", "text": "Happy birthday!",
+                                 "source": "es"}))
+        msgs = collect_until(ws)
+    final = next(m for m in msgs if m["type"] == "final")
+    assert final["source"] == "en"       # fell back to detection
+    assert final["conf"] > 0
+
+
+def test_detected_typed_card_is_marked_flippable(client, stub_transcribe,
+                                                 fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "text", "text": "Happy birthday!"}))
+        msgs = collect_until(ws)
+    final = next(m for m in msgs if m["type"] == "final")
+    assert final["source"] == "en"       # the bug this all started from
+    assert final["auto"] is True         # UI shows the ⇄ chip
+    assert final["chosen"] is False      # ...labelled "Detected", not "Set to"
+    assert 0 < final["conf"] <= 1
+
+
+def test_forced_direction_card_is_not_flippable(client, stub_transcribe,
+                                                fake_ollama):
+    """Nothing to flip when the user already pinned the whole direction."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "de-en"}))
+        ws.send_text(json.dumps({"type": "text", "text": "Guten Morgen"}))
+        msgs = collect_until(ws)
+    final = next(m for m in msgs if m["type"] == "final")
+    assert final["auto"] is False and "conf" not in final
+
+
+def test_spoken_card_is_flippable_too(client, stub_transcribe, fake_ollama):
+    """Whisper can pick the wrong language from the audio as easily as the
+    text detector can from the text."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en"}))
+        speak(ws)
+        msgs = collect_until(ws)
+    final = next(m for m in msgs if m["type"] == "final")
+    assert final["auto"] is True
+
+
+def test_retranslate_replaces_the_card_with_the_other_direction(
+        client, stub_transcribe, fake_ollama):
+    """Tapping a card's chip: same text, opposite direction, and the old card
+    goes away instead of leaving both readings on screen."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "text", "text": "Happy birthday!"}))
+        first = next(m for m in collect_until(ws) if m["type"] == "final")
+        ws.send_text(json.dumps({"type": "retranslate", "id": first["id"],
+                                 "text": "Happy birthday!", "source": "de"}))
+        msgs = collect_until(ws)
+    redone = next(m for m in msgs if m["type"] == "final")
+    assert redone["source"] == "de" and redone["target"] == "en"
+    assert redone["replaces"] == first["id"]
+    assert redone["id"] != first["id"]
+    assert any(m["type"] == "translation_done" for m in msgs)
+
+
+def test_retranslate_drops_the_wrong_reading_from_context(
+        client, stub_transcribe, fake_ollama):
+    """The mistranslation must not keep steering later turns from history."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "text",
+                                 "text": "Wie geht es dir und der Familie?"}))
+        first = next(m for m in collect_until(ws) if m["type"] == "final")
+        ws.send_text(json.dumps({"type": "retranslate", "id": first["id"],
+                                 "text": "Wie geht es dir und der Familie?",
+                                 "source": "en"}))
+        collect_until(ws)
+        ws.send_text(json.dumps({"type": "text", "text": "Und sonst?"}))
+        collect_until(ws)
+    # A context turn renders as user=source/assistant=translation, and the
+    # roles swap when the next turn runs the other way — so count the text
+    # itself, not the role it landed in.
+    context = [m["content"] for m in fake_ollama["chat"]["messages"]
+               if m["role"] != "system"]
+    # Once, as the redone turn. Twice would mean the replaced card's reading
+    # is still in the context, competing with the corrected one.
+    assert context.count("Wie geht es dir und der Familie?") == 1
+
+
+def test_retranslate_garbage_is_ignored(client, stub_transcribe, fake_ollama):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "retranslate", "id": 1}))
+        ws.send_text(json.dumps({"type": "retranslate", "id": 1, "text": "  "}))
+        ws.send_text(json.dumps({"type": "text", "text": "Guten Morgen"}))
+        msgs = collect_until(ws)
+    assert any(m["type"] == "final" for m in msgs)   # still fully functional
+
+
 def test_typed_garbage_is_ignored(client, stub_transcribe):
     with client.websocket_connect("/ws") as ws:
         ws.send_text(json.dumps({"type": "text", "text": "   "}))

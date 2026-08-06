@@ -82,6 +82,15 @@ main {
 .lang.de { background: rgba(79,163,255,.15); color: var(--de); }
 .lang.en { background: rgba(62,207,142,.15); color: var(--en); }
 .lang.es { background: rgba(245,166,35,.15); color: var(--es); }
+/* An auto-detected source chip is a button: tap it to redo the card in the
+   other language. Touch has no hover, so it must look tappable at rest —
+   hence the border, and the dashed one when detection was a close call. */
+.card .lang.flip { font-family: inherit; cursor: pointer;
+  border: 1px solid currentColor; padding: 1px 7px; }
+.card .lang.flip::after { content: " ⇄"; opacity: .75; }
+.card .lang.flip.unsure { border-style: dashed; }
+.card .lang.flip:hover { filter: brightness(1.35); }
+.card.flipping { opacity: .5; }
 .card.de { border-left: 4px solid var(--de); }
 .card.en { border-left: 4px solid var(--en); }
 .card.es { border-left: 4px solid var(--es); }
@@ -148,6 +157,13 @@ main {
   border: 1px solid var(--border); border-radius: 8px; padding: 9px 12px;
 }
 #typeBar input:focus { outline: none; border-color: var(--muted); }
+/* The typed-language pin. Fixed width so cycling Auto/DE/EN doesn't shove
+   the input sideways under your thumb mid-sentence. */
+#pinBtn { min-width: 62px; padding: 9px 8px; font-size: 13px;
+  font-weight: 700; letter-spacing: .04em; color: var(--muted); }
+#pinBtn.pinned { color: var(--text); border-color: var(--muted);
+  background: var(--panel); }
+#pinBtn.gone { display: none; }
 .pulse { width: 9px; height: 9px; border-radius: 50%; background: var(--err);
   animation: blink 1s infinite; flex-shrink: 0; }
 /* Touch has no hover-reveal: row buttons must be visibly present. At the

@@ -243,6 +243,31 @@ def test_api_translate_display_field_is_captioned(client, fake_ollama):
     assert r["display"] == "🗣️ AllKlaro (DE → EN):\nRefined translation."
 
 
+def test_api_translate_reports_detection_confidence(client, fake_ollama):
+    """The share-sheet Shortcut gets no card to tap, so it gets the number
+    instead and can re-ask with an explicit source when it looks shaky."""
+    sure = client.post("/api/translate",
+                       json={"text": "Wie geht es dir und der Familie?"}).json()
+    assert sure["source"] == "de" and sure["confidence"] > 0.9
+    # A forced direction detects nothing, so there is nothing to report.
+    forced = client.post("/api/translate",
+                         json={"text": "Guten Morgen", "mode": "de-en"}).json()
+    assert forced["confidence"] is None
+
+
+def test_api_translate_source_override(client, fake_ollama):
+    plain = client.post("/api/translate", json={"text": "Happy birthday!"}).json()
+    assert plain["source"] == "en"           # detection gets it right now
+    pinned = client.post("/api/translate",
+                         json={"text": "Happy birthday!", "source": "de"}).json()
+    assert (pinned["source"], pinned["target"]) == ("de", "en")
+    assert pinned["confidence"] is None      # pinned, not guessed
+    # A source outside the mode's pair is ignored rather than obeyed.
+    off_pair = client.post("/api/translate",
+                           json={"text": "Happy birthday!", "source": "es"}).json()
+    assert off_pair["source"] == "en"
+
+
 def test_api_translate_get_variant_for_browser_smoke_tests(client, fake_ollama):
     r = client.get("/api/translate",
                    params={"text": "Wie geht es dir und der Familie?"}).json()

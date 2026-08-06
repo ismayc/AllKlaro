@@ -50,6 +50,27 @@ def test_conversation_can_be_cleared():
     assert re.search(r"clearBtn\.onclick[^}]*speechSynthesis\?\.cancel", JS, re.S)
 
 
+def test_wrong_language_can_be_corrected_from_the_card():
+    """A misdetected card is fixed by tapping its language chip, so the chip
+    has to be a real button — and must not also fire tap-to-speak."""
+    css = (STATIC / "style.css").read_text()
+    assert "sourceChip" in JS and ".lang.flip" in css
+    assert re.search(r"btn\.onclick[^}]*stopPropagation\(\);\s*flipCard", JS)
+    assert '"retranslate"' in JS            # server redoes it the other way
+    # Close calls are marked, and touch has no hover to reveal affordances.
+    assert "unsure" in JS and ".lang.flip.unsure" in css
+    assert "UNSURE_BELOW" in JS
+
+
+def test_typed_language_can_be_pinned():
+    assert 'id="pinBtn"' in HTML
+    assert "#pinBtn" in (STATIC / "style.css").read_text()
+    assert re.search(r"pinBtn\.onclick", JS)
+    assert "pinnedSource," in JS            # survives a reload
+    # The pin only exists for auto modes, and re-checks when the mode changes.
+    assert re.search(r"modeSel\.onchange[^;]*renderPin\(\)", JS)
+
+
 def test_translations_are_editable():
     css = (STATIC / "style.css").read_text()
     assert "edit-btn" in JS and ".edit-btn" in css

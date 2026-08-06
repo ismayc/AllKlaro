@@ -107,7 +107,8 @@
     <div id="hint">
       Press <strong>Start</strong> and speak. Each pause finalizes an utterance,
       auto-detected and translated within the chosen language pair
-      (German, Spanish, English).
+      (German, Spanish, English). If a card lands in the wrong language, tap
+      its <strong>⇄</strong> chip to redo it the other way.
     </div>
   </main>
 
@@ -127,6 +128,8 @@
   </div>
 
   <form id="typeBar" title="Translate typed text — works without the microphone">
+    <button type="button" id="pinBtn" class="tool-btn"
+            title="Which language you are typing. Auto detects it; tap to pin it instead.">Auto</button>
     <input id="typeInput" type="text" placeholder="Type to translate…"
            autocomplete="off" enterkeyhint="send" />
     <button type="button" id="pasteBtn" class="tool-btn"
@@ -156,6 +159,10 @@
       <p>Tap a translation's 📋 to copy it, or its ✏️ to fix it; corrections
         are remembered and steer future translations. Long-press any word
         for its dictionary entry — gender, plural, and meanings.</p>
+      <p>In an auto mode each card's language chip is a button: tap it to
+        redo that card the other way round. A dashed chip means the guess
+        was close. The <strong>Auto</strong> button by the type bar pins the
+        language you are typing so it is never guessed at all.</p>
       <p class="about-links">
         <a href="https://ismayc.github.io/AllKlaro/" target="_blank" rel="noopener">Website</a>
         <a href="https://github.com/ismayc/AllKlaro" target="_blank" rel="noopener">GitHub</a>

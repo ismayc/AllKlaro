@@ -49,6 +49,7 @@ by default) that sees the conversation's recent context.
 | 🤝 **Address form** | Pin how "you" comes out — du/Sie/ihr in German, tú/usted/ustedes in Spanish — or leave it on Auto and let context decide |
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
 | ⌨️ **Type to translate** | A text box under the feed — type instead of speaking, mic not required; same context, corrections, and draft+refine pipeline |
+| 🧭 **Language detection you can overrule** | Typed text is identified by a character n-gram model restricted to the active pair, backed by function-word lists — 98.8% on the short-phrase corpus in `tests/fixtures/detect_phrases.py`, against 77.0% for the word lists alone. Any card's language chip is a button that redoes it the other way, and the type bar's **Auto** button pins the language outright |
 | 📖 **Gender lexicons** | Optional: compile dict.cc / FreeDict exports into loanword-gender dictionaries — "caipirinha" gets der/die/das and "problema" gets el/la injected |
 | 🔍 **Long-press dictionary** | Hold any word in the feed for its Wiktionary entry — gender with article, plural, IPA, meanings; inflected forms chain to their base word ("ging" → gehen) |
 
@@ -214,6 +215,11 @@ conversation gets the full screen):
   clipboard and translates it in one tap — made for text copied out of
   WhatsApp; dialect German in the paste gets the same `dialects.txt` hints
   as speech.
+- **Wrong language? Tap the chip** — in an auto mode every card's language
+  chip (`EN ⇄`) redoes that card in the other direction, and drops the wrong
+  reading out of the conversation context. A dashed chip means the detector
+  was close to a coin flip. To stop it guessing at all, the **Auto** button
+  left of the type bar cycles Auto → DE → EN and pins what you type.
 - **German style** — Standard, Berlinerisch, Hessisch, or Wormser Platt
   (Rheinhessisch): translations *into* German come out in that dialect
   (the declension guard steps aside, since "dit Haus" is not a mistake
@@ -273,13 +279,17 @@ a WhatsApp message can be translated without switching apps:
  "mode": "auto-de-en",          // optional, this is the default
  "de_flavor": "berlin",         // optional: berlin | hessian | worms
  "es_flavor": "mexico",         // optional: mexico | barcelona
- "address": "informal"}         // optional: informal | formal | plural
+ "address": "informal",         // optional: informal | formal | plural
+ "source": "de"}                // optional: skip detection, force the source
 ```
 
 returns `{"source": "de", "target": "en", "translation": "...",
-"translations": {"en": "..."}, "display": "🗣️ AllKlaro (DE → EN):\n..."}`
+"translations": {"en": "..."}, "confidence": 0.97,
+"display": "🗣️ AllKlaro (DE → EN):\n..."}`
 — `display` is the translation with a ready-made caption, for Shortcuts
-that want a labeled result.
+that want a labeled result. `confidence` is how sure detection was (`null`
+when nothing was detected, i.e. a forced direction or an explicit
+`source`), so a Shortcut can re-ask with `source` when it looks shaky.
 
 **Step 0 — prove the server is reachable** (do this before touching
 Shortcuts; it isolates the two things that can fail):
@@ -484,7 +494,11 @@ The speed and correctness machinery, for the curious:
 - **Continuous-speech splitting** — no pauses (videos, fast talkers)? Split
   at natural micro-pauses after ~8 s instead of stalling.
 - **Pair-constrained detection** — "Dutch" detected in a German↔English
-  conversation triggers a re-decode pinned to German.
+  conversation triggers a re-decode pinned to German. Typed text gets the
+  same restriction: py3langid is limited to the two active languages, which
+  is what makes it accurate on two-word phrases. Where it hedges (below
+  0.97) a lopsided function-word count overrules it, and orthography only
+  one candidate writes (ä, ß, ¿) settles it outright.
 - **Junk defense in depth** — Whisper's temperature-fallback ladder,
   compression-ratio and no-speech signals, a repetition-loop detector, and a
   blocklist of stock hallucinations ("Untertitelung des ZDF…").

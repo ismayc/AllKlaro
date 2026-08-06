@@ -35,6 +35,7 @@ const lookupWord = document.getElementById("lookupWord");
 const lookupBody = document.getElementById("lookupBody");
 const lookupSpeak = document.getElementById("lookupSpeak");
 const lookupClose = document.getElementById("lookupClose");
+const pinBtn = document.getElementById("pinBtn");
 
 let ws = null, audioCtx = null;
 let streams = [], workletNodes = [];
@@ -44,6 +45,11 @@ let lastSummary = "";
 const cards = new Map(); // utterance id -> card state
 // es-MX: Chester's Spanish-speaking contacts are Latin American.
 const TTS_LANG = { de: "de-DE", en: "en-US", es: "es-MX" };
+const LANG_NAMES = { de: "German", en: "English", es: "Spanish" };
+// Matches server.py's UNSURE_BELOW: under this the detector was close to a
+// coin flip, and the chip says so rather than looking decided.
+const UNSURE_BELOW = 0.75;
+let pinnedSource = ""; // "" = detect the typed language; else force it
 
 // ------------------------------------------------------------------- settings
 
@@ -66,6 +72,7 @@ function saveSettings() {
     focus: focusChk.checked,
     stats: statsChk.checked,
     pause: pauseSlider.value,
+    pinnedSource,
     controlsHidden: controls.classList.contains("hidden"),
   }));
 }
@@ -263,7 +270,41 @@ function sendConfig() {
                              pause_ms: +pauseSlider.value }));
   }
 }
-modeSel.onchange = () => { sendConfig(); saveSettings(); };
+// ------------------------------------------------------------ language pin
+// Detection is good but not perfect, and a wrong guess on typed text is
+// silent. This pins the language of what you type so it never runs.
+
+function autoPair() {
+  const parts = modeSel.value.split("-");
+  return parts[0] === "auto" && parts.length === 3 ? [parts[1], parts[2]] : null;
+}
+
+function renderPin() {
+  const pair = autoPair();
+  // A forced direction ("German → English") already decides the source.
+  pinBtn.classList.toggle("gone", !pair);
+  if (!pair) return;
+  if (pinnedSource && !pair.includes(pinnedSource)) pinnedSource = "";
+  pinBtn.textContent = pinnedSource ? pinnedSource.toUpperCase() : "Auto";
+  pinBtn.classList.toggle("pinned", !!pinnedSource);
+  pinBtn.title = pinnedSource
+    ? `Typing in ${LANG_NAMES[pinnedSource]} — tap to change`
+    : "Typed language is detected — tap to pin it instead";
+}
+
+pinBtn.onclick = () => {
+  const pair = autoPair();
+  if (!pair) return;
+  const cycle = ["", pair[0], pair[1]];
+  pinnedSource = cycle[(cycle.indexOf(pinnedSource) + 1) % cycle.length];
+  renderPin();
+  saveSettings();
+};
+
+if (saved.pinnedSource) pinnedSource = saved.pinnedSource;
+renderPin();
+
+modeSel.onchange = () => { renderPin(); sendConfig(); saveSettings(); };
 flavorSel.onchange = () => { sendConfig(); saveSettings(); };
 esFlavorSel.onchange = () => { sendConfig(); saveSettings(); };
 addressSel.onchange = () => { sendConfig(); saveSettings(); };
@@ -288,6 +329,46 @@ function langChip(code) {
   return `<span class="lang ${code}">${code.toUpperCase()}</span>`;
 }
 
+// The source chip doubles as the fix when the language was guessed wrong:
+// in an auto mode it is a button that re-runs the card the other way round.
+// Only auto modes get one — a forced direction has nothing to flip.
+function sourceChip(msg) {
+  const other = msg.targets[0];
+  if (!msg.auto || !other || other === msg.source) {
+    const span = document.createElement("span");
+    span.className = "lang " + msg.source;
+    span.textContent = msg.source.toUpperCase();
+    return span;
+  }
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "lang flip " + msg.source;
+  btn.textContent = msg.source.toUpperCase();
+  // conf is absent for speech (Whisper reports a language, not a margin).
+  const unsure = msg.conf != null && msg.conf < UNSURE_BELOW;
+  if (unsure) btn.classList.add("unsure");
+  btn.title = (msg.chosen
+    ? `Set to ${LANG_NAMES[msg.source]}`
+    : `Detected ${LANG_NAMES[msg.source]}${unsure ? ", but it was a close call" : ""}`)
+    + ` — tap to redo this as ${LANG_NAMES[other]}`;
+  btn.onclick = (e) => { e.stopPropagation(); flipCard(msg.id); };
+  return btn;
+}
+
+// Ask the server to redo this utterance with the languages swapped. It comes
+// back as a fresh card that replaces this one, so the old (wrong) reading
+// also drops out of the conversation context.
+function flipCard(id) {
+  const c = cards.get(id);
+  if (!c) return;
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return showError("Not connected — cannot redo that translation.");
+  }
+  c.card.classList.add("flipping");
+  ws.send(JSON.stringify({ type: "retranslate", id,
+                           text: c.text, source: c.targets[0] }));
+}
+
 function newCard(msg) {
   hint?.remove();
   if (msg.replaces != null) {
@@ -301,8 +382,8 @@ function newCard(msg) {
   orig.className = "orig";
   const speakerChip = callMode
     ? `<span class="speaker">${msg.speaker === "them" ? "Them" : "You"}</span>` : "";
-  orig.innerHTML = speakerChip + langChip(msg.source);
-  orig.append(wordSpans(msg.text, msg.source));
+  orig.innerHTML = speakerChip;
+  orig.append(sourceChip(msg), wordSpans(msg.text, msg.source));
   orig.title = "Tap to hear it spoken";
   // Tapping a phrase speaks it aloud in that phrase's own language.
   orig.onclick = (e) => { e.stopPropagation(); speakText(msg.text, msg.source, true); };
@@ -870,7 +951,11 @@ typeForm.onsubmit = async (e) => {
     try { await connectWS(); } // typing works without the mic running
     catch { return showError("Could not reach the server. Is it running?"); }
   }
-  ws.send(JSON.stringify({ type: "text", text }));
+  const payload = { type: "text", text };
+  if (pinnedSource && autoPair()?.includes(pinnedSource)) {
+    payload.source = pinnedSource;
+  }
+  ws.send(JSON.stringify(payload));
   typeInput.value = "";
 };
 

@@ -228,6 +228,8 @@ def test_missing_glossary_is_harmless(tmp_path, monkeypatch):
 
 
 # ------------------------------------------------------ typed-text detection
+# Accuracy over the full phrase corpus lives in test_detect.py; these are the
+# direction-resolution cases that the rest of this module depends on.
 
 
 def test_detect_language_german_english():
@@ -243,10 +245,13 @@ def test_detect_language_spanish_pair():
     assert detect_language("I would like to buy a ticket.", ("es", "en")) == "en"
 
 
-def test_detect_language_tie_goes_to_first_candidate():
+def test_detect_language_ignores_candidate_order():
+    """A bare noun used to be decided purely by which language was listed
+    first, because it scored zero in both. That tie-break is what made
+    "Happy birthday!" German; the answer must not turn on argument order."""
     from server import detect_language
-    assert detect_language("Xylophon", ("de", "en")) == "de"
-    assert detect_language("Xylophon", ("en", "de")) == "en"
+    assert (detect_language("Xylophon", ("de", "en"))
+            == detect_language("Xylophon", ("en", "de")))
 
 # ------------------------------------------------------ German output flavor
 

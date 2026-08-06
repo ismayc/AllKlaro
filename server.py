@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 import time
 import zlib
 from difflib import SequenceMatcher
@@ -1183,7 +1184,14 @@ async def translate_api(payload: dict):
     address = payload.get("address")
     address = address if address in VALID_ADDRESS else ""
     pair = mode_pair(mode)
-    detected = detect_language(text, pair) if pair else (lang_hint(mode) or "de")
+    pinned = payload.get("source")           # caller overriding detection
+    confidence = None
+    if pair and pinned in pair:
+        detected = pinned
+    elif pair:
+        detected, confidence = detect_language_scored(text, pair)
+    else:
+        detected = lang_hint(mode) or "de"
     source, targets = resolve_targets(mode, detected)
     translations = {}
     for target in targets:
@@ -1202,18 +1210,21 @@ async def translate_api(payload: dict):
     return {"source": source, "target": targets[0],
             "translation": translations[targets[0]],
             "translations": translations,
+            # How sure the detector was, so a Shortcut can re-ask with an
+            # explicit "source" when the answer looks like a coin flip.
+            "confidence": None if confidence is None else round(confidence, 2),
             "display": f"{caption}\n{translations[targets[0]]}"}
 
 
 @app.get("/api/translate")
-async def translate_api_get(text: str = "", mode: str = "",
+async def translate_api_get(text: str = "", mode: str = "", source: str = "",
                             de_flavor: str = "", es_flavor: str = "",
                             model: str = "", address: str = ""):
     """GET twin of the POST endpoint, so the whole pipeline can be
     smoke-tested from a phone browser's address bar:
     https://<mac-ip>:8710/api/translate?text=Hallo — separates "server
     unreachable" from "Shortcut built wrong" when debugging."""
-    return await translate_api({"text": text, "mode": mode,
+    return await translate_api({"text": text, "mode": mode, "source": source,
                                 "de_flavor": de_flavor,
                                 "es_flavor": es_flavor, "model": model,
                                 "address": address})
@@ -1753,37 +1764,148 @@ def normalize_text(text: str) -> str:
 
 
 # Typed text skips Whisper, so auto modes need their own language detection.
+#
+# py3langid's character n-gram model does the actual work; the word lists
+# below are its tie-breaking vote and the fallback when the package is
+# missing. They used to be the whole detector, and that is what made short
+# greetings unusable: "Happy birthday!" contains no listed word in any
+# language, so every candidate scored zero and the tie fell through to the
+# pair's first language — German, and with a dialect selected, loudly so.
+# Measured over the 248 phrase/pair cases in tests/fixtures/detect_phrases.py:
+# the scorer this replaced got 77.0%, these lists on their own 84.3%, and the
+# two signals together 98.8%.
 STOPWORDS = {
-    "de": {"der", "die", "das", "und", "ist", "nicht", "ich", "du", "wir",
-           "ihr", "sie", "es", "ein", "eine", "einen", "dem", "den", "mit",
-           "für", "auf", "haben", "hat", "war", "sind", "bitte", "danke",
-           "schon", "noch", "auch", "aber", "oder", "wenn", "wie", "wo",
-           "was", "warum", "kann", "können", "möchte", "geht", "gut"},
-    "en": {"the", "and", "is", "are", "was", "were", "i", "you", "we",
-           "they", "it", "a", "an", "to", "of", "in", "on", "with", "for",
-           "have", "has", "had", "please", "thanks", "this", "that", "what",
-           "why", "how", "where", "when", "not", "can", "could", "would",
-           "like", "good"},
-    "es": {"el", "la", "los", "las", "y", "es", "no", "yo", "tú", "usted",
-           "un", "una", "unos", "unas", "de", "en", "con", "para", "por",
-           "que", "qué", "cómo", "dónde", "cuándo", "gracias", "está",
-           "están", "ser", "estar", "pero", "si", "como", "puedo", "quiero",
-           "bien", "muy"},
+    "de": {"der", "die", "das", "den", "dem", "des", "ein", "eine", "einen",
+           "einem", "einer", "eines", "und", "oder", "aber", "denn",
+           "sondern", "wenn", "weil", "dass", "ob", "als", "wie", "wo",
+           "warum", "ich", "du", "er", "sie", "es", "wir", "ihr", "mich",
+           "mir", "dich", "dir", "ihm", "ihn", "uns", "euch", "ihnen",
+           "sich", "mein", "meine", "dein", "deine", "sein", "unser",
+           "ist", "sind", "war", "waren", "bin", "bist", "seid", "haben",
+           "hat", "habe", "hatte", "hatten", "wird", "werden", "wurde",
+           "wurden", "kann", "können", "könnte", "muss", "müssen",
+           "möchte", "will", "wollen", "soll", "sollen", "darf", "nicht",
+           "kein", "keine", "nichts", "nie", "immer", "noch", "schon",
+           "auch", "nur", "sehr", "mehr", "wieder", "mit", "ohne", "für",
+           "von", "zu", "zum", "zur", "aus", "bei", "nach", "über",
+           "unter", "vor", "auf", "an", "im", "am", "hier", "dort",
+           "heute", "morgen", "gestern", "jetzt", "dann", "bitte",
+           "danke", "ja", "nein", "gut", "geht", "gibt", "bis", "etwas",
+           "viel", "viele"},
+    "en": {"the", "a", "an", "and", "or", "but", "if", "because", "that",
+           "which", "who", "what", "when", "where", "why", "how", "i",
+           "you", "he", "she", "it", "we", "they", "me", "him", "her",
+           "us", "them", "my", "your", "his", "its", "our", "their", "is",
+           "are", "was", "were", "be", "been", "being", "am", "have",
+           "has", "had", "do", "does", "did", "done", "will", "would",
+           "can", "could", "should", "must", "may", "might", "not", "no",
+           "never", "always", "still", "already", "only", "very", "more",
+           "again", "just", "with", "without", "for", "from", "to", "of",
+           "at", "by", "on", "in", "into", "out", "up", "down", "over",
+           "under", "about", "here", "there", "today", "tomorrow",
+           "yesterday", "now", "then", "please", "thanks", "thank", "yes",
+           "ok", "good", "this", "these", "those", "some", "any", "all",
+           "each", "let", "get", "got", "see", "know"},
+    "es": {"el", "la", "los", "las", "un", "una", "unos", "unas", "lo",
+           "y", "o", "pero", "porque", "que", "si", "cuando", "donde",
+           "como", "quien", "cual", "yo", "tú", "él", "ella", "nosotros",
+           "ustedes", "ellos", "me", "te", "se", "nos", "le", "les", "mi",
+           "mis", "su", "sus", "nuestro", "es", "son", "era", "eran",
+           "soy", "eres", "somos", "está", "están", "estoy", "estamos",
+           "ser", "estar", "he", "has", "ha", "hemos", "han", "haber",
+           "hay", "tengo", "tiene", "tienen", "tener", "no", "nunca",
+           "siempre", "ya", "todavía", "solo", "muy", "más", "también",
+           "tan", "con", "sin", "para", "por", "de", "en", "a", "al",
+           "del", "desde", "hasta", "sobre", "entre", "aquí", "allí",
+           "hoy", "mañana", "ayer", "ahora", "entonces", "favor",
+           "gracias", "sí", "bien", "este", "esta", "esto", "ese", "esa",
+           "eso", "usted", "puedo", "quiero", "vamos"},
 }
-CHAR_HINTS = {"de": "äöüß", "es": "ñ¿¡áéíóú"}
+# Characters each language actually writes. One settles the answer only when
+# exactly one candidate in the pair writes it: "ü" proves German against
+# English, but proves nothing against Spanish ("pingüino", "bilingüe").
+NATIVE_CHARS = {"de": "äöüß", "es": "ñ¿¡ü"}
+# Weaker, because English borrows them too ("café", "naïve").
+SOFT_CHARS = {"es": "áéíóú"}
+# How the two signals are combined: the model wins unless it is hedging
+# below MODEL_CEILING and the word lists lean the other way by at least
+# LEXICAL_MARGIN ("Und sonst?" — one German function word, model 0.96 sure
+# it is English). Loosening them further starts losing collision-heavy
+# sentences ("The war was over in nineteen forty five", which carries three
+# German function words); both were swept against the fixture corpus.
+MODEL_CEILING = 0.97
+LEXICAL_MARGIN = 1
+# Below this the UI marks the card's language chip as a guess worth checking.
+# It flags about a tenth of the fixture phrases — often enough to be worth
+# glancing at, rare enough that the marking still means something.
+UNSURE_BELOW = 0.75
+
+_WORD_RE = re.compile(r"[^\W\d_]+")
+_langid_identifier = None
+_langid_lock = threading.Lock()
+
+
+def _lexical_vote(text: str, candidates: tuple[str, ...]) -> tuple[dict, str | None]:
+    """(function-word hits per candidate, the one language whose own
+    orthography appears here — None if neither or both do)."""
+    lowered = text.lower()
+    words = _WORD_RE.findall(lowered)
+    hits = {}
+    for lang in candidates:
+        hits[lang] = sum(1 for w in words if w in STOPWORDS.get(lang, ()))
+        hits[lang] += sum(0.5 for c in lowered if c in SOFT_CHARS.get(lang, ""))
+    marked = [lang for lang in candidates
+              if any(c in NATIVE_CHARS.get(lang, "") for c in lowered)]
+    return hits, marked[0] if len(marked) == 1 else None
+
+
+def _langid_vote(text: str, candidates: tuple[str, ...]) -> tuple[str | None, float]:
+    """py3langid restricted to the active pair — the restriction is what
+    makes it accurate on two-word phrases. None when the package is absent,
+    so the app still runs (on the word lists alone) without it."""
+    global _langid_identifier
+    try:
+        from py3langid.langid import MODEL_FILE, LanguageIdentifier
+    except ImportError:  # pragma: no cover - exercised by the fallback test
+        return None, 0.0
+    try:
+        with _langid_lock:   # set_languages mutates shared model state
+            if _langid_identifier is None:
+                _langid_identifier = LanguageIdentifier.from_pickled_model(
+                    MODEL_FILE, norm_probs=True)
+            _langid_identifier.set_languages(list(candidates))
+            lang, prob = _langid_identifier.classify(text)
+        return lang, float(prob)
+    except Exception:
+        log.exception("language model failed; falling back to word lists")
+        return None, 0.0
+
+
+def detect_language_scored(text: str,
+                           candidates: tuple[str, str] = ("de", "en"),
+                           ) -> tuple[str, float]:
+    """Language of typed text, plus 0..1 confidence in that answer."""
+    hits, proven = _lexical_vote(text, candidates)
+    if proven:
+        return proven, 1.0
+    lang, prob = _langid_vote(text, candidates)
+    if lang is None or lang not in candidates:
+        # No model: the word lists decide, ties to the first candidate.
+        best = max(hits.values())
+        top = next(c for c in candidates if hits[c] == best)
+        return top, (0.7 if best >= LEXICAL_MARGIN else 0.4)
+    other = next(c for c in candidates if c != lang)
+    if prob < MODEL_CEILING and hits[other] - hits[lang] >= LEXICAL_MARGIN:
+        return other, 0.7
+    if hits[lang] > hits[other]:
+        prob = max(prob, 0.9)       # both signals agree
+    elif hits[other] > hits[lang]:
+        prob = min(prob, 0.7)       # they disagree and the model just wins
+    return lang, prob
 
 
 def detect_language(text: str, candidates: tuple[str, str] = ("de", "en")) -> str:
-    """Stopword/charset scorer for typed text; ties go to the first candidate."""
-    lowered = text.lower()
-    words = re.findall(r"[^\W\d_]+", lowered)
-    best, best_score = candidates[0], -1
-    for lang in candidates:
-        score = sum(1 for w in words if w in STOPWORDS.get(lang, ()))
-        score += sum(2 for c in lowered if c in CHAR_HINTS.get(lang, ""))
-        if score > best_score:
-            best, best_score = lang, score
-    return best
+    return detect_language_scored(text, candidates)[0]
 
 
 def is_echo(a: str, b: str) -> bool:
@@ -1929,7 +2051,10 @@ async def ws_endpoint(ws: WebSocket):
                                   "speaker": speaker, "t": t0})
             final_msg = {"type": "final", "id": my_uid, "text": text,
                          "source": source, "target": targets[0],
-                         "targets": targets, "speaker": speaker}
+                         "targets": targets, "speaker": speaker,
+                         # Whisper picked this language from the audio; a tap
+                         # on the chip re-runs the translation the other way.
+                         "auto": bool(pair)}
             if replaces is not None:
                 final_msg["replaces"] = replaces
                 meta["merged"] = True
@@ -2042,18 +2167,46 @@ async def ws_endpoint(ws: WebSocket):
             # still occupies Ollama while the next utterance waits its turn.
             meta["refine_ms"] = int((loop.time() - t2) * 1000)
 
-    async def handle_text(text, my_uid):
+    def forget(old_uid):
+        """Drop a superseded utterance from the conversation context, so a
+        redirected card's mistranslation stops steering later turns."""
+        for h in [h for h in history if h.get("uid") == old_uid]:
+            history.remove(h)
+        corrected_uids.discard(old_uid)
+
+    async def handle_text(text, my_uid, pinned=None, replaces=None):
         """Typed input: same translation pipeline, no audio machinery —
-        no Whisper, no merging, no echo dedupe, no busy flag."""
+        no Whisper, no merging, no echo dedupe, no busy flag.
+
+        `pinned` is the user overriding detection (the type bar's language
+        pin, or a tap on a card's chip); `replaces` is the card that tap
+        was correcting, which this one takes over from."""
         t0 = loop.time()
         try:
             pair = auto_pair()
-            detected = (detect_language(text, pair) if pair
-                        else lang_hint(mode) or "de")
+            conf = None
+            chosen = bool(pair) and pinned in pair
+            if chosen:
+                detected = pinned
+            elif pair:
+                detected, conf = detect_language_scored(text, pair)
+            else:
+                detected = lang_hint(mode) or "de"
             source, targets = resolve_targets(mode, detected)
-            await safe_send(ws, {"type": "final", "id": my_uid, "text": text,
-                                 "source": source, "target": targets[0],
-                                 "targets": targets, "speaker": "you"})
+            msg = {"type": "final", "id": my_uid, "text": text,
+                   "source": source, "target": targets[0],
+                   "targets": targets, "speaker": "you",
+                   # Only an auto mode has a direction worth flipping.
+                   "auto": bool(pair),
+                   # ...and the chip shouldn't claim to have detected a
+                   # language the user picked by hand.
+                   "chosen": chosen}
+            if conf is not None:
+                msg["conf"] = round(conf, 2)
+            if replaces is not None:
+                forget(replaces)
+                msg["replaces"] = replaces
+            await safe_send(ws, msg)
             await run_translations(my_uid, text, source, targets, t0, t0)
         except Exception as exc:
             log.exception("typed translation failed")
@@ -2145,8 +2298,24 @@ async def ws_endpoint(ws: WebSocket):
                     typed = cfg.get("text")
                     if isinstance(typed, str) and typed.strip():
                         uid += 1
+                        # "source" is the type bar's language pin: set, it
+                        # skips detection entirely for this message.
                         asyncio.create_task(
-                            handle_text(typed.strip()[:2000], uid))
+                            handle_text(typed.strip()[:2000], uid,
+                                        pinned=cfg.get("source")))
+                elif isinstance(cfg, dict) and cfg.get("type") == "retranslate":
+                    # The user tapped a card's language chip: detection (or
+                    # Whisper) put it in the wrong language. Redo it with the
+                    # direction they picked, replacing the card in place. The
+                    # client sends the text back, so this works for cards
+                    # older than the context window.
+                    original = cfg.get("text")
+                    if isinstance(original, str) and original.strip():
+                        uid += 1
+                        asyncio.create_task(
+                            handle_text(original.strip()[:2000], uid,
+                                        pinned=cfg.get("source"),
+                                        replaces=cfg.get("id")))
                 elif isinstance(cfg, dict) and cfg.get("type") == "correction":
                     # An edited translation also fixes the live context, so
                     # follow-up utterances build on the corrected phrasing.

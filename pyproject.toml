@@ -8,6 +8,7 @@ dependencies = [
     "mlx-whisper>=0.4.3",
     "numpy>=2.4.6",
     "onnxruntime>=1.27.0",
+    "py3langid>=0.3.0",
     "uvicorn[standard]>=0.51.0",
 ]
 
