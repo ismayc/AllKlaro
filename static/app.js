@@ -194,6 +194,41 @@ function modelLabel(name, sizes) {
   return gb ? `${name} · ${gb.toFixed(1).replace(/\.0$/, "")} GB` : name;
 }
 
+// Which (main, draft) pair to actually use, given what's saved and what's
+// installed. Pure so it can be tested without a browser.
+//
+// The draft pass only helps if the draft is faster than the model it drafts
+// for; a pairing where it isn't puts the big model on the critical path and
+// leaves the small one cold. Saved settings can be inverted like that — hand
+// picked, or from before the size-aware default below existed — and it is the
+// most expensive mistake available here. Measured over a real 54-minute
+// conversation: main qwen2.5:7b (4.7 GB) with a 19 GB draft gave a first-word
+// lag p50 of 57 s, against 15 s for main gemma3:12b (8.1 GB) with a 4.7 GB
+// draft. So an inverted pair is discarded rather than restored, main included
+// — keeping the saved main would just re-pick a draft for the wrong model.
+function resolvePair(saved, models, sizes, def) {
+  const size = (m) => (sizes?.[m] || 0);
+  const savedMain = models.includes(saved.model) ? saved.model : "";
+  // "" is a real saved draft: it means the user turned the draft pass off.
+  const savedDraft = saved.draft === "" || models.includes(saved.draft)
+    ? saved.draft : undefined;
+  const inverted = !!savedMain && !!savedDraft
+    && size(savedDraft) >= size(savedMain);
+  const model = !inverted && savedMain
+    ? savedMain
+    : (models.includes(def) ? def : models[0] ?? "");
+  if (!inverted && savedDraft !== undefined) return { model, draft: savedDraft };
+  // Default draft: smallest model that's still trustworthy (see
+  // MIN_DRAFT_BYTES) and smaller than the main model; if only tiny models
+  // exist, the largest of those is the least-bad choice.
+  const smaller = models
+    .filter((m) => m !== model && size(m) < size(model))
+    .sort((a, b) => size(a) - size(b));
+  const draft = smaller.find((m) => size(m) >= MIN_DRAFT_BYTES)
+    ?? smaller[smaller.length - 1] ?? "";
+  return { model, draft };
+}
+
 async function loadModels() {
   try {
     const r = await fetch("/api/models");
@@ -203,26 +238,17 @@ async function loadModels() {
     for (const m of models) {
       modelSel.add(new Option(modelLabel(m, sizes), m, m === def, m === def));
     }
-    if (saved.model && models.includes(saved.model)) modelSel.value = saved.model;
-    else if (!models.includes(def) && models.length) modelSel.value = models[0];
-
     draftSel.innerHTML = "";
     draftSel.add(new Option("Off", ""));
     for (const m of models) draftSel.add(new Option(modelLabel(m, sizes), m));
-    if (saved.draft !== undefined &&
-        [...draftSel.options].some((o) => o.value === saved.draft)) {
-      draftSel.value = saved.draft;
-    } else if (sizes) {
-      // Default draft: smallest model that's still trustworthy (see
-      // MIN_DRAFT_BYTES) and smaller than the main model; if only tiny
-      // models exist, the largest of those is the least-bad choice.
-      const smaller = models
-        .filter((m) => m !== modelSel.value &&
-                       (sizes[m] || Infinity) < (sizes[modelSel.value] || 0))
-        .sort((a, b) => sizes[a] - sizes[b]);
-      draftSel.value = smaller.find((m) => sizes[m] >= MIN_DRAFT_BYTES)
-        ?? smaller[smaller.length - 1] ?? "";
-    }
+
+    const pair = resolvePair(saved, models, sizes, def);
+    modelSel.value = pair.model;
+    draftSel.value = pair.draft;
+    // Deliberately not saved back here: loadDevices() is still in flight, and
+    // saveSettings() would write an empty deviceLabel over the saved one. Every
+    // load re-resolves, so a repaired pair is what runs either way, and the
+    // next settings change persists it.
   } catch {
     showError("Could not list Ollama models — is `ollama serve` running?");
   }
