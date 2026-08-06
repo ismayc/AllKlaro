@@ -42,7 +42,14 @@ END_SILENCE_FRAMES = 22            # ~700 ms of silence ends the utterance
 EARLY_SILENCE_FRAMES = 10          # ~320 ms: start transcribing speculatively
 MIN_UTTERANCE_SEC = 0.4
 MAX_UTTERANCE_SEC = 30.0           # hard force-flush, even mid-word
-SOFT_MAX_SEC = 8.0                 # after this, split at the last micro-pause
+# Overridable so an A/B can sweep it without editing this file — both arms of
+# a benchmark have to run identical source. This is the largest untouched
+# component of first-word lag: pooled over two stub runs of the real slice,
+# the emitted chunk is 65% of first-word lag at p50 (5.76 s of 8.71 s), and
+# soft_max chunks (p50 6.88 s) cost 2.4 s more lag than pause ones. Lowering
+# it cuts sooner, trading translation context and extra Whisper decodes for
+# less accumulation — which of those wins is a measurement, not a guess.
+SOFT_MAX_SEC = float(os.environ.get("ALLKLARO_SOFT_MAX_SEC", "8.0"))
 MICRO_PAUSE_FRAMES = 6             # ~190 ms dip = natural split point in
                                    # continuous speech (videos, fast talkers)
 PARTIAL_WINDOW_FRAMES = 190        # live partials look at the last ~6 s only

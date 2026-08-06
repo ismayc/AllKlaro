@@ -96,6 +96,23 @@ arguable.*
       lower `SOFT_MAX_SEC`, or translate from partials instead of waiting for
       a chunk boundary.
 
+### 6. One mic carries everyone, and nothing says who spoke
+Multi-speaker *load* is already covered: the 54-minute recording is a real
+group conversation captured through a single mic, which is the only setup
+intended, so every lag number here already includes overlap and turn-taking.
+That also explains why `soft_max` dominates (22 of 40 splits) — several
+people trading turns rarely leave the ~700 ms gap that closes an utterance,
+so the audio reads as continuous speech. This is a cause of item 1, not a
+separate load risk.
+
+- [ ] **`SPEAKERS = {0: "you", 1: "them"}` is a channel tag, not
+      diarization** — it records which input stream the audio arrived on, set
+      by the client. With one mic for the whole room every card is `"you"`,
+      so a group transcript cannot show who said what.
+- [ ] Whether that matters is a product call: for *listening along* to a
+      conversation it may not, and diarization on a single stream is a real
+      cost. Worth deciding before it gets built by accident.
+
 ### 2. Does the refine pass still earn its place?
 - [ ] It times out or is shed on a large fraction of utterances, spending
       Ollama time rewriting text already on screen — in a pipeline where

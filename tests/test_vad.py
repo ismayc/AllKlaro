@@ -234,3 +234,55 @@ def test_energy_scorer_detects_tone_over_silence():
     scorer = EnergyScorer()
     assert not scorer(silence())
     assert scorer(speech())
+
+
+def test_soft_max_picks_the_last_micro_pause_before_the_cap(monkeypatch):
+    """Lowering SOFT_MAX_SEC has to cut at an *earlier* micro-pause, not just
+    trip sooner at the same one — that is the whole lever for accumulation
+    lag, which is 65% of first-word lag at p50 on the real recording.
+
+    Two dips: one 3.2 s in, one 7.2 s in. A cap above both must take the
+    later one; a cap between them must take the earlier one.
+    """
+    import server as srv
+
+    def run(cap):
+        monkeypatch.setattr(srv, "SOFT_MAX_SEC", cap)
+        script = [True] * 94 + [False] * 6 + [True] * 119 + [False] * 6 \
+            + [True] * 100
+        frames = [speech()] * 94 + [silence()] * 6 + [speech()] * 119 \
+            + [silence()] * 6 + [speech()] * 100
+        vad = srv.VadSession(ScriptScorer(script))
+        out = [u for u in feed_all(vad, frames) if u is not None]
+        assert out, f"cap {cap}: no soft_max split happened"
+        assert vad.split_reason == "soft_max"
+        return len(out[0]) / FRAME_SAMPLES        # chunk length in frames
+
+    late = run(8.0)
+    early = run(4.0)
+    assert late == 225, late      # the second dip, at 7.2 s
+    assert early == 100, early    # the first dip, at 3.2 s
+    assert early < late           # the lever actually moves the cut point
+
+
+def test_soft_max_sec_is_env_overridable():
+    """The A/B sweeps this from the environment so both arms run identical
+    source; if the override silently did nothing, every arm would measure the
+    same 8.0 s and the comparison would look like pure noise."""
+    import importlib
+    import os
+
+    import server as srv
+
+    assert srv.SOFT_MAX_SEC == 8.0            # default when unset
+    prev = os.environ.get("ALLKLARO_SOFT_MAX_SEC")
+    os.environ["ALLKLARO_SOFT_MAX_SEC"] = "3.5"
+    try:
+        reloaded = importlib.reload(srv)
+        assert reloaded.SOFT_MAX_SEC == 3.5
+    finally:
+        if prev is None:
+            del os.environ["ALLKLARO_SOFT_MAX_SEC"]
+        else:
+            os.environ["ALLKLARO_SOFT_MAX_SEC"] = prev
+        importlib.reload(srv)                 # leave the module as we found it
