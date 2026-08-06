@@ -20,7 +20,8 @@ translation is streaming onto your screen, color-coded by speaker and language.
 You answer in English; they get German or Spanish back. Nothing ever leaves
 your machine: speech
 recognition runs on the Mac's GPU ([mlx-whisper](https://github.com/ml-explore/mlx-examples)
-`large-v3-turbo`), voice detection is neural ([Silero VAD](https://github.com/snakers4/silero-vad)),
+`large-v3-turbo`, with [Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3)
+doing the live partials), voice detection is neural ([Silero VAD](https://github.com/snakers4/silero-vad)),
 and translation is a local [Ollama](https://ollama.com) model (`gemma3:12b`
 by default) that sees the conversation's recent context.
 
@@ -598,6 +599,29 @@ than dropping anything you said:
 
 `specs_shed` and `refines_shed` appear in the trace so the shedding is
 visible rather than looking like the app being slow.
+
+**Two ASR models, on purpose.** Shedding buys the budget back by throwing
+work away; moving work is better. Live partials re-decode a rolling ~6 s
+window every 2 s, which was ~36% of everything the one Whisper thread
+decoded. They now run on a second, much smaller model — NVIDIA's Parakeet
+TDT 0.6B v3 via [parakeet-mlx](https://pypi.org/project/parakeet-mlx/) — on
+its own worker, so a partial never waits behind a final and never competes
+with one. Measured on the same 6 s window, both warm (2026-08-06):
+
+| | 6 s German | 6 s Spanish |
+|---|---|---|
+| `whisper-large-v3-turbo` | 884 ms | 822 ms |
+| `parakeet-tdt-0.6b-v3` | **71 ms** | **60 ms** |
+
+Transcripts were identical apart from punctuation. On a replay at 1.4x pace,
+partials starved by a busy Whisper thread went from **109 to 0**.
+
+Finals and speculations deliberately stay on Whisper: a speculation *becomes*
+the final transcript when the pause turns out to be real, so it is not
+optional work and must not be downgraded. If `parakeet-mlx` or the model is
+missing, partials fall back to the Whisper thread — the old behaviour, with
+the old contention. Point `ALLKLARO_PARTIAL_ASR` at another repo to swap the
+model, or at a bogus one to force the fallback.
 
 ## 📖 Gender lexicons (optional)
 

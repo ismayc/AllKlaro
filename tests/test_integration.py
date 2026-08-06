@@ -5,6 +5,7 @@ Run with:  RUN_INTEGRATION=1 uv run pytest -m integration -v
 import json
 import os
 import subprocess
+import time
 import wave
 
 import httpx
@@ -163,6 +164,45 @@ async def test_real_ollama_context_resolves_pronoun():
         server.DEFAULT_MODEL, history)
     # With context, "Sie" must resolve to she (the sister), not formal you.
     assert "she" in text.lower()
+
+
+def test_real_partial_asr_transcribes_german_and_spanish(tmp_path,
+                                                         real_partial_asr):
+    """The fast partial pass against the real Parakeet model. Partials are
+    transient, so the bar is 'recognisably the right words in the right
+    language', not Whisper-grade — but it has to actually handle German
+    umlauts and Spanish accents, which is why both are checked."""
+    if server.load_parakeet() is None:
+        pytest.skip("parakeet-mlx / model unavailable")
+    for text, voice, must in ((GERMAN_TEXT, "Anna", ("projekt", "woche")),
+                              (SPANISH_TEXT, SPANISH_VOICE,
+                               ("proyecto", "semana"))):
+        pcm = tts_wav(tmp_path, text, voice)
+        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        got = server.transcribe_partial(audio)
+        assert got is not None, "fast path returned None with a model loaded"
+        for word in must:
+            assert word in got.lower(), f"{word!r} missing from {got!r}"
+
+
+def test_real_partial_asr_is_much_faster_than_whisper(tmp_path,
+                                                      real_partial_asr):
+    """The entire justification for the second model. Measured 884 ms vs
+    71 ms on a 6 s German window (2026-08-06); asserting only 3x leaves
+    room for a slower machine or a cold-ish graph."""
+    if server.load_parakeet() is None:
+        pytest.skip("parakeet-mlx / model unavailable")
+    pcm = tts_wav(tmp_path, GERMAN_TEXT, "Anna")
+    audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    window = audio[:16000 * 6]
+
+    server.transcribe_partial(window)          # warm the MLX graph
+    server.transcribe(window, language=None)
+    t = time.perf_counter(); server.transcribe_partial(window)
+    fast = time.perf_counter() - t
+    t = time.perf_counter(); server.transcribe(window, language=None)
+    slow = time.perf_counter() - t
+    assert fast * 3 < slow, f"partial pass {fast:.3f}s vs whisper {slow:.3f}s"
 
 
 def test_real_silero_vad_on_real_speech(tmp_path):

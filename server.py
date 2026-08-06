@@ -71,6 +71,12 @@ REFINE_MAX_QUEUE = 2               # skip the second-pass refine past this depth
 # old enough that better wording no longer matters.
 REFINE_TIMEOUT_SEC = 10.0
 REFINE_MAX_AGE_SEC = 20.0
+# ...and the same for the translation backlog. `whisper_pending` says nothing
+# about how many utterances are waiting on Ollama, which is the queue the next
+# card actually sits in once transcription keeps up. 2 = one translating and
+# one waiting; past that, a background rewrite of text already on screen is
+# worth less than the card nobody has seen yet.
+REFINE_MAX_IN_FLIGHT = int(os.environ.get("ALLKLARO_REFINE_MAX_IN_FLIGHT", "2"))
 HISTORY_TURNS = 6                  # recent exchanges fed to the translator
 MERGE_GAP_SEC = 2.0                # resumed-within window for fragment merging
 MERGE_MAX_CHARS = 300              # never grow merged utterances beyond this
@@ -806,6 +812,71 @@ def clean_transcript(result: dict) -> str:
     return "".join(kept).strip()
 
 
+# --------------------------------------------------- partial-pass ASR (fast)
+#
+# Live partials used to run on the same Whisper thread as finals, re-decoding
+# a rolling ~6 s window from scratch every 2 s. Measured over a real
+# conversation that redundancy was ~36% of everything the one thread decoded —
+# against a deficit of only ~11%, which is why the queue grew without bound.
+#
+# Parakeet is an RNN-T/TDT model built for incremental decoding rather than
+# sliding-window re-transcription, and it is ~12x faster here on the exact
+# window AllKlaro decodes (measured 2026-08-06 on the same audio, both warm:
+# 884 ms Whisper vs 71 ms Parakeet for 6 s of German; 822 ms vs 60 ms for
+# Spanish, with identical transcripts apart from punctuation).
+#
+# Finals and speculations stay on Whisper. A speculation *becomes* the final
+# transcript when the pause turns out to be real (see handle_utterance), so
+# it is not optional work and must not be downgraded.
+PARTIAL_ASR_REPO = os.environ.get("ALLKLARO_PARTIAL_ASR",
+                                  "mlx-community/parakeet-tdt-0.6b-v3")
+# Partials get their own worker: the whole point is that they no longer wait
+# behind finals. Both models still share the GPU, but at ~70 ms a partial is
+# no longer meaningful contention.
+partial_executor = ThreadPoolExecutor(max_workers=1)
+_parakeet = None
+_parakeet_unavailable = False
+_parakeet_lock = threading.Lock()
+
+
+def load_parakeet():
+    """Load the partial-pass model once. None when unavailable, which makes
+    partials fall back to Whisper — degraded pacing, never a broken app."""
+    global _parakeet, _parakeet_unavailable
+    if _parakeet is not None or _parakeet_unavailable:
+        return _parakeet          # fast path, no lock once settled
+    # Callers are serialized by partial_executor today, but a second worker
+    # (or a direct call) would otherwise start a duplicate multi-second load.
+    with _parakeet_lock:
+        if _parakeet is not None or _parakeet_unavailable:
+            return _parakeet
+        try:
+            from parakeet_mlx import from_pretrained
+
+            _parakeet = from_pretrained(PARTIAL_ASR_REPO)
+            log.info("Partial-pass ASR ready (%s).", PARTIAL_ASR_REPO)
+        except Exception as exc:
+            _parakeet_unavailable = True
+            log.warning("Partial ASR unavailable (%s); partials fall back to "
+                        "Whisper and will compete with finals.", exc)
+    return _parakeet
+
+
+def transcribe_partial(audio: np.ndarray) -> str | None:
+    """Transcribe a live-partial window. Returns the text, or None to mean
+    "no fast model here, use Whisper" — never raises for that case."""
+    model = load_parakeet()
+    if model is None:
+        return None
+    import mlx.core as mx
+    from parakeet_mlx.audio import get_logmel
+
+    # current_audio() already hands us float32 normalized to +-1.
+    mel = get_logmel(mx.array(audio), model.preprocessor_config)
+    results = model.generate(mel)
+    return results[0].text.strip() if results else ""
+
+
 def transcribe(audio: np.ndarray, language: str | None,
                prompt: str | None = None) -> dict:
     import mlx_whisper
@@ -825,17 +896,34 @@ def transcribe(audio: np.ndarray, language: str | None,
 
 
 def submit_transcribe(loop, audio: np.ndarray, language: str | None,
-                      prompt: str | None = None):
+                      prompt: str | None = None, timing: dict | None = None):
     """Queue a transcription on the single Whisper thread, keeping count.
 
-    Every caller goes through here — final utterances, speculations, and live
-    partials all compete for the same worker, and `whisper_pending` is the
-    only place that competition is visible.
+    Every caller goes through here — final utterances and speculations
+    compete for the same worker, and `whisper_pending` is the only place
+    that competition is visible. (Live partials have their own worker; see
+    transcribe_partial.)
+
+    Pass `timing` to learn how the wall time split. The caller can only see
+    submit-to-result, which is queue wait AND decode together — and reading
+    that number as "decoding" is exactly how a 73 s wait for 1.9 s of work
+    once got attributed to a slow model.
     """
     global whisper_pending
     whisper_pending += 1
-    fut = loop.run_in_executor(whisper_executor, transcribe, audio,
-                               language, prompt)
+    t_submit = time.perf_counter()
+
+    def job():
+        t_start = time.perf_counter()
+        try:
+            return transcribe(audio, language, prompt)
+        finally:
+            if timing is not None:
+                now = time.perf_counter()
+                timing["queue_ms"] = int((t_start - t_submit) * 1000)
+                timing["decode_ms"] = int((now - t_start) * 1000)
+
+    fut = loop.run_in_executor(whisper_executor, job)
     fut.add_done_callback(_transcribe_finished)
     return fut
 
@@ -1032,7 +1120,16 @@ async def lifespan(app: FastAPI):
         transcribe(np.zeros(SAMPLE_RATE // 2, dtype=np.float32), language="en")
         log.info("Whisper ready.")
 
-    asyncio.get_event_loop().run_in_executor(whisper_executor, _load)
+    def _load_partial():
+        # On its own worker so the (larger) Whisper load doesn't gate it, and
+        # warmed here because the first real call compiles the MLX graph —
+        # otherwise the first partial of a conversation pays for it.
+        if load_parakeet() is not None:
+            transcribe_partial(np.zeros(SAMPLE_RATE, dtype=np.float32))
+
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(whisper_executor, _load)
+    loop.run_in_executor(partial_executor, _load_partial)
     yield
 
 
@@ -1953,6 +2050,7 @@ async def ws_endpoint(ws: WebSocket):
     uid = 0
     last_partial = 0.0
     busy = False                     # a transcription is in flight
+    partial_busy = False             # ...specifically a live partial
     # Last finalized utterance, for merging sentence fragments cut mid-pause.
     prev = None                      # {"uid","text","source","speaker","t_end"}
     recent_finals: deque = deque(maxlen=8)  # for cross-channel echo dedupe
@@ -1985,7 +2083,8 @@ async def ws_endpoint(ws: WebSocket):
         return mode_pair(mode)
 
     async def handle_utterance(audio: np.ndarray, my_uid: int, speaker: str,
-                               spec_task=None, meta: dict | None = None):
+                               spec_task=None, meta: dict | None = None,
+                               spec_timing: dict | None = None):
         nonlocal busy, prev, in_flight, last_done
         busy = True
         in_flight += 1
@@ -1999,9 +2098,11 @@ async def ws_endpoint(ws: WebSocket):
         try:
             if spec_task is not None:
                 result = await spec_task  # transcription began during the pause
+                if spec_timing:
+                    meta.update(spec_timing)
             else:
                 result = await submit_transcribe(loop, audio, lang_hint(mode),
-                                                 whisper_prompt())
+                                                 whisper_prompt(), timing=meta)
             detected = result.get("language", "de")
             pair = auto_pair()
             if pair and detected not in pair:
@@ -2121,7 +2222,16 @@ async def ws_endpoint(ws: WebSocket):
             for t, streamed in zip(targets, translations):
                 candidate = streamed
                 stale = (loop.time() - meta.get("t_emit", t0)) > REFINE_MAX_AGE_SEC
-                if draft and (whisper_pending > REFINE_MAX_QUEUE or stale):
+                # Two backlogs can make a refine not worth running, and until
+                # partials moved off the Whisper thread only one of them was
+                # ever the binding constraint. Measured on the real recording
+                # with a sane draft/main pairing: the Whisper queue sat at 1-3
+                # while refine took a p50 of 8.8 s of Ollama time against an
+                # utterance arriving every ~6 s. Gating on `whisper_pending`
+                # alone therefore let refines pile onto the *translation*
+                # backlog, which is what the next card actually waits for.
+                if draft and (whisper_pending > REFINE_MAX_QUEUE
+                              or in_flight > REFINE_MAX_IN_FLIGHT or stale):
                     # The refine pass runs after the card is already readable
                     # and competes with Ollama and Whisper for the same GPU.
                     # Behind a backlog, or on an utterance already this old,
@@ -2214,22 +2324,32 @@ async def ws_endpoint(ws: WebSocket):
                                  "message": f"Translation failed: {exc}"})
 
     async def maybe_partial():
-        nonlocal last_partial, busy, partials_skipped
+        nonlocal last_partial, busy, partial_busy, partials_skipped
         now = loop.time()
-        # Never let a partial queue in front of real work: skip while an
-        # utterance is being handled or a speculation is in flight.
-        if busy or now - last_partial < PARTIAL_INTERVAL_SEC:
-            # Only a busy pipe counts as starvation; the interval is by design.
-            if busy and now - last_partial >= PARTIAL_INTERVAL_SEC:
-                partials_skipped += 1
+        if now - last_partial < PARTIAL_INTERVAL_SEC:
+            return                       # the interval is by design
+        fast = not _parakeet_unavailable
+        if partial_busy:
+            # One at a time, by design — the previous one is still decoding.
+            # Deliberately NOT counted as skipped: `partials_skipped` measures
+            # partials lost to an overloaded pipeline, and inflating it with
+            # normal pacing would make the overload metric meaningless.
             return
-        if whisper_pending > PARTIAL_MAX_QUEUE:
-            # `busy` only knows about one in-flight handler; it says nothing
-            # about how deep the executor queue is. Without this a partial can
-            # be admitted in front of a dozen waiting finals.
+        # On the fast path a partial has its own worker, so a busy Whisper
+        # thread is no longer a reason to skip one — that starvation is
+        # exactly the cost this change removes.
+        if busy and not fast:
             partials_skipped += 1
             return
-        if any(c["vad"].speculating for c in channels.values()):
+        if whisper_pending > PARTIAL_MAX_QUEUE:
+            # Not contention any more: this says the finals are so far behind
+            # that live text would be describing a different moment than the
+            # cards underneath it.
+            partials_skipped += 1
+            return
+        if not fast and any(c["vad"].speculating for c in channels.values()):
+            # A speculation owns the Whisper thread and its result becomes a
+            # final; only the slow path can collide with it.
             partials_skipped += 1
             return
         audio = next((c["vad"].current_audio() for c in channels.values()
@@ -2237,17 +2357,26 @@ async def ws_endpoint(ws: WebSocket):
         if audio is None:
             return
         last_partial = now
-        busy = True
+        partial_busy = True
+        if not fast:
+            busy = True
         try:
-            result = await submit_transcribe(loop, audio, lang_hint(mode),
-                                             whisper_prompt())
-            text = clean_transcript(result)
+            text = None
+            if fast:
+                text = await loop.run_in_executor(partial_executor,
+                                                  transcribe_partial, audio)
+            if text is None:             # no fast model — Whisper does it
+                result = await submit_transcribe(loop, audio, lang_hint(mode),
+                                                 whisper_prompt())
+                text = clean_transcript(result)
             if text and not HALLUCINATION_RE.match(text):
                 await safe_send(ws, {"type": "partial", "text": text})
         except Exception:
             log.exception("partial transcription failed")
         finally:
-            busy = False
+            partial_busy = False
+            if not fast:
+                busy = False
 
     try:
         while True:
@@ -2351,16 +2480,20 @@ async def ws_endpoint(ws: WebSocket):
                         specs_shed += 1
                         vad.speculating = False
                     else:
+                        spec_timing = {}
                         ch["spec"] = {"len": len(early),
+                                      "timing": spec_timing,
                                       "task": submit_transcribe(
                                           loop, early, lang_hint(mode),
-                                          whisper_prompt())}
+                                          whisper_prompt(),
+                                          timing=spec_timing)}
                 if utterance is not None:
                     spec = ch.pop("spec", None)
                     expected = (spec["len"] + (vad.end_silence
                                 - EARLY_SILENCE_FRAMES) * FRAME_SAMPLES
                                 if spec else -1)
                     spec_task = spec["task"] if len(utterance) == expected else None
+                    spec_timing = spec["timing"] if spec_task else None
                     uid += 1
                     # A miss means that speculation is still occupying the one
                     # Whisper thread with a result nobody will read.
@@ -2381,7 +2514,7 @@ async def ws_endpoint(ws: WebSocket):
                                          "speaker": SPEAKERS[tag]})
                     asyncio.create_task(
                         handle_utterance(utterance, uid, SPEAKERS[tag],
-                                         spec_task, meta))
+                                         spec_task, meta, spec_timing))
             if any(c["vad"].in_speech for c in channels.values()):
                 asyncio.create_task(maybe_partial())
             now = loop.time()

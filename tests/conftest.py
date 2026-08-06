@@ -36,6 +36,49 @@ def stub_transcribe(monkeypatch):
     return stub
 
 
+class PartialStub:
+    """Stands in for the fast partial-pass ASR (Parakeet); records call sizes."""
+
+    def __init__(self):
+        self.text = "live partial text"
+        self.calls = []
+
+    def __call__(self, audio):
+        self.calls.append(round(len(audio) / 16000, 2))
+        return self.text
+
+
+@pytest.fixture(autouse=True)
+def no_real_partial_asr(monkeypatch):
+    """Tests must never download or load the real Parakeet model. Default is
+    the fallback path, so a test that says nothing gets Whisper partials via
+    the existing stub; `stub_partial` opts into the fast path."""
+    monkeypatch.setattr(server, "_parakeet", None)
+    monkeypatch.setattr(server, "_parakeet_unavailable", True)
+    monkeypatch.setattr(server, "load_parakeet", lambda: None)
+
+
+@pytest.fixture
+def stub_partial(monkeypatch):
+    """Opt into the fast partial path with a doubled model."""
+    stub = PartialStub()
+    monkeypatch.setattr(server, "transcribe_partial", stub)
+    monkeypatch.setattr(server, "_parakeet_unavailable", False)
+    return stub
+
+
+# Captured before any fixture can patch it, so the integration suite can put
+# the genuine loader back.
+_REAL_LOAD_PARAKEET = server.load_parakeet
+
+
+@pytest.fixture
+def real_partial_asr(no_real_partial_asr, monkeypatch):
+    """Integration only: undo the guard and use the real Parakeet model."""
+    monkeypatch.setattr(server, "load_parakeet", _REAL_LOAD_PARAKEET)
+    monkeypatch.setattr(server, "_parakeet_unavailable", False)
+
+
 @pytest.fixture(autouse=True)
 def no_user_gender_lexicon(tmp_path, monkeypatch):
     """Tests must not see the developer's real ~/.cache lexicons."""

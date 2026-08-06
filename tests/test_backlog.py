@@ -253,3 +253,63 @@ def test_trace_records_what_was_shed(client, stub_transcribe, trace_file,
     assert records
     assert "specs_shed" in records[0] and "refines_shed" in records[0]
     assert records[0]["specs_shed"] >= 1
+
+
+# ------------------------------- translation backlog (not the Whisper queue)
+
+
+def test_refine_is_shed_when_translations_are_backed_up(
+        client, stub_transcribe, fake_ollama, monkeypatch, stub_partial):
+    """Whisper keeping up does NOT mean the pipeline is keeping up.
+
+    Once partials moved off the Whisper thread, the queue that the next card
+    actually waits in is Ollama's. Measured on the real recording with a sane
+    draft/main pairing: the Whisper queue sat at 1-3 while the refine pass
+    took a p50 of 8.8 s against an utterance arriving every ~6 s. Gating only
+    on `whisper_pending` let refines pile onto the translation backlog.
+    """
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    monkeypatch.setattr(srv, "REFINE_MAX_IN_FLIGHT", 0)   # any backlog counts
+    assert srv.whisper_pending <= srv.REFINE_MAX_QUEUE    # Whisper is fine
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "config", "model": "main-model",
+                      "draft_model": "fast-draft"})
+        speak(ws)
+        msgs = collect_until(ws, stop_types=("translation_revised", "error"))
+    done = [m for m in msgs if m["type"] == "translation_done"]
+    assert done and done[0]["refining"] is True
+    models = translation_models(fake_ollama)
+    assert "fast-draft" in models       # the card the user reads still lands
+    assert "main-model" not in models   # the background rewrite did not
+
+
+def test_refine_still_runs_when_nothing_is_backed_up(client, stub_transcribe,
+                                                     fake_ollama, monkeypatch,
+                                                     stub_partial):
+    """Control: the new gate must not shed refines on an idle pipeline."""
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    monkeypatch.setattr(srv, "REFINE_MAX_IN_FLIGHT", 5)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "config", "model": "main-model",
+                      "draft_model": "fast-draft"})
+        speak(ws)
+        collect_until(ws, stop_types=("translation_revised", "error"))
+    assert "main-model" in translation_models(fake_ollama)
+
+
+def test_transcribe_timing_separates_queue_from_decode(client, stub_transcribe,
+                                                       fake_ollama, trace_file,
+                                                       monkeypatch):
+    """`transcribe_ms` spans queue wait AND decode. Reading it as decode time
+    is how a 73 s wait for ~1.9 s of work once got blamed on a slow model."""
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        collect_until(ws)
+    fin = [r for r in trace_records(trace_file) if r.get("outcome") == "final"]
+    assert fin, "no final traced"
+    r = fin[0]
+    assert "queue_ms" in r and "decode_ms" in r
+    # The two parts must account for the whole, not exceed it.
+    assert r["queue_ms"] >= 0 and r["decode_ms"] >= 0
+    assert r["queue_ms"] + r["decode_ms"] <= r["transcribe_ms"] + 50
