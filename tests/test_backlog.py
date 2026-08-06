@@ -8,11 +8,13 @@ so these thresholds buy the budget back without dropping anything a listener
 would miss.
 """
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
 import server as srv
-from conftest import SPEECH_CHUNK, collect_until, speak, trace_records
+from conftest import (SILENCE_CHUNK, SPEECH_CHUNK, collect_until, speak,
+                      trace_records)
 
 
 @pytest.fixture
@@ -50,6 +52,54 @@ def test_speculation_runs_when_the_pipe_is_clear(client, stub_transcribe,
     assert any(m["type"] == "final" for m in msgs)
     # The speculation is reused as the final, so exactly one decode happens.
     assert len(stub_transcribe.calls) == 1
+
+
+def test_expected_length_accounts_for_how_the_utterance_ended():
+    """The two split reasons need different sums, and getting the sign wrong
+    would silently reject every speculation."""
+    spec = {"len": 100_000}
+    pause = SimpleNamespace(split_reason="pause", end_silence=srv.END_SILENCE_FRAMES)
+    soft = SimpleNamespace(split_reason="soft_max", end_silence=srv.END_SILENCE_FRAMES)
+    # A pause keeps the trailing silence, so the utterance is *longer*.
+    assert srv.spec_expected_len(spec, pause) == 100_000 + (
+        srv.END_SILENCE_FRAMES - srv.EARLY_SILENCE_FRAMES) * srv.FRAME_SAMPLES
+    # A soft_max cuts at the micro-pause, so the utterance is *shorter* —
+    # by exactly the gap between the micro-pause and the speculation.
+    assert srv.spec_expected_len(spec, soft) == 100_000 - (
+        srv.EARLY_SILENCE_FRAMES - srv.MICRO_PAUSE_FRAMES) * srv.FRAME_SAMPLES
+
+
+def test_soft_max_split_reuses_the_speculation(client, stub_transcribe,
+                                               fake_ollama, trace_file,
+                                               monkeypatch):
+    """Continuous speech used to throw every speculation away.
+
+    On the real recording all 15 speculation misses in a 240 s slice were
+    soft_max splits and all 18 hits were pauses — the split emits
+    `speech[:split_at]` while the hit test only knew the pause arithmetic.
+    The speculation was launched at EARLY_SILENCE_FRAMES of the very silence
+    run whose MICRO_PAUSE_FRAMES mark became `split_at`, so it holds the
+    emitted chunk plus one short run of trailing silence: the same words, and
+    a ~2 s decode that no longer has to happen twice.
+    """
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    monkeypatch.setattr(srv, "SOFT_MAX_SEC", 2.5)   # reachable in a short test
+    with client.websocket_connect("/ws") as ws:
+        for _ in range(3):
+            ws.send_bytes(SILENCE_CHUNK)
+        for _ in range(10):                 # 1.28 s of speech
+            ws.send_bytes(SPEECH_CHUNK)
+        for _ in range(3):                  # 384 ms: past EARLY, before the end
+            ws.send_bytes(SILENCE_CHUNK)
+        for _ in range(12):                 # speaker carries on past SOFT_MAX
+            ws.send_bytes(SPEECH_CHUNK)
+        for _ in range(8):
+            ws.send_bytes(SILENCE_CHUNK)
+        collect_until(ws)
+    soft = [r for r in trace_records(trace_file) if r.get("split") == "soft_max"]
+    assert soft, "no soft_max split — the scenario did not happen"
+    assert soft[0]["spec"] == "hit", \
+        "a soft_max split threw its speculation away"
 
 
 def test_speculation_is_shed_when_the_queue_is_deep(client, stub_transcribe,

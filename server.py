@@ -1109,6 +1109,38 @@ class VadSession:
         return np.concatenate(window).astype(np.float32) / 32768.0
 
 
+def spec_expected_len(spec: dict, vad: "VAD") -> int:
+    """How long the finished utterance must be for the in-flight speculation
+    to be a transcript of it. Any other length means the speculation decoded
+    a different span and its result has to be thrown away.
+
+    There are two ways an utterance can end, and they need different sums.
+
+    A `pause` split keeps every frame of the trailing silence, so the
+    utterance is the speculated audio plus the silence still to come.
+
+    A `soft_max` split is the one that used to be written off. It emits
+    `speech[:split_at]`, cut at the last micro-pause — and a speculation is
+    launched at EARLY_SILENCE_FRAMES of silence while `split_at` was set at
+    MICRO_PAUSE_FRAMES of that same run, exactly (EARLY - MICRO) frames
+    earlier. So when the split is at the speculation's own micro-pause, the
+    speculated audio is the emitted chunk plus 128 ms of trailing silence:
+    the same words. Requiring exactly that difference is what keeps it
+    honest — a split at a *later* micro-pause makes the utterance longer
+    than the speculation (words the speculation never saw), and an *earlier*
+    one makes the gap bigger than one silence run.
+
+    Measured on the real 54-minute recording before this existed: all 15
+    misses in a 240 s slice were soft_max, and all 18 hits were pause. Each
+    miss threw away a ~2 s decode on the one Whisper thread.
+    """
+    if vad.split_reason == "soft_max":
+        return spec["len"] - (EARLY_SILENCE_FRAMES
+                              - MICRO_PAUSE_FRAMES) * FRAME_SAMPLES
+    return spec["len"] + (vad.end_silence
+                          - EARLY_SILENCE_FRAMES) * FRAME_SAMPLES
+
+
 # --------------------------------------------------------------------- startup
 
 
@@ -2489,9 +2521,7 @@ async def ws_endpoint(ws: WebSocket):
                                           timing=spec_timing)}
                 if utterance is not None:
                     spec = ch.pop("spec", None)
-                    expected = (spec["len"] + (vad.end_silence
-                                - EARLY_SILENCE_FRAMES) * FRAME_SAMPLES
-                                if spec else -1)
+                    expected = spec_expected_len(spec, vad) if spec else -1
                     spec_task = spec["task"] if len(utterance) == expected else None
                     spec_timing = spec["timing"] if spec_task else None
                     uid += 1

@@ -543,8 +543,8 @@ until you ask for it):
 |---|---|
 | `buffering` | seconds of speech already said, still growing into a chunk. Nothing about it can reach the screen until a pause or a micro-pause cuts it. |
 | `in flight` | utterances being transcribed or translated right now |
-| `whisper q` | jobs queued on the Whisper thread — there is exactly one, and finals, speculations, and partials all share it |
-| `partials lost` | live partials skipped because the pipe was busy = blank screen while someone is still talking |
+| `whisper q` | jobs queued on the Whisper thread — there is exactly one, and finals and speculations share it (partials have their own, see below) |
+| `partials lost` | live partials skipped because the finals fell so far behind that live text would describe a different moment = blank screen while someone is still talking |
 | `last chunk` | length and why it was cut: `pause` (good), `soft_max` (cut at a micro-pause), `hard_max` (30 s limit, mid-word) |
 | `last lag` | how old the chunk's **first** word was when its card appeared |
 
@@ -622,6 +622,23 @@ optional work and must not be downgraded. If `parakeet-mlx` or the model is
 missing, partials fall back to the Whisper thread — the old behaviour, with
 the old contention. Point `ALLKLARO_PARTIAL_ASR` at another repo to swap the
 model, or at a bogus one to force the fallback.
+
+**Speculations that continuous speech used to waste.** When a pause reaches
+~320 ms the chunk is handed to Whisper immediately, on the bet that the pause
+is the end of the utterance; if it is, the result is already waiting and the
+decode cost nothing. If the speaker carries on, that decode is wasted — so
+how often the bet loses is the whole story. On the real recording it lost 37%
+of the time, and every single loss was the same case: a `soft_max` split.
+
+Continuous speech never yields a full pause, so it is cut at the last
+micro-pause instead. That mark is set at `MICRO_PAUSE_FRAMES` of silence and
+the speculation launches at `EARLY_SILENCE_FRAMES` of *the same* silence run,
+so the speculation holds the emitted chunk plus 128 ms of trailing silence —
+the same words, thrown away only because the reuse test knew the arithmetic
+for a pause and not for a `soft_max`. It now knows both, and requires exactly
+that difference: a split at a later micro-pause means real words the
+speculation never saw. Over a 240 s slice, twice, that is 15 wasted decodes
+down to 2 and **55 Whisper decodes down to 42** for the same 40 utterances.
 
 ## 📖 Gender lexicons (optional)
 

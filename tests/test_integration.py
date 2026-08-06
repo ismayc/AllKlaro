@@ -4,6 +4,7 @@ Run with:  RUN_INTEGRATION=1 uv run pytest -m integration -v
 """
 import json
 import os
+import re
 import subprocess
 import time
 import wave
@@ -203,6 +204,30 @@ def test_real_partial_asr_is_much_faster_than_whisper(tmp_path,
     t = time.perf_counter(); server.transcribe(window, language=None)
     slow = time.perf_counter() - t
     assert fast * 3 < slow, f"partial pass {fast:.3f}s vs whisper {slow:.3f}s"
+
+
+def test_reused_speculation_transcribes_the_same_words(tmp_path):
+    """The soundness condition for reusing a speculation on a soft_max split.
+
+    That split emits `speech[:split_at]`, while the speculation decoded the
+    same audio plus the rest of its silence run — (EARLY - MICRO) frames,
+    128 ms. Reuse is only honest if that tail cannot change the words, which
+    is a claim about a real model, not about arithmetic: the unit tests can
+    only check the lengths line up. Punctuation and case are normalised away
+    because a trailing pause legitimately moves a full stop, and a card is
+    not wrong for ending in "." instead of "!".
+    """
+    pcm = tts_wav(tmp_path, GERMAN_TEXT, "Anna")
+    chunk = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    pad = ((server.EARLY_SILENCE_FRAMES - server.MICRO_PAUSE_FRAMES)
+           * server.FRAME_SAMPLES)
+    speculated = np.concatenate([chunk, np.zeros(pad, dtype=np.float32)])
+
+    def words(audio):
+        text = server.clean_transcript(server.transcribe(audio, language="de"))
+        return re.findall(r"\w+", text.lower())
+
+    assert words(speculated) == words(chunk)
 
 
 def test_real_silero_vad_on_real_speech(tmp_path):
