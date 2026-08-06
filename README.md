@@ -117,6 +117,29 @@ faster, which is exactly the draft job. Earlier rounds rejected
 `qwen2.5:14b` (grammar) and all 3B-class general models (paraphrase too
 freely even as drafts).
 
+**Update 2026-07-27** — re-measured on an M4 Max / 48 GB while tuning
+against a real conversation, using the full integration suite rather than
+the 12-probe subset:
+
+| model | integration | warm translation | keeps the learner features |
+|---|---|---|---|
+| `gemma3:12b` | **22/22** | 2.1 s | all of them |
+| `qwen2.5:7b-instruct` | 18/22 | 1.5 s | loses Berlin flavour, correction steering, gender overrides |
+| `translategemma:4b` | 17/22 | 1.0 s | loses those plus Hessisch/Worms |
+
+`gemma3:12b` remains the only model that keeps everything, and warm it is
+only ~0.5 s slower than the 7B. Prefer it as a single-pass main model.
+
+⚠️ **A draft model is not free.** With `translategemma:4b` resident under
+`keep_alive: "60m"`, Ollama could not load `gemma3:12b` at all — a single
+call did not return in two minutes, and a prewarm timed out after five.
+Unloading the draft fixed it instantly (2.1 s). So a two-model setup can
+wedge Ollama for *everything else* on the box, and the refine pass then
+silently never lands (`refine_ms` pinned at exactly `REFINE_TIMEOUT_SEC`
+means this is happening — you are getting draft quality and paying for
+two models). Measured with one model pair on one machine; check
+`ollama ps` and the trace before trusting a draft configuration.
+
 Benchmark any candidate yourself in one command (needs Ollama running
 and the model pulled):
 
@@ -537,10 +560,30 @@ uv run python tools/replay.py --audio talk.m4a  # a real recording instead
 
 Because the input is identical run to run, a parameter change (`SOFT_MAX_SEC`,
 `PARTIAL_INTERVAL_SEC`, the pause slider, a different draft model) can be
-compared honestly. Synthetic speech is *more* relentless than a human —
-`say` leaves fewer sub-200 ms gaps than real speakers do — so treat it as
-the hard end of the range, and confirm against the overlay in a real
-conversation.
+compared honestly.
+
+⚠️ **Use `--audio` with a real recording for anything that matters.**
+Synthetic `say` output looks like the harder case and is actually the
+easier one. It never pauses, so it produces one 30 s `hard_max` chunk at a
+time and nothing is ever in flight to contend with anything else. A real
+conversation pauses constantly, which yields ~6 s chunks *ten times a
+minute*, all competing for one Whisper thread. Measured against a real
+54-minute conversation, the queue reached 72 and the first word of the
+median chunk was 91 seconds old on screen; the same code under `say` never
+queued past 1. See `docs/findings/real-conversation-pace.md`.
+
+**Backlog shedding.** Because that overload is only ~11%, and all of the
+surplus is *optional* work, the pipeline sheds it by queue depth rather
+than dropping anything you said:
+
+| constant | what stops when the Whisper queue is deeper than this |
+|---|---|
+| `PARTIAL_MAX_QUEUE` | live partials (they'd otherwise be admitted in front of waiting finals) |
+| `SPEC_MAX_QUEUE` | speculative decodes (they only pay off if they land before the real chunk) |
+| `REFINE_MAX_QUEUE` | the second-pass refine (the card is already readable without it) |
+
+`specs_shed` and `refines_shed` appear in the trace so the shedding is
+visible rather than looking like the app being slow.
 
 ## 📖 Gender lexicons (optional)
 

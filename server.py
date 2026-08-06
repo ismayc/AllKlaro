@@ -44,8 +44,32 @@ MAX_UTTERANCE_SEC = 30.0           # hard force-flush, even mid-word
 SOFT_MAX_SEC = 8.0                 # after this, split at the last micro-pause
 MICRO_PAUSE_FRAMES = 6             # ~190 ms dip = natural split point in
                                    # continuous speech (videos, fast talkers)
-PARTIAL_WINDOW_FRAMES = 375        # live partials look at the last ~12 s only
-PARTIAL_INTERVAL_SEC = 1.5         # how often to emit live partial transcripts
+PARTIAL_WINDOW_FRAMES = 190        # live partials look at the last ~6 s only
+PARTIAL_INTERVAL_SEC = 2.0         # how often to emit live partial transcripts
+
+# Backlog thresholds — see docs/findings/real-conversation-pace.md.
+# Measured on a real 54-minute conversation: the pipeline decodes ~2.7x more
+# audio than exists (rolling partials + speculations), which puts the single
+# Whisper thread at ~1.11x realtime against a 1.0x budget. An 11% overload does
+# not degrade, it queues without bound: the queue reached 72 and first-word lag
+# 91 s. All of that surplus is *optional* work, so shedding it by backlog depth
+# restores the budget without ever dropping a real utterance.
+# PARTIAL_MAX_QUEUE was 1 for one measured run: the queue is legitimately
+# non-empty most of the time even when healthy (89 of 94 chunks at depth <= 5),
+# so a threshold of 1 shed 2672 partials and left the screen blank while people
+# were still talking — trading one failure for another. It wants to say "we are
+# behind", not "we are working".
+SPEC_MAX_QUEUE = 2                 # no speculative decodes past this depth
+PARTIAL_MAX_QUEUE = 3              # no live partials past this depth
+REFINE_MAX_QUEUE = 2               # skip the second-pass refine past this depth
+# The refine pass is a background improvement to text the user can already
+# read, so it must never be able to stall the pipeline. Measured: pointing
+# draft and main at two different Ollama models made every refine take >120 s
+# (model swapping), and because lag was clocked after it, cards that appeared
+# in ~13 s were reported as 125 s. Bound it, and drop it once the utterance is
+# old enough that better wording no longer matters.
+REFINE_TIMEOUT_SEC = 10.0
+REFINE_MAX_AGE_SEC = 20.0
 HISTORY_TURNS = 6                  # recent exchanges fed to the translator
 MERGE_GAP_SEC = 2.0                # resumed-within window for fragment merging
 MERGE_MAX_CHARS = 300              # never grow merged utterances beyond this
@@ -1524,6 +1548,32 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
     return None
 
 
+_prewarmed: set[str] = set()
+
+
+async def prewarm_model(model: str) -> None:
+    """Load a model into Ollama once, off the critical path.
+
+    Fire-and-forget: a failure here only means the first refine pays the load,
+    which is the behaviour without it.
+    """
+    if not model or model in _prewarmed:
+        return
+    _prewarmed.add(model)
+    try:
+        async with ollama_client() as client:
+            await client.post("/api/chat", json={
+                "model": model, "stream": False, "keep_alive": "60m",
+                "messages": [{"role": "user", "content": "ok"}],
+                "options": {"num_predict": 1, "temperature": 0.0}},
+                timeout=120)
+        log.info("Prewarmed translation model %s", model)
+    except Exception as exc:
+        _prewarmed.discard(model)
+        log.warning("Prewarm of %s failed (%s); first refine will pay the load",
+                    model, exc)
+
+
 async def translate_once(text: str, source: str, target: str, model: str,
                          history: list[dict] | None = None,
                          revise: tuple[str, str] | None = None,
@@ -1788,6 +1838,8 @@ async def ws_endpoint(ws: WebSocket):
     stats_on = False                 # client wants the live pipeline overlay
     in_flight = 0                    # utterances being transcribed/translated
     partials_skipped = 0             # partials dropped because the pipe was busy
+    specs_shed = 0                   # speculations skipped because of backlog
+    refines_shed = 0                 # refine passes skipped because of backlog
     last_stats = 0.0
     last_done = None                 # summary of the last finished utterance
 
@@ -1893,7 +1945,13 @@ async def ws_endpoint(ws: WebSocket):
             busy = False
             in_flight -= 1
             # Age of this chunk's *last* word when its translation landed...
-            meta["lag_ms"] = int((loop.time() - meta["t_emit"]) * 1000)
+            # `t_card` is stamped when the card actually reaches the screen;
+            # falling back to now covers the paths that never got that far.
+            # Measuring here instead would fold in the *background* refine pass,
+            # which happens after the user can already read the card — that made
+            # one run report a 125 s lag for text that appeared in about 13 s.
+            meta["lag_ms"] = int(((meta.pop("t_card", None) or loop.time())
+                                  - meta["t_emit"]) * 1000)
             # ...and of its first, which is the delay a listener actually
             # feels: everything above plus the time the chunk spent growing.
             meta["first_word_lag_ms"] = (meta["lag_ms"]
@@ -1906,6 +1964,7 @@ async def ws_endpoint(ws: WebSocket):
 
     async def run_translations(my_uid, text, source, targets, t0, t1,
                                meta: dict | None = None):
+        nonlocal refines_shed
         meta = meta if meta is not None else {}
         # Two-tier translation: stream the fast draft model first so text
         # appears immediately, then re-translate with the main model
@@ -1930,14 +1989,31 @@ async def ws_endpoint(ws: WebSocket):
                 "refining": bool(draft),
                 "transcribe_ms": int((t1 - t0) * 1000),
                 "translate_ms": int((t2 - t1) * 1000)})
+            # The card is now on screen. Everything after this is improvement,
+            # not latency, and must not be charged to the lag a listener feels.
+            meta["t_card"] = t2
             texts = {}
             for t, streamed in zip(targets, translations):
                 candidate = streamed
-                if draft:
-                    refined = await translate_once(text, source, t,
-                                                   model, context,
-                                                   flavor=flavor_for(t),
-                                                   address=address)
+                stale = (loop.time() - meta.get("t_emit", t0)) > REFINE_MAX_AGE_SEC
+                if draft and (whisper_pending > REFINE_MAX_QUEUE or stale):
+                    # The refine pass runs after the card is already readable
+                    # and competes with Ollama and Whisper for the same GPU.
+                    # Behind a backlog, or on an utterance already this old,
+                    # better wording is worth far less than catching up.
+                    refines_shed += 1
+                elif draft:
+                    try:
+                        refined = await asyncio.wait_for(
+                            translate_once(text, source, t, model, context,
+                                           flavor=flavor_for(t),
+                                           address=address),
+                            timeout=REFINE_TIMEOUT_SEC)
+                    except (asyncio.TimeoutError, TimeoutError):
+                        # Keep the draft. A refinement nobody waited for is
+                        # not worth blocking the utterances behind it.
+                        refined = None
+                        refines_shed += 1
                     if refined:
                         candidate = refined
                 if t == "de" and de_flavor:
@@ -1994,6 +2070,12 @@ async def ws_endpoint(ws: WebSocket):
             if busy and now - last_partial >= PARTIAL_INTERVAL_SEC:
                 partials_skipped += 1
             return
+        if whisper_pending > PARTIAL_MAX_QUEUE:
+            # `busy` only knows about one in-flight handler; it says nothing
+            # about how deep the executor queue is. Without this a partial can
+            # be admitted in front of a dozen waiting finals.
+            partials_skipped += 1
+            return
         if any(c["vad"].speculating for c in channels.values()):
             partials_skipped += 1
             return
@@ -2030,6 +2112,15 @@ async def ws_endpoint(ws: WebSocket):
                         stats_on = bool(cfg["stats"])
                     if "draft_model" in cfg:  # "" means draft pass off
                         draft_model = cfg["draft_model"] or None
+                    if draft_model and draft_model != model:
+                        # Two models means Ollama has to hold both. A cold load
+                        # of the main model takes far longer than
+                        # REFINE_TIMEOUT_SEC, so without this every refine is
+                        # aborted mid-load and reloads from scratch forever —
+                        # measured as refine_ms pinned at exactly the timeout,
+                        # i.e. the refinement never once landed. Pay the load
+                        # now, before anyone is waiting on it.
+                        asyncio.create_task(prewarm_model(model))
                     if "de_flavor" in cfg:  # "" means standard German
                         de_flavor = (cfg["de_flavor"]
                                      if cfg["de_flavor"] in FLAVOR_NOTES["de"]
@@ -2084,10 +2175,17 @@ async def ws_endpoint(ws: WebSocket):
                     # the result is ready if the pause turns out to be final.
                     early = vad.early_event
                     vad.early_event = None
-                    ch["spec"] = {"len": len(early),
-                                  "task": submit_transcribe(
-                                      loop, early, lang_hint(mode),
-                                      whisper_prompt())}
+                    if whisper_pending > SPEC_MAX_QUEUE:
+                        # Speculation only pays off if it finishes before the
+                        # real chunk arrives. Behind a queue it cannot, and it
+                        # doubles the audio the one thread has to decode.
+                        specs_shed += 1
+                        vad.speculating = False
+                    else:
+                        ch["spec"] = {"len": len(early),
+                                      "task": submit_transcribe(
+                                          loop, early, lang_hint(mode),
+                                          whisper_prompt())}
                 if utterance is not None:
                     spec = ch.pop("spec", None)
                     expected = (spec["len"] + (vad.end_silence
@@ -2105,8 +2203,11 @@ async def ws_endpoint(ws: WebSocket):
                             "spec": ("hit" if spec_task else
                                      "miss" if spec else "none"),
                             "whisper_queue": whisper_pending,
-                            "partials_skipped": partials_skipped}
+                            "partials_skipped": partials_skipped,
+                            "specs_shed": specs_shed,
+                            "refines_shed": refines_shed}
                     partials_skipped = 0
+                    specs_shed = refines_shed = 0
                     await safe_send(ws, {"type": "segment_start", "id": uid,
                                          "speaker": SPEAKERS[tag]})
                     asyncio.create_task(
