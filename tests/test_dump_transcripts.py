@@ -9,6 +9,7 @@ the model.
 import json
 import sys
 import wave
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -54,10 +55,19 @@ def test_frames_mixes_a_stereo_file_down(tmp_path):
     assert np.allclose(got[0], mono[:srv.FRAME_SAMPLES], atol=1)
 
 
+def use_energy_vad(monkeypatch):
+    """These fixtures are a 440 Hz tone, which Silero rightly says is not
+    speech. The dumper loads Silero to match the server, so pin the energy
+    scorer here — this asserts the plumbing, not the VAD model."""
+    monkeypatch.setattr(srv, "load_silero", lambda: None)
+    monkeypatch.setattr(srv, "make_scorer", lambda: srv.EnergyScorer())
+
+
 def run_main(tmp_path, monkeypatch, result, language=None):
     audio = tmp_path / "a.wav"
     write_wav(audio, np.concatenate([quiet(10), tone(40), quiet(30)]))
     out = tmp_path / "out.jsonl"
+    use_energy_vad(monkeypatch)
     monkeypatch.setattr(srv, "transcribe", lambda a, lang, prompt=None: result)
     argv = ["dump_transcripts.py", "--audio", str(audio), "--out", str(out)]
     if language:
@@ -107,6 +117,7 @@ def test_language_flag_is_passed_through_to_whisper(tmp_path, monkeypatch):
         seen.append(language)
         return {"text": " Ja.", "language": language or "en", "segments": []}
 
+    use_energy_vad(monkeypatch)
     monkeypatch.setattr(srv, "transcribe", fake)
     audio = tmp_path / "a.wav"
     write_wav(audio, np.concatenate([quiet(10), tone(40), quiet(30)]))
@@ -118,6 +129,19 @@ def test_language_flag_is_passed_through_to_whisper(tmp_path, monkeypatch):
         monkeypatch.setattr(sys, "argv", argv)
         dt.main()
     assert seen == [None, "de"]
+
+
+def test_it_runs_as_a_script_not_only_as_an_import():
+    """Every other test here imports the module, which pytest makes work by
+    putting the repo root on sys.path. Run from the command line that is not
+    true, and `import server` failed — invisible to an import-based test."""
+    import subprocess
+    r = subprocess.run(
+        [sys.executable, str(Path(dt.__file__).resolve()), "--help"],
+        capture_output=True, text=True, timeout=120,
+        cwd=str(Path(dt.__file__).resolve().parent))
+    assert r.returncode == 0, r.stderr[-800:]
+    assert "--language" in r.stdout
 
 
 def test_rejects_a_wrong_sample_rate(tmp_path):

@@ -155,8 +155,35 @@ separate load risk.
       good model on the critical path.
 
 ### 4. Output quality, which lag work does not touch
-- [ ] German audio sometimes transcribed as English words (3 of 35 cards in a
-      4-minute run), so the card renders EN→DE.
-- [ ] Hallucination loops (a whole card of one repeated syllable) that
-      `HALLUCINATION_RE` does not catch.
+Ground truth now exists: `tools/dump_transcripts.py` over the real slice, 51
+utterances, auto-detect and forced-`de` side by side.
+
+- [x] **"German transcribed as English" is largely a misdiagnosis.** Six of
+      51 utterances auto-detected as English, and on inspection most are
+      *correct* — the conversation is genuinely bilingual. #49 stays
+      `"We had..."` even when Whisper is forced to German, and #50/#51 are
+      fluent English sentences. Auto-detect was right; the cards were not
+      wrong for the reason assumed.
+- [ ] **The real failure is the mirror image, and it is reachable from the
+      UI.** `lang_hint(mode)` pins Whisper's language for any *forced*
+      direction (`de-en` → always German) and only returns `None` for
+      `auto-*` modes (`server.py:2000`, used at `server.py:2261`). Pick
+      "German → English" during a bilingual conversation and every English
+      utterance is decoded as German. Measured on the same audio, that turns
+      *"we had some sort of problem where they came and fixed something"*
+      into *"Und so haben wir so ein Problem, wo sie sich und die Füße
+      starete, die sich so starete, die Füße starete, die Füße starete."*
+      Consider defaulting to auto, or falling back when the forced decode
+      looks degenerate.
+- [ ] **A phrase-level repetition loop passes every filter.** That same
+      utterance: `is_degenerate` compression 1.33 (needs > 4.0), Whisper's own
+      `compression_ratio` 1.57 (drops at > 2.4), `collapse_repeats` unchanged
+      (needs 8+ repeats of a unit ≤ 12 chars). It is a ~17-char phrase
+      repeated 3–4 times, which is too few repeats and too long a unit for
+      all three guards. `cleaned == raw`; nothing caught it. Note this is not
+      a `HALLUCINATION_RE` gap as originally written — that is a blocklist of
+      stock phrases and was never the mechanism.
+- [x] Loops do **not** reproduce under auto-detect on this slice: 0 of 51
+      dropped, no repetition-dominated survivors. They appear to be a
+      consequence of forcing the wrong language, not a standalone ASR defect.
 - [ ] A wrong card is worse than a slow one.

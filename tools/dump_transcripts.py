@@ -22,11 +22,17 @@ shows what the same audio yields when detection cannot go wrong.
 """
 import argparse
 import json
+import sys
 import wave
+from pathlib import Path
 
 import numpy as np
 
-import server as srv
+# Run as a script from tools/, the repo root is not on sys.path — pytest adds
+# it, so the tests import fine while the command line does not.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import server as srv  # noqa: E402
 
 
 def frames(path):
@@ -51,7 +57,13 @@ def main():
     p.add_argument("--out", default="transcripts.jsonl")
     a = p.parse_args()
 
-    vad = srv.VadSession()
+    # Match the server exactly: it builds the VAD with make_scorer() and
+    # END_SILENCE_FRAMES. The default VadSession() falls back to the energy
+    # scorer, which on this recording segmented 240 s into 4 utterances
+    # instead of ~40 — a dump that is not the pipeline's own segmentation is
+    # worthless as ground truth for what the pipeline translates.
+    srv.load_silero()
+    vad = srv.VadSession(srv.make_scorer(), srv.END_SILENCE_FRAMES)
     rows, idx, t = [], 0, 0.0
     for f in frames(a.audio):
         t += srv.FRAME_MS / 1000
