@@ -64,13 +64,29 @@ more shed. Further Whisper-side optimisation has little left to win.
       what Whisper actually writes when a Berliner speaks, which the real
       recording can supply once some of it is hand-checked.
 
-### 3. The measurement rig cannot resolve what it is tuning
-- [ ] Make a pipeline run repeatable — two **identical** arms differed 2.7x on
-      `translate_ms`, which is wider than any change being measured.
-- [ ] Separate pipeline timing from model-server noise (fixed-latency stub for
-      pipeline work; the real models only for quality checks).
+### 3. The measurement rig cannot resolve what it is tuning — fixed at p50
+- [x] **Translation stage separated from model-server noise.**
+      `tools/fake_ollama.py` serves `/api/chat` at a latency you choose,
+      defaulting to the measured real p50s (draft 2600 ms, refine 8800 ms).
+      `OLLAMA_URL` is now `ALLKLARO_OLLAMA_URL`-overridable so both arms of an
+      A/B run identical source, the same rationale as `REFINE_MAX_IN_FLIGHT`.
+- [x] **Repeatability measured, not assumed.** Two *identical* arms over the
+      real 240 s slice, 42 utterances each: `first_word_lag` p50 differed by
+      **130 ms**, against **3600 ms** for two identical live-Ollama arms.
+      `translate_ms` p50 delta 0 ms, stdev 17 ms within a run. The rig now
+      resolves sub-second effects, so items 1 and 2 are decidable.
+- [ ] **Residual noise is Whisper, and it lives in the tail.** Every large
+      p90 delta between the identical arms is an ASR metric — `decode_ms`
+      1022 ms, `transcribe_ms` 828 ms — while `translate_ms` p90 moved 84 ms.
+      A fixed-cost ASR stub is the fix, deliberately *not* built yet: p50
+      resolution decides items 1 and 2, and tail precision buys nothing until
+      a p90 claim is load-bearing.
+- [ ] **Arms are not bit-identical.** Run 2 produced 41 finals to run 1's 40
+      and 32 speculation hits to 31, so a small part of any delta is a
+      different utterance set rather than timing. Compare distributions, and
+      do not read a sub-100 ms difference as signal.
 
-*Doing this second: it is what makes items 1 and 2 decidable instead of
+*Done second, as planned: it is what makes items 1 and 2 decidable instead of
 arguable.*
 
 ### 1. Audio accumulation — the largest remaining component

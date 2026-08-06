@@ -90,7 +90,12 @@ STATS_INTERVAL_SEC = 0.5           # how often the pipeline overlay is updated
 SENTENCE_END_RE = re.compile(r"[.!?…]['\")\]]?\s*$")
 
 WHISPER_REPO = "mlx-community/whisper-large-v3-turbo"
-OLLAMA_URL = "http://127.0.0.1:11434"
+# Overridable so a benchmark can point the translation stage at a
+# fixed-latency stub (tools/fake_ollama.py). Measured on the real recording,
+# the live server's own spread — translate p50 2.9 s to 7.7 s across runs of
+# identical code — is wider than any pipeline change worth making, so timing
+# work needs a translation stage that costs the same every time.
+OLLAMA_URL = os.environ.get("ALLKLARO_OLLAMA_URL", "http://127.0.0.1:11434")
 # ALLKLARO_MODEL also lets the integration suite benchmark any model:
 #   RUN_INTEGRATION=1 ALLKLARO_MODEL=<name> uv run pytest tests/test_integration.py
 DEFAULT_MODEL = os.environ.get("ALLKLARO_MODEL", "gemma3:12b")
