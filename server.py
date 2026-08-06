@@ -843,6 +843,31 @@ def is_degenerate(text: str) -> bool:
     return ratio > 4.0
 
 
+def has_phrase_loop(text: str, n: int = 3, times: int = 3) -> bool:
+    """A short phrase repeated 3+ times — the loop shape the other two checks
+    are both blind to.
+
+    `is_degenerate` wants a compression ratio above 4.0 and `collapse_repeats`
+    wants 8+ repeats of a unit under 12 chars. A ~17-char phrase repeated
+    three times clears neither. Measured on the real recording, forcing German
+    onto English speech produced "…die Füße starete, die sich so starete, die
+    Füße starete, die Füße starete." — compression 1.33 against the 4.0
+    threshold, and Whisper's own compression_ratio 1.57 against its 2.4. It
+    was emitted verbatim.
+
+    Counted over words rather than characters so punctuation and spacing
+    cannot hide the repeat. Validated against the 51 real utterances of the
+    Berlin slice: zero flagged, so this does not touch ordinary speech —
+    including genuine emphasis like "Ja, ja, ja", which repeats a single word
+    and never a 3-word phrase.
+    """
+    words = re.findall(r"\w+", text.lower())
+    if len(words) < n * times:
+        return False
+    grams = [tuple(words[i:i + n]) for i in range(len(words) - n + 1)]
+    return max(grams.count(g) for g in set(grams)) >= times
+
+
 def collapse_repeats(text: str) -> str:
     """Collapse short units repeated 8+ times ("L-L-L-L…" → "L-"), rescuing
     the real speech in a segment that ends in a repetition loop."""
@@ -856,6 +881,11 @@ def _clean_segment(raw: str) -> str | None:
     collapsed = collapse_repeats(raw)
     if len(collapsed) < 0.4 * len(raw) and len(collapsed.strip()) < 30:
         return None                    # mostly loop, nothing left worth keeping
+    # After collapsing, not before: a tail of "L-L-L-…" is 100 repeated tokens
+    # to a word-level check, so testing the raw text would throw away the real
+    # speech in front of a loop that collapse_repeats can rescue.
+    if has_phrase_loop(collapsed):
+        return None                    # loop that survived collapsing
     return collapsed
 
 

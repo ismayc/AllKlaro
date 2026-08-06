@@ -2,7 +2,8 @@
 import pytest
 
 import server
-from server import (HALLUCINATION_RE, clean_transcript, is_echo, lang_hint,
+from server import (HALLUCINATION_RE, clean_transcript, collapse_repeats,
+                    has_phrase_loop, is_degenerate, is_echo, lang_hint,
                     normalize_text, resolve_direction, translation_messages)
 
 
@@ -316,3 +317,44 @@ def test_spanish_flavor_notes_and_barcelona_plural_override():
     # Flavors never leak across targets.
     assert "chido" not in translation_messages(
         "Hi", "en", "de", flavor="mexico")[0]["content"]
+
+
+# The exact output of forcing German onto English speech in the real
+# recording — "we had some sort of problem where they came and fixed
+# something" decoded as German. Kept verbatim because a synthesised loop
+# would not have the same near-miss statistics: this one scores 1.33
+# compression against is_degenerate's 4.0 and 1.57 against Whisper's 2.4.
+REAL_PHRASE_LOOP = ("Und so haben wir so ein Problem, wo sie sich und die "
+                    "Füße starete, die sich so starete, die Füße starete, "
+                    "die Füße starete.")
+
+
+def test_the_real_phrase_loop_is_dropped():
+    assert has_phrase_loop(REAL_PHRASE_LOOP)
+    assert clean_transcript({"text": REAL_PHRASE_LOOP}) == ""
+
+
+def test_the_loop_slips_every_older_guard():
+    """Documents why a new check was needed rather than a tuned threshold:
+    all three existing guards score this text as ordinary speech."""
+    assert not is_degenerate(REAL_PHRASE_LOOP)
+    assert collapse_repeats(REAL_PHRASE_LOOP) == REAL_PHRASE_LOOP
+    assert clean_transcript({"segments": [
+        {"text": REAL_PHRASE_LOOP, "compression_ratio": 1.57,
+         "no_speech_prob": 0.1, "avg_logprob": -0.3}]}) == ""
+
+
+@pytest.mark.parametrize("real", [
+    # Verbatim from the 51-utterance dump of the real recording.
+    "Ja, ja, ja.",
+    "Ja. Ja. Ja, genau.",
+    "It was .46 yesterday. Yeah. Yeah.",
+    "We had some sort of problem where they came and fixed something and "
+    "then they also adjusted the refiller.",
+    "Guten Tag, wie geht's? Wie geht es Ihnen denn heute so?",
+])
+def test_real_speech_is_not_mistaken_for_a_loop(real):
+    """Emphasis repeats a word, never a three-word phrase. Zero of the 51
+    real utterances flagged; these are the closest calls among them."""
+    assert not has_phrase_loop(real)
+    assert clean_transcript({"text": real}) == real.strip()

@@ -175,7 +175,13 @@ utterances, auto-detect and forced-`de` side by side.
       starete, die sich so starete, die Füße starete, die Füße starete."*
       Consider defaulting to auto, or falling back when the forced decode
       looks degenerate.
-- [ ] **A phrase-level repetition loop passes every filter.** That same
+- [x] **A phrase-level repetition loop passed every filter — now caught by
+      `has_phrase_loop`**, which flags any 3-word phrase occurring 3+ times.
+      It runs *after* `collapse_repeats`, not before: a "L-L-L-…" tail is 100
+      repeated tokens to a word-level check, so testing raw text would throw
+      away the real speech in front of a loop the collapser can rescue.
+      Validated end to end on the dump — 0 of 51 real utterances dropped, and
+      exactly the one garbage utterance removed. Original evidence: That same
       utterance: `is_degenerate` compression 1.33 (needs > 4.0), Whisper's own
       `compression_ratio` 1.57 (drops at > 2.4), `collapse_repeats` unchanged
       (needs 8+ repeats of a unit ≤ 12 chars). It is a ~17-char phrase
