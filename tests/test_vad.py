@@ -274,7 +274,7 @@ def test_soft_max_sec_is_env_overridable():
 
     import server as srv
 
-    assert srv.SOFT_MAX_SEC == 8.0            # default when unset
+    assert srv.SOFT_MAX_SEC == 5.0            # measured default when unset
     prev = os.environ.get("ALLKLARO_SOFT_MAX_SEC")
     os.environ["ALLKLARO_SOFT_MAX_SEC"] = "3.5"
     try:

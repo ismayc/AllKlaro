@@ -42,14 +42,28 @@ END_SILENCE_FRAMES = 22            # ~700 ms of silence ends the utterance
 EARLY_SILENCE_FRAMES = 10          # ~320 ms: start transcribing speculatively
 MIN_UTTERANCE_SEC = 0.4
 MAX_UTTERANCE_SEC = 30.0           # hard force-flush, even mid-word
-# Overridable so an A/B can sweep it without editing this file — both arms of
-# a benchmark have to run identical source. This is the largest untouched
-# component of first-word lag: pooled over two stub runs of the real slice,
-# the emitted chunk is 65% of first-word lag at p50 (5.76 s of 8.71 s), and
-# soft_max chunks (p50 6.88 s) cost 2.4 s more lag than pause ones. Lowering
-# it cuts sooner, trading translation context and extra Whisper decodes for
-# less accumulation — which of those wins is a measurement, not a guess.
-SOFT_MAX_SEC = float(os.environ.get("ALLKLARO_SOFT_MAX_SEC", "8.0"))
+# 5.0, not the original 8.0, and not lower: measured, bracketed A-B-A on the
+# real slice. Accumulation was 65% of first-word lag at p50, and the split
+# points to cut sooner already existed — `split_at` is updated at every
+# micro-pause and was then ignored until 8 s had elapsed.
+#
+# Against the fixed-cost stub, on the chunk-count-invariant metric (lag at
+# speech-run starts, which a lower cap cannot inflate by manufacturing more
+# utterances): 8.0 -> 9092 ms, 6.0 -> 8631 ms, 5.0 -> 6827 ms, 4.0 -> 6417 ms.
+# 6.0 does not clear its own 366 ms control spread; 5.0 takes 2.3 s of the
+# 2.8 s available at 4.0, and 4.0 pays steeply for the last 400 ms.
+#
+# Confirmed against live Ollama, which contradicted the expected cost. More,
+# shorter chunks did not congest it: translate p50 fell 3000 -> 1744 ms and
+# its worst case 14.7 s -> 4.4 s, because a shorter chunk is a shorter prompt.
+# Live first-word lag fell 10444 -> 6932 ms, a larger win than the stub showed.
+#
+# The real cost is speculation coverage: cutting at a 6-frame micro-pause can
+# fire before the 10-frame silence that launches a speculation, so `spec:none`
+# went 6 -> 20 live. Refines also shed more (37 -> 49), but refine_ms sits at
+# its 10 s timeout in both arms, so that is shedding work already failing.
+SOFT_MAX_SEC = float(os.environ.get("ALLKLARO_SOFT_MAX_SEC", "5.0"))
+SOFT_MAX_SEC = float(os.environ.get("ALLKLARO_SOFT_MAX_SEC", "5.0"))
 MICRO_PAUSE_FRAMES = 6             # ~190 ms dip = natural split point in
                                    # continuous speech (videos, fast talkers)
 PARTIAL_WINDOW_FRAMES = 190        # live partials look at the last ~6 s only

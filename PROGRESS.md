@@ -89,12 +89,39 @@ more shed. Further Whisper-side optimisation has little left to win.
 *Done second, as planned: it is what makes items 1 and 2 decidable instead of
 arguable.*
 
-### 1. Audio accumulation — the largest remaining component
-- [ ] 5.8 s median chunk = **36–52% of first-word lag**, untouched.
-- [ ] Partly irreducible, but 22 of 40 utterances are already `soft_max`
-      splits at micro-pauses, so the machinery to cut earlier exists. Test a
-      lower `SOFT_MAX_SEC`, or translate from partials instead of waiting for
-      a chunk boundary.
+### 1. Audio accumulation — largest remaining component, cut by ~3.5 s
+- [x] **Confirmed as the dominant term.** Pooled over the stub runs, the
+      emitted chunk is **65%** of first-word lag at p50 (5.76 s of 8.71 s).
+      The earlier 36–52% was measured against live Ollama, where a 2.9–7.7 s
+      translate leg dilutes accumulation's share; both are right about their
+      own run.
+- [x] **The split points already existed.** `split_at` is updated at *every*
+      micro-pause and was then ignored until `SOFT_MAX_SEC` (8 s) elapsed, so
+      usable cuts were being found seconds early and discarded.
+- [x] **Swept bracketed A-B-A**, on the chunk-count-invariant metric — lag at
+      speech-run starts, which a lower cap cannot flatter by manufacturing
+      more, shorter utterances:
+
+      | cap | runstart p50 | vs 8.0    | verdict |
+      |-----|--------------|-----------|---------|
+      | 8.0 | 9092 ms      | —         | baseline |
+      | 6.0 | 8631 ms      | −460 ms   | inside its 366 ms control spread |
+      | 5.0 | 6827 ms      | −2264 ms  | real |
+      | 4.0 | 6417 ms      | −2800 ms  | real, but pays steeply for 400 ms |
+
+- [x] **Default is now 5.0.** Confirmed against live Ollama, where the
+      expected cost did not appear: more, shorter chunks did **not** congest
+      it. Translate p50 fell 3000 → 1744 ms and its worst case 14.7 s → 4.4 s,
+      because a shorter chunk is a shorter prompt. Live first-word lag fell
+      **10444 → 6932 ms**, a larger win than the stub predicted.
+- [ ] **Speculation coverage is the real cost.** `spec:none` went 6 → 20 live:
+      a cut at a 6-frame micro-pause can fire before the 10-frame silence that
+      launches a speculation, so `EARLY_SILENCE_FRAMES` / `MICRO_PAUSE_FRAMES`
+      want revisiting now that the cap is lower. Refines also shed more
+      (37 → 49) but `refine_ms` sits at its 10 s timeout in *both* arms, so
+      that is shedding work already failing — see item 2.
+- [ ] Translating from partials rather than chunk boundaries is still
+      untried, and is the next lever if more is wanted.
 
 ### 6. One mic carries everyone, and nothing says who spoke
 Multi-speaker *load* is already covered: the 54-minute recording is a real
@@ -117,6 +144,13 @@ separate load risk.
 - [ ] It times out or is shed on a large fraction of utterances, spending
       Ollama time rewriting text already on screen — in a pipeline where
       Ollama is now the constraint.
+- [ ] **Now measured against live Ollama, and it is worse than "a large
+      fraction": `refine_ms` p50 is 10003 ms at cap 8.0 and 10001 ms at cap
+      5.0 — the 10 s timeout itself, in both arms.** The median refine does
+      not complete. Shed counts were 37 of 40 and 49 of 52. So the pass is
+      near-totally ineffective in practice while still costing queue time,
+      and the stub hides this completely (it sheds 7 at the same cap, because
+      a fixed-cost server cannot time out).
 - [ ] Make it much cheaper, make it conditional, or drop it and put a single
       good model on the critical path.
 

@@ -46,6 +46,13 @@ def _partials_skipped(trace_file, client, monkeypatch, **fixtures):
     """Run one utterance and report how many partials were skipped."""
     monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 0.0)
     monkeypatch.setattr(srv, "PARTIAL_MAX_QUEUE", 99)  # isolate from shedding
+    # Pin the soft-max cap: this pair is about whether partials get their own
+    # worker, and it needs one long utterance held in flight to create the
+    # contention. Inheriting the default coupled it to an unrelated tuning
+    # constant — when that dropped 8.0 -> 5.0 the chunk was emitted before any
+    # partial came due, so the fallback path stopped starving and the test
+    # failed without the fast path having changed at all.
+    monkeypatch.setattr(srv, "SOFT_MAX_SEC", 8.0)
     with client.websocket_connect("/ws") as ws:
         speak(ws, speech_chunks=40)
         collect_until(ws)
