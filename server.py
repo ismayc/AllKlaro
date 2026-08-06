@@ -865,7 +865,13 @@ def has_phrase_loop(text: str, n: int = 3, times: int = 3) -> bool:
     if len(words) < n * times:
         return False
     grams = [tuple(words[i:i + n]) for i in range(len(words) - n + 1)]
-    return max(grams.count(g) for g in set(grams)) >= times
+    # The gram must be a *varied* phrase. One word repeated is emphasis or
+    # onomatopoeia, and five of them yield three copies of an all-identical
+    # gram: over the full recording that dropped "…dann kommt das immer tüt
+    # tüt tüt tüt tüt, dann tropft das da runter." — a coherent German
+    # sentence about a gutter dripping. Runs of a single token are already
+    # handled upstream by is_degenerate and collapse_repeats.
+    return any(len(set(g)) > 1 and grams.count(g) >= times for g in set(grams))
 
 
 def collapse_repeats(text: str) -> str:

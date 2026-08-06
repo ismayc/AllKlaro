@@ -345,8 +345,14 @@ def test_the_loop_slips_every_older_guard():
 
 
 @pytest.mark.parametrize("real", [
-    # Verbatim from the 51-utterance dump of the real recording.
+    # Verbatim from a 259-utterance dump spanning five slices of the real
+    # recording (1:00, 10:00, 25:00, 40:00, 50:00).
     "Ja, ja, ja.",
+    # Onomatopoeia. Five repeats of one word make three copies of an
+    # all-identical 3-gram, so the first version of has_phrase_loop threw this
+    # whole coherent sentence away. Only a *varied* phrase counts as a loop.
+    "Regenrinnen gibt es hier nicht, dann ist das genau da abgeschnitten "
+    "und dann kommt das immer tüt tüt tüt tüt tüt, dann tropft das da runter.",
     "Ja. Ja. Ja, genau.",
     "It was .46 yesterday. Yeah. Yeah.",
     "We had some sort of problem where they came and fixed something and "
@@ -358,3 +364,11 @@ def test_real_speech_is_not_mistaken_for_a_loop(real):
     real utterances flagged; these are the closest calls among them."""
     assert not has_phrase_loop(real)
     assert clean_transcript({"text": real}) == real.strip()
+
+
+def test_a_varied_phrase_loop_from_the_later_recording_is_dropped():
+    """Found at 50:00, where the conversation is majority English: a real
+    hallucination loop that repeats a phrase rather than a word, so it is
+    caught while "tüt tüt tüt" is not."""
+    assert has_phrase_loop("I'd like to I'd like to I'd like to "
+                           "I'd like to I'd like to")

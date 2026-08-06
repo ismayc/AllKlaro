@@ -155,8 +155,17 @@ separate load risk.
       good model on the critical path.
 
 ### 4. Output quality, which lag work does not touch
-Ground truth now exists: `tools/dump_transcripts.py` over the real slice, 51
-utterances, auto-detect and forced-`de` side by side.
+Ground truth now exists: `tools/dump_transcripts.py` over **five** slices of
+the recording — 1:00, 10:00, 25:00, 40:00, 50:00 — **259 utterances**, with
+auto-detect and forced-`de` side by side. One slice was not enough: the first
+version of the loop filter looked perfect on 51 utterances and had a false
+positive waiting at 10:00. Rebuild the extra slices the same way as
+`demo4.wav` (see the `/test-allklaro-translating` skill), varying the offset.
+
+**The conversation shifts language as it goes**, which no single slice shows:
+English is 12% of utterances at 1:00, 6% at 10:00, 19% at 25:00, 31% at 40:00
+and **60% at 50:00**. Any behaviour keyed to a fixed source language gets
+worse the longer the conversation runs.
 
 - [x] **"German transcribed as English" is largely a misdiagnosis.** Six of
       51 utterances auto-detected as English, and on inspection most are
