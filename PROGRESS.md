@@ -198,7 +198,17 @@ worse the longer the conversation runs.
       all three guards. `cleaned == raw`; nothing caught it. Note this is not
       a `HALLUCINATION_RE` gap as originally written — that is a blocklist of
       stock phrases and was never the mechanism.
-- [x] Loops do **not** reproduce under auto-detect on this slice: 0 of 51
-      dropped, no repetition-dominated survivors. They appear to be a
-      consequence of forcing the wrong language, not a standalone ASR defect.
+- [x] **Loops are their own defect, not a symptom of the forced language** —
+      corrected on the wider corpus. Under plain auto-detect, 4 of 259
+      utterances are degenerate: "EP" ×32 at 25:00, "PPE" ×60 at 40:00, "I"
+      ×50 and "I'd like to" ×5 at 50:00. The first pass looked at one slice,
+      found none, and drew the wrong conclusion.
+- [x] **Forcing German is damaging, but less uniformly than first written.**
+      On the 32 English utterances at 50:00 it produced *zero* loops and only
+      2 garbage drops; most came back as fluent, often *correct* German
+      ("Yeah, I see them." → "Ja, ah, ich sehe sie."), because a language hint
+      makes Whisper translate rather than transcribe. One case went the other
+      way entirely — auto-detect emitted "I I I I…" where forced German gave a
+      clean "Ja!". So the fix is not simply "always auto": it is worth
+      measuring which mode wins per utterance before changing the default.
 - [ ] A wrong card is worse than a slow one.
