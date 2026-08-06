@@ -57,12 +57,18 @@ more shed. Further Whisper-side optimisation has little left to win.
 - [x] **Ambiguous entries now name their dialect.** Without this, selecting
       Berlinerisch would have offered the Rhine-Hessian reading of "mehr"
       (= *mer*, wir) to a Berlin speaker: a new error rather than a fix.
-- [ ] **Remaining gap: no Berlinerisch mis-hearings are catalogued.** Every
-      ambiguous entry is Hessian / Rhine-Hessian, so for the Berlinerisch
-      setting the concrete word-level repair still has nothing to offer —
-      only the general comprehension note. Closing this needs ground truth:
-      what Whisper actually writes when a Berliner speaks, which the real
-      recording can supply once some of it is hand-checked.
+- [x] **Dormancy confirmed at 4.4x the original sample.** Across five slices
+      of the recording — **2277 German word tokens** — there are **zero**
+      unambiguous dialect markers from the 97-key lexicon. Only the ambiguous
+      `mehr` ×10 and `des` ×4 appear. The spelling-based hint could never have
+      fired, and asserting the selected dialect was the right repair.
+- [ ] **The remaining gap cannot be closed from transcripts, which is why it
+      is still open.** Cataloguing Berlinerisch mis-hearings needs to know
+      what Whisper writes when a Berliner speaks — but Whisper writes standard
+      orthography, so the transcript route yields nothing by construction. It
+      needs someone listening to the audio next to the text, not another dump.
+      Every ambiguous entry remains Hessian / Rhine-Hessian, so the
+      Berlinerisch setting still offers only the general comprehension note.
 
 ### 3. The measurement rig cannot resolve what it is tuning — fixed at p50
 - [x] **Translation stage separated from model-server noise.**
