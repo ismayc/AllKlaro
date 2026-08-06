@@ -75,12 +75,18 @@ Worschd = Wurst (sausage)
 Dorschd = Durst (thirst)
 
 # --- Ambiguous: standard words that are often mis-heard dialect
-? des = das
-? nett = net (nicht)
-? mehr = mer (wir)
-? schoppe = Schoppen (a glass of cider/wine)
-? shoppe = Schoppen (a glass of cider/wine)
-? mol = mal
+# The trailing [tags] name the dialects an entry belongs to. They matter only
+# once a dialect is *selected*: an ambiguous word is then hinted on its own,
+# and glossing "mehr" as Rhine-Hessian "mer (wir)" for a Berlin speaker would
+# be an error rather than a help. Untagged entries apply to every dialect.
+# All of these are Hessian / Rhine-Hessian forms (Berlinerisch has det/dit,
+# nich and ma, not des, net and mol).
+? des = das [hessian worms]
+? nett = net (nicht) [hessian worms]
+? mehr = mer (wir) [hessian worms]
+? schoppe = Schoppen (a glass of cider/wine) [hessian worms]
+? shoppe = Schoppen (a glass of cider/wine) [hessian worms]
+? mol = mal [hessian worms]
 
 # ===================================================================
 [es]

@@ -4,7 +4,7 @@ import server
 
 def test_dialects_file_parses_with_ambiguity_flags():
     lex = server.load_dialects()
-    assert lex["de"]["ick"] == ("ich", False)    # unambiguous marker
+    assert lex["de"]["ick"] == ("ich", False, None)   # unambiguous marker
     assert lex["de"]["nochemol"][1] is False
     assert lex["de"]["nett"][1] is True          # real standard word too
     assert lex["de"]["des"][1] is True
@@ -12,6 +12,19 @@ def test_dialects_file_parses_with_ambiguity_flags():
     assert lex["es"]["chido"][1] is False
     assert lex["es"]["vale"][1] is True          # everyday standard word
     assert "chido" not in lex["de"]              # sections don't bleed
+
+
+def test_ambiguous_entries_name_the_dialect_they_belong_to():
+    """Which dialect an ambiguous word belongs to only matters once a dialect
+    is selected — and then it matters a lot: "mehr" is Rhine-Hessian "mer"
+    (wir), and offering that reading to someone listening to a Berliner would
+    be a new error rather than a fix."""
+    lex = server.load_dialects()
+    assert lex["de"]["nett"][2] == frozenset({"hessian", "worms"})
+    assert lex["de"]["mehr"][2] == frozenset({"hessian", "worms"})
+    assert "berlin" not in lex["de"]["des"][2]
+    # Unambiguous markers stay untagged: "ick" is Berlin wherever it appears.
+    assert lex["de"]["ick"][2] is None
 
 
 def test_markers_trigger_note_with_mishearing_hints():
@@ -83,3 +96,86 @@ def test_spanish_ambiguous_words_alone_prove_nothing():
     # without an unambiguous regional marker in the same sentence.
     assert server.dialect_notes("Vale, nos vemos mañana.", "es") is None
     assert server.dialect_notes("Mi padre y mi tío llegan hoy.", "es") is None
+
+
+# ------------------------------- dialect the user selected, not one we guess
+
+
+def test_selected_dialect_reaches_the_source_side():
+    """`dialect_notes` infers dialect from spelling, which speech never
+    supplies: Whisper normalises dialect to standard orthography. Measured
+    over 514 word tokens of the real Berlin recording, not one unambiguous
+    marker appeared, so the inferred hint could never fire. The flavor the
+    user picked is the missing signal — an assertion, not a guess."""
+    plain = server.translation_messages("Ich habe das nett verstanden.",
+                                        "de", "en")[0]["content"]
+    assert "Berlinerisch" not in plain
+
+    heard = server.translation_messages("Ich habe das nett verstanden.",
+                                        "de", "en",
+                                        heard_flavor="berlin")[0]["content"]
+    assert "Berlinerisch" in heard
+    assert "transcribed speech" in heard
+
+
+def test_source_side_hint_is_keyed_on_the_source_language():
+    """Writing replies in Berlinerisch says nothing about the Spanish being
+    spoken to you — the note must follow the source, not the target."""
+    msgs = server.translation_messages("¿Vale, quedamos ahorita?", "es", "en",
+                                       heard_flavor="berlin")[0]["content"]
+    assert "Berlinerisch" not in msgs
+    mex = server.translation_messages("¿Vale, quedamos ahorita?", "es", "en",
+                                      heard_flavor="mexico")[0]["content"]
+    assert "Mexican Spanish" in mex
+
+
+def test_source_side_hint_warns_against_reading_dialect_into_plain_text():
+    """The risk of an always-on hint is the opposite failure: inventing
+    dialect where the speaker used none."""
+    heard = server.translation_messages("Guten Tag.", "de", "en",
+                                        heard_flavor="hessian")[0]["content"]
+    assert "exactly as written" in heard
+
+
+def test_source_side_hint_stays_in_the_cacheable_prefix():
+    """It is static per connection, so it must sit above the per-sentence
+    additions or every sentence invalidates Ollama's prefix cache."""
+    system = server.translation_messages("Ick sage wat.", "de", "en",
+                                         heard_flavor="berlin")[0]["content"]
+    assert "transcribed speech" in system
+    # The inferred, per-sentence note still fires for typed dialect...
+    assert "regional dialect" in system
+    # ...and comes after the static one.
+    assert system.index("transcribed speech") < system.index("regional dialect")
+
+
+def test_unknown_or_absent_flavor_adds_nothing():
+    for bogus in ("", None, "swabian"):
+        system = server.translation_messages("Guten Tag.", "de", "en",
+                                             heard_flavor=bogus)[0]["content"]
+        assert "transcribed speech" not in system
+
+
+def test_asserted_dialect_activates_only_its_own_ambiguous_words():
+    """The whole point of the tags. A Berlin speaker saying "mehr" means
+    more; a Wormser saying it may mean "mer" (wir)."""
+    text = "Ich habe mehr Zeit und des ist gut."
+    assert server.dialect_notes(text, "de") is None            # inferring: silent
+    assert server.dialect_notes(text, "de", asserted="berlin") is None
+    worms = server.dialect_notes(text, "de", asserted="worms")
+    assert worms and '"mehr" = mer (wir)' in worms
+
+
+def test_asserted_hint_is_hedged_not_a_command():
+    """"nett" really can just mean nice; an unhedged gloss would invert
+    "das war nett von dir" instead of fixing anything."""
+    note = server.dialect_notes("Das war nett.", "de", asserted="hessian")
+    assert note and "also ordinary German" in note
+    assert "whichever fits" in note
+
+
+def test_marker_path_still_glosses_ambiguous_words_of_any_dialect():
+    """With an unambiguous marker present the sentence vouches for itself,
+    so the tags must not start filtering the typed-input path."""
+    note = server.dialect_notes("Nochemol, des war nett.", "de")
+    assert note and '"des" = das' in note and '"nett" = net (nicht)' in note

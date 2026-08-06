@@ -197,13 +197,19 @@ def glossary_whisper_terms() -> str:
 _dialects_cache = {"mtime": None, "map": {}}
 
 
-def load_dialects() -> dict[str, dict[str, tuple[str, bool]]]:
-    """dialects.txt: language -> {dialect token -> (gloss, ambiguous)}.
+def load_dialects() -> dict[str, dict[str, tuple[str, bool, frozenset | None]]]:
+    """dialects.txt: language -> {token -> (gloss, ambiguous, flavors)}.
 
     A "[es]"-style line switches the language section (the file starts in
     German for backward compatibility). Ambiguous entries ("? nett = net
     (nicht)") are real standard words too; they are only hinted when the
-    sentence also contains an unambiguous dialect marker."""
+    sentence also contains an unambiguous dialect marker, or when the user
+    has selected the dialect they belong to.
+
+    A trailing "[hessian worms]" names those dialects; None means the entry
+    applies to all of them. The distinction only bites for ambiguous entries:
+    hinting a Rhine-Hessian reading of "mehr" to someone who told us they are
+    listening to a Berliner would be a new error, not a fix."""
     try:
         mtime = DIALECTS_PATH.stat().st_mtime
     except OSError:
@@ -221,22 +227,39 @@ def load_dialects() -> dict[str, dict[str, tuple[str, bool]]]:
                 lang = section.group(1)
                 continue
             ambiguous = line.startswith("?")
+            flavors = None
+            tag = re.search(r"\[([\w\s,]+)\]\s*$", line)
+            if tag:
+                flavors = frozenset(tag.group(1).replace(",", " ").split())
+                line = line[:tag.start()].rstrip()
             term, _, standard = line.lstrip("? ").partition("=")
             if term.strip() and standard.strip():
                 entries.setdefault(lang, {})[term.strip().lower()] = (
-                    standard.strip(), ambiguous)
+                    standard.strip(), ambiguous, flavors)
         _dialects_cache.update(mtime=mtime, map=entries)
     return _dialects_cache["map"]
 
 
-def dialect_notes(text: str, source: str) -> str | None:
-    """A hint block when the German source contains dialect markers.
+def dialect_notes(text: str, source: str,
+                  asserted: str | None = None) -> str | None:
+    """A hint block when the source text contains dialect markers.
 
     Whisper mangles spoken dialect in meaning-changing ways ("net
     verstanne" -> "nett verstarne", which gemma then translates as
     'understood nicely' — an inversion). Whisper-side prompt biasing made
     transcripts WORSE in testing, so the fix lives here: name the likely
     intended forms and let the model translate the intended meaning.
+
+    `asserted` means the user has *selected* this dialect rather than us
+    inferring it from spelling. That changes what the ambiguous entries are
+    worth. Normally a word like "nett" proves nothing on its own — it is
+    ordinary German — so it is only glossed alongside an unambiguous marker
+    like "nochemol". But speech never supplies those markers: Whisper
+    normalises dialect to standard orthography, and over 514 word tokens of
+    the real recording not one unambiguous marker appeared, which is why
+    this whole hint was dormant on the audio path. Once the speaker's
+    dialect is asserted, an ambiguous hit is worth reporting on its own —
+    hedged, because "nett" really can just mean nice.
     """
     intros = {
         "de": ("The German speaker is using regional dialect (e.g. Berlin, "
@@ -256,14 +279,32 @@ def dialect_notes(text: str, source: str) -> str | None:
             continue
         seen.add(token)
         entry = lexicon.get(token)
-        if entry:
-            hits.append((token, entry[0]))
-            marker = marker or not entry[1]
-    if not marker:                     # ambiguous words alone prove nothing
-        return None
-    listed = "; ".join(f'"{t}" = {std}' for t, std in hits[:10])
-    return (f"{intros[source]} In this sentence: {listed}. Translate the "
-            "intended standard meaning naturally.")
+        if not entry:
+            continue
+        hits.append((token, *entry))
+        marker = marker or not entry[1]
+    if marker:
+        # An unambiguous marker vouches for the whole sentence, so every hit
+        # is worth glossing — including the ambiguous ones, whatever dialect
+        # they are filed under. This is the typed-input path.
+        listed = "; ".join(f'"{t}" = {g}' for t, g, _, _ in hits[:10])
+        return (f"{intros[source]} In this sentence: {listed}. Translate the "
+                "intended standard meaning naturally.")
+    # No marker: only a selected dialect can justify a hint, and then only
+    # for entries belonging to *that* dialect.
+    eligible = [(t, g) for t, g, _, flavors in hits
+                if not flavors or asserted in flavors]
+    if not (asserted and eligible):
+        return None                    # ambiguous words alone prove nothing
+    listed = "; ".join(f'"{t}" = {g}' for t, g in eligible[:10])
+    # Asserted dialect, but every hit is a word that is ordinary standard
+    # language too. Say so and let context decide — flipping "nett" to "nicht"
+    # in "das war nett von dir" would be its own inversion.
+    lang = LANG_NAMES.get(source, source)
+    return (f"{intros[source]} These words are also ordinary {lang}, so read "
+            f"whichever fits: {listed}. If the dialect reading is the one "
+            f"that makes sense here, translate that meaning — a mis-heard "
+            f"negation is the common case.")
 
 
 # ---------------------------------------------------------------- gender lexicon
@@ -1326,6 +1367,7 @@ async def translate_api(payload: dict):
     for target in targets:
         flavor = flavors.get(target, "")
         out = await translate_once(text, source, target, model, flavor=flavor,
+                                   heard_flavor=flavors.get(source, ""),
                                    address=address)
         if out is None:
             return {"error": "Translation failed — are Ollama and the model "
@@ -1497,6 +1539,56 @@ FLAVOR_NOTES["de"] = {
         "mache, se gehe), -che diminutives. Dialect flavor, not parody — "
         "keep it readable and never change the meaning."),
 }
+# The same selection, read the other way round: if you are writing replies in
+# Berlinerisch you are listening to a Berliner. `dialect_notes` below tries to
+# *infer* that from the text, and on speech it cannot — Whisper normalises
+# dialect to standard orthography, so the unambiguous markers it looks for
+# never arrive. Measured over 514 word tokens of the real Berlin recording:
+# zero unambiguous markers, so the hint could not fire once. The selected
+# flavor is the missing signal, and it is a user assertion rather than a guess.
+#
+# Static per connection, so this goes in the cacheable prefix, not with the
+# per-sentence additions.
+HEARD_DIALECT_NOTES: dict[str, dict[str, str]] = {"de": {}, "es": {}}
+_HEARD_INTRO = ("You are translating transcribed speech from a {name} "
+                "speaker. Speech recognition writes {short} in standard "
+                "spelling and mis-hears its words in ways that change "
+                "meaning — {example} Where a sentence only makes sense once "
+                "such a word is restored, translate the intended meaning; "
+                "where the text already reads as plain {lang}, translate it "
+                "exactly as written and do not read dialect into it.")
+HEARD_DIALECT_NOTES["de"] = {
+    "berlin": _HEARD_INTRO.format(
+        name="Berlin dialect (Berlinerisch)", short="Berlinerisch", lang="German",
+        example=("ick (ich), dit/det (das), wat (was), ooch (auch), "
+                 "keen/keene (kein/keine), nüscht (nichts), jut (gut) and "
+                 "j- for g- (jehen, jenau) are the forms behind the "
+                 "mis-hearings, and negation is the usual casualty.")),
+    "hessian": _HEARD_INTRO.format(
+        name="Hessian (Hessisch)", short="Hessisch", lang="German",
+        example=('"net verstanne" (nicht verstanden) is transcribed as '
+                 '"nett verstarne" and then translated as "understood '
+                 'nicely" — the exact opposite. Also isch (ich), aach '
+                 "(auch), ebbes (etwas), babbeln (reden), -sch for -ch.")),
+    "worms": _HEARD_INTRO.format(
+        name="Wormser Platt (Rheinhessisch)", short="Wormser Platt", lang="German",
+        example=('"net" (nicht) arriving as "nett" inverts a negation. Also '
+                 "nää (nein), isch (ich), aach (auch), ebbes (etwas), mer "
+                 "(wir), gugge (schauen), -scht for -st (bischt, hoscht), "
+                 "and dropped final -n on verbs (mer mache).")),
+}
+HEARD_DIALECT_NOTES["es"] = {
+    "mexico": _HEARD_INTRO.format(
+        name="Mexican Spanish", short="it", lang="Spanish",
+        example=("ahorita, ¿mande?, platicar, chamba, órale and qué padre "
+                 "are colloquial rather than literal — ahorita is not "
+                 '"right now" and chido is not a proper noun.')),
+    "barcelona": _HEARD_INTRO.format(
+        name="Barcelona Spanish", short="it", lang="Spanish",
+        example=("vale, tío/tía, guay, currar and plegar (from Catalan) are "
+                 "colloquial rather than literal.")),
+}
+
 FLAVOR_NOTES["es"] = {
     "mexico": (
         "Write the Spanish translation in casual Mexican Spanish: ustedes "
@@ -1549,7 +1641,8 @@ ADDRESS_NOTES = {
 def translation_messages(text: str, source: str, target: str,
                          history: list[dict] | None = None,
                          flavor: str | None = None,
-                         address: str | None = None) -> list[dict]:
+                         address: str | None = None,
+                         heard_flavor: str | None = None) -> list[dict]:
     """Static system prompt + history as chat turns.
 
     Keeping the system prompt constant and prepending history as normal
@@ -1574,6 +1667,9 @@ def translation_messages(text: str, source: str, target: str,
     flavor_note = FLAVOR_NOTES.get(target, {}).get(flavor or "")
     if flavor_note:
         system += "\n\n" + flavor_note
+    heard_note = HEARD_DIALECT_NOTES.get(source, {}).get(heard_flavor or "")
+    if heard_note:
+        system += "\n\n" + heard_note
     address_note = ADDRESS_NOTES.get(target, {}).get(address or "")
     if target == "es" and address == "plural" and flavor == "barcelona":
         # Barcelona style overrides the Latin American plural default.
@@ -1591,7 +1687,8 @@ def translation_messages(text: str, source: str, target: str,
     note = gender_notes(text, target)
     if note:
         system += "\n\n" + note
-    dialect = dialect_notes(text, source)
+    dialect = dialect_notes(text, source,
+                            asserted=heard_flavor if heard_note else None)
     if dialect:
         system += "\n\n" + dialect
     # User-corrected translations similar to this sentence are shown as
@@ -1636,7 +1733,8 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
                              target: str, model: str,
                              history: list[dict] | None = None,
                              flavor: str | None = None,
-                             address: str | None = None) -> str | None:
+                             address: str | None = None,
+                             heard_flavor: str | None = None) -> str | None:
     """Streams deltas to the client; returns the full translation, or None on error.
 
     The caller sends the closing `translation_done` message (with metrics).
@@ -1644,7 +1742,7 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
     payload = {
         "model": model,
         "messages": translation_messages(text, source, target, history,
-                                         flavor, address),
+                                         flavor, address, heard_flavor),
         "stream": True,
         "options": {"temperature": 0.0},
         "keep_alive": "60m",
@@ -1718,7 +1816,8 @@ async def translate_once(text: str, source: str, target: str, model: str,
                          history: list[dict] | None = None,
                          revise: tuple[str, str] | None = None,
                          flavor: str | None = None,
-                         address: str | None = None) -> str | None:
+                         address: str | None = None,
+                         heard_flavor: str | None = None) -> str | None:
     """One-shot, non-streaming translation; None on any failure.
 
     Used for the behind-the-scenes refinement pass, which replaces the fast
@@ -1727,7 +1826,7 @@ async def translate_once(text: str, source: str, target: str, model: str,
     own earlier translation, with the offending facts spelled out.
     """
     messages = translation_messages(text, source, target, history,
-                                    flavor, address)
+                                    flavor, address, heard_flavor)
     if revise:
         candidate, issues = revise
         messages.append({"role": "assistant", "content": candidate})
@@ -2234,7 +2333,7 @@ async def ws_endpoint(ws: WebSocket):
         translations = await asyncio.gather(
             *(stream_translation(ws, my_uid, text, source, t,
                                  draft or model, context, flavor_for(t),
-                                 address)
+                                 address, flavor_for(source))
               for t in targets))
         if all(t is not None for t in translations):
             history.append({"uid": my_uid, "source": source,
@@ -2274,7 +2373,8 @@ async def ws_endpoint(ws: WebSocket):
                         refined = await asyncio.wait_for(
                             translate_once(text, source, t, model, context,
                                            flavor=flavor_for(t),
-                                           address=address),
+                                           address=address,
+                                           heard_flavor=flavor_for(source)),
                             timeout=REFINE_TIMEOUT_SEC)
                     except (asyncio.TimeoutError, TimeoutError):
                         # Keep the draft. A refinement nobody waited for is

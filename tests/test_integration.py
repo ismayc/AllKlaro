@@ -230,6 +230,38 @@ def test_reused_speculation_transcribes_the_same_words(tmp_path):
     assert words(speculated) == words(chunk)
 
 
+NEGATED = ("didn't", "did not", "not ", "n't ", "no ")
+
+
+async def test_real_model_uncrosses_a_mis_heard_negation():
+    """The failure this whole dialect path exists for, against the real model.
+
+    Hessian "net verstanne" (nicht verstanden) is transcribed as "nett
+    verstarne", which gemma then renders as "I understood that nicely" — the
+    exact opposite of what was said. The gloss that fixes it was already in
+    dialects.txt and unreachable: it is an ambiguous entry, and those were
+    only offered alongside an unambiguous marker that speech never supplies.
+    """
+    text = "Ich habe das nett verstarne."
+    plain = await server.translate_once(text, "de", "en", server.DEFAULT_MODEL)
+    hinted = await server.translate_once(text, "de", "en", server.DEFAULT_MODEL,
+                                         heard_flavor="hessian")
+    assert plain and hinted
+    assert not any(n in plain.lower() for n in NEGATED), \
+        f"expected the uncorrected inversion, got {plain!r}"
+    assert any(n in hinted.lower() for n in NEGATED), \
+        f"negation not recovered: {hinted!r}"
+
+
+async def test_real_model_does_not_invent_a_negation():
+    """The opposite failure. "nett" really can just mean nice, so the hint is
+    hedged — an unhedged gloss would invert this one instead of fixing it."""
+    hinted = await server.translate_once("Das war nett von dir.", "de", "en",
+                                         server.DEFAULT_MODEL, heard_flavor="hessian")
+    assert hinted and not any(n in hinted.lower() for n in NEGATED), \
+        f"hint inverted a sentence that was already correct: {hinted!r}"
+
+
 def test_real_silero_vad_on_real_speech(tmp_path):
     server.load_silero()
     if server._silero_session is None:
