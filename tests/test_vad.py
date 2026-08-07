@@ -3,8 +3,13 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from server import (EARLY_SILENCE_FRAMES, END_SILENCE_FRAMES, FRAME_SAMPLES,
+from server import (EARLY_SILENCE_FRAMES, END_SILENCE_FRAMES, FRAME_MS,
+                    FRAME_SAMPLES, MICRO_PAUSE_FRAMES, SOFT_MAX_SEC,
                     EnergyScorer, SileroScorer, VadSession)
+
+
+def frames_for(seconds):
+    return int(seconds * 1000 / FRAME_MS)
 
 
 def silence():
@@ -191,6 +196,86 @@ def test_no_early_event_when_pause_setting_is_very_short():
     for f in [speech()] * 40 + [silence()] * 12:
         vad.feed(f)
         assert vad.early_event is None
+
+
+# --------------------------------------------- why soft_max splits go unspec'd
+#
+# Every `spec:none` in the live traces is a soft_max split, and there are
+# exactly two ways to get one. Both come from the same root: the split point
+# is chosen at MICRO_PAUSE_FRAMES but a speculation only launches at
+# EARLY_SILENCE_FRAMES, so a split can land on a dip that never became one.
+# These two tests pin the geometry that makes the difference *free* in one
+# case and merely *unrecoverable* in the other — see PROGRESS.md item 1.
+
+
+def test_over_cap_split_fires_before_a_speculation_can_launch():
+    """Speech runs past the cap with no dip at all. The first micro-pause both
+    sets `split_at` and triggers the cut on the SAME frame, at
+    MICRO_PAUSE_FRAMES — four frames before a speculation would launch.
+
+    This is the majority `spec:none` case, and it costs nothing: the cut is
+    simultaneous with the split decision, so there is no dead time for a
+    speculation to have exploited. Submitting the audio speculatively would
+    submit it at the very same instant.
+    """
+    voiced = frames_for(SOFT_MAX_SEC) + 40      # well past the cap, no dip
+    vad = VadSession(ScriptScorer([True] * voiced + [False] * 30))
+    saw_early = False
+    emitted = []
+    for f in [speech()] * voiced + [silence()] * 30:
+        u = vad.feed(f)
+        if vad.early_event is not None:
+            saw_early = True
+            vad.early_event = None
+        if u is not None:
+            emitted.append((u, vad.split_reason, vad.silence_run))
+
+    chunk, reason, silence_run = emitted[0]
+    assert reason == "soft_max"
+    # The cut happens *at* the micro-pause, not at the speculation trigger.
+    assert silence_run == MICRO_PAUSE_FRAMES
+    assert MICRO_PAUSE_FRAMES < EARLY_SILENCE_FRAMES  # the whole reason
+    assert not saw_early    # nothing was launched before the chunk was emitted
+    # The chunk is longer than the cap, which is the trace signature of it.
+    assert len(chunk) / FRAME_SAMPLES > frames_for(SOFT_MAX_SEC)
+
+
+def test_stale_split_point_emits_old_audio_with_no_speculation():
+    """A dip long enough to set `split_at` but too short to launch a
+    speculation (MICRO <= run < EARLY), then speech resumes and runs past the
+    cap. The cut fires mid-word when `seconds` crosses the cap, using that
+    stale split point.
+
+    Unlike the case above this one *does* leave dead time — the gap between
+    the dip and the cap crossing — but nothing is in flight to fill it.
+    """
+    dip = EARLY_SILENCE_FRAMES - 1              # 9: sets split_at, no spec
+    assert MICRO_PAUSE_FRAMES <= dip < EARLY_SILENCE_FRAMES
+    lead = frames_for(2.0)
+    rest = frames_for(SOFT_MAX_SEC)             # carries well past the cap
+    pattern = [True] * lead + [False] * dip + [True] * rest
+    vad = VadSession(ScriptScorer(pattern))
+    audio = [speech()] * lead + [silence()] * dip + [speech()] * rest
+
+    saw_early = False
+    emitted = []
+    for f in audio:
+        u = vad.feed(f)
+        if vad.early_event is not None:
+            saw_early = True
+            vad.early_event = None
+        if u is not None:
+            emitted.append((u, vad.split_reason, vad.silence_run))
+
+    chunk, reason, silence_run = emitted[0]
+    assert reason == "soft_max"
+    assert not saw_early          # the 9-frame dip never reached EARLY
+    # The cut lands during voiced speech, not in a pause at all.
+    assert silence_run == 0
+    # It emits audio that ended back at the dip, well under the cap, while
+    # more than a cap's worth had accumulated — that is the "stale" part.
+    assert len(chunk) / FRAME_SAMPLES < frames_for(SOFT_MAX_SEC)
+    assert vad.in_speech          # the rest is still being captured
 
 
 # ---------------------------------------------------------------- scorers

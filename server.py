@@ -58,11 +58,20 @@ MAX_UTTERANCE_SEC = 30.0           # hard force-flush, even mid-word
 # its worst case 14.7 s -> 4.4 s, because a shorter chunk is a shorter prompt.
 # Live first-word lag fell 10444 -> 6932 ms, a larger win than the stub showed.
 #
-# The real cost is speculation coverage: cutting at a 6-frame micro-pause can
-# fire before the 10-frame silence that launches a speculation, so `spec:none`
-# went 6 -> 20 live. Refines also shed more (37 -> 49), but refine_ms sits at
-# its 10 s timeout in both arms, so that is shedding work already failing.
-SOFT_MAX_SEC = float(os.environ.get("ALLKLARO_SOFT_MAX_SEC", "5.0"))
+# `spec:none` went 6 -> 20 live, which looked like the cap's real cost. It is
+# mostly not a cost at all. Every spec:none is a soft_max split (pause splits
+# are 19/19 and 15/15 hits), and `specs_shed` is 0 in both arms, so nothing was
+# lost to the backlog. Of the 20, thirteen are chunks *longer* than the cap:
+# speech ran past 5 s with no dip, so the first micro-pause set `split_at` and
+# fired the cut on the same frame, at MICRO_PAUSE_FRAMES. There is no dead time
+# there for a speculation to have filled — it would submit the same audio at
+# the same instant. The other seven cut at a stale `split_at` left by a 6-9
+# frame dip; those do leave dead time (p50 1.45 s against a 0.68 s decode), but
+# filling it means speculating at every dip, and that is the redundant decoding
+# the backlog gates exist to shed. `queue_ms` p50 is 0 in every group, so the
+# whole mechanism is worth a few hundred ms per utterance at best. Refines also
+# shed more (37 -> 49), but refine_ms sits at its 10 s timeout in both arms, so
+# that is shedding work already failing. See tests/test_vad.py for the geometry.
 SOFT_MAX_SEC = float(os.environ.get("ALLKLARO_SOFT_MAX_SEC", "5.0"))
 MICRO_PAUSE_FRAMES = 6             # ~190 ms dip = natural split point in
                                    # continuous speech (videos, fast talkers)
