@@ -422,7 +422,9 @@ function newCard(msg) {
   const speakerChip = callMode
     ? `<span class="speaker">${msg.speaker === "them" ? "Them" : "You"}</span>` : "";
   orig.innerHTML = speakerChip;
-  orig.append(sourceChip(msg), wordSpans(msg.text, msg.source));
+  orig.append(sourceChip(msg),
+              wordSpans(msg.text, msg.source,
+                        new Set(msg.dialect || [])));
   orig.title = "Tap to hear it spoken";
   // Tapping a phrase speaks it aloud in that phrase's own language.
   orig.onclick = (e) => { e.stopPropagation(); speakText(msg.text, msg.source, true); };
@@ -611,13 +613,16 @@ function attachLongPress(el, fn) {
 }
 
 // Text -> fragment with each word in a long-pressable span.
-function wordSpans(text, lang) {
+// `marked` is the set of dialect words to colour. Only ever passed for the
+// heard text: the translation is standard German by design, so there is
+// nothing there to point at.
+function wordSpans(text, lang, marked) {
   const frag = document.createDocumentFragment();
   let last = 0;
   for (const m of text.matchAll(/\p{L}[\p{L}\p{M}'’-]*/gu)) {
     if (m.index > last) frag.append(text.slice(last, m.index));
     const span = document.createElement("span");
-    span.className = "w";
+    span.className = marked?.has(m[0].toLowerCase()) ? "w dialect" : "w";
     span.textContent = m[0];
     attachLongPress(span, () => openLookup(m[0], lang));
     frag.append(span);

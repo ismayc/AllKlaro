@@ -106,7 +106,10 @@ def test_words_are_lookupable_on_long_press():
     assert "#lookup.hidden" in css and ".lookup-card" in css
     assert "/api/lookup" in JS
     # Both the original line and finished translation rows get word spans.
-    assert "wordSpans(msg.text, msg.source)" in JS
+    # Matched loosely on the arguments: the heard line also passes the dialect
+    # set, so pinning the exact call text made this fail on a change that did
+    # not touch lookup at all.
+    assert re.search(r"wordSpans\(\s*msg\.text,\s*msg\.source", JS)
     assert "wordSpans(row.text, target)" in JS
     # A long-press must not also fire tap-to-speak or the big-text overlay,
     # and iOS's text-selection callout must not fight the gesture.

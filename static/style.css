@@ -102,6 +102,13 @@ main {
      callout must not fight it — copying is what the 📋 button is for. */
   -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .card .orig:hover, .card .trans:hover { background: rgba(139, 152, 171, .08); }
+/* Dialect words in the heard text. Colour alone would be invisible to a
+   red-green colourblind reader and says nothing on a printed export, so the
+   dotted underline carries the same meaning independently. */
+.card .orig .w.dialect {
+  color: var(--err); text-decoration: underline dotted currentColor;
+  text-underline-offset: 2px;
+}
 .card .trans .cursor { color: var(--muted); animation: blink 1s infinite; }
 .card .lang { font-size: 11px; font-weight: 700; letter-spacing: .06em;
   padding: 1px 7px; border-radius: 20px; margin-right: 8px; vertical-align: 2px; }

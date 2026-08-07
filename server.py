@@ -307,6 +307,46 @@ def load_dialects() -> dict[str, dict[str, tuple[str, bool, frozenset | None]]]:
     return _dialects_cache["map"]
 
 
+def dialect_markers(text: str, source: str,
+                    flavor: str | None = None) -> list[str]:
+    """Dialect words in `text`, lowercased, for colouring the source on screen.
+
+    Unambiguous entries only, and this is the whole design. The ambiguous ones
+    are ordinary standard words — measured over 2267 German tokens of the real
+    recording, the *only* lexicon hits were 14 ambiguous ones ("mehr" ×10,
+    "des" ×4), every one of them ordinary speech and none of them Berlinerisch.
+    Colouring those would paint plain German red on a recording containing no
+    detectable dialect at all.
+
+    The consequence is worth stating rather than discovering later: because
+    Whisper normalises dialect to standard orthography, this stays dark on the
+    audio path. It earns its place on typed input, where the spelling survives.
+
+    A selected `flavor` narrows the lexicon to that dialect; without one, any
+    unambiguous marker counts.
+    """
+    lexicon = load_dialects().get(source)
+    if not lexicon:
+        return []
+    found, seen = [], set()
+    for token in re.findall(r"[^\W\d_]+", text.lower()):
+        if token in seen:
+            continue
+        seen.add(token)
+        entry = lexicon.get(token)
+        if not entry:
+            continue
+        _gloss, ambiguous, flavors = entry
+        if ambiguous:
+            continue
+        if flavor and flavors and flavor not in flavors:
+            # Marking a Rhine-Hessian form while the user is listening to a
+            # Berliner would be a new error, not a feature.
+            continue
+        found.append(token)
+    return found
+
+
 def dialect_notes(text: str, source: str,
                   asserted: str | None = None) -> str | None:
     """A hint block when the source text contains dialect markers.
@@ -2513,6 +2553,11 @@ async def ws_endpoint(ws: WebSocket):
             final_msg = {"type": "final", "id": my_uid, "text": text,
                          "source": source, "target": targets[0],
                          "targets": targets, "speaker": speaker,
+                         # Dialect words are marked in the heard text only —
+                         # the translation is standard by design, so there is
+                         # nothing there to point at.
+                         "dialect": dialect_markers(text, source,
+                                                    flavor_for(source)),
                          # Whisper picked this language from the audio; a tap
                          # on the chip re-runs the translation the other way.
                          "auto": bool(pair)}
@@ -2693,6 +2738,9 @@ async def ws_endpoint(ws: WebSocket):
             msg = {"type": "final", "id": my_uid, "text": text,
                    "source": source, "target": targets[0],
                    "targets": targets, "speaker": "you",
+                   # The path this actually fires on: typed dialect keeps its
+                   # spelling, where speech does not.
+                   "dialect": dialect_markers(text, source, flavor_for(source)),
                    # Only an auto mode has a direction worth flipping.
                    "auto": bool(pair),
                    # ...and the chip shouldn't claim to have detected a

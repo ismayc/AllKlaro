@@ -296,6 +296,27 @@ separate load risk.
       guarantees — Parakeet also loops on *real* words — and are tested as
       such.
 
+### 10. Dialect words are marked in the heard text
+- [x] **Built, and deliberately narrow.** Unambiguous forms only, coloured in
+      the source line and never in the translation (which is standard German
+      by design). Red plus a dotted underline, so it survives colourblindness
+      and printing.
+- [x] **Measured before building, and the measurement is the design.** Over
+      2267 German word tokens of the real recording the lexicon matched **14
+      times, every hit ambiguous** ("mehr" ×10, "des" ×4) and none of them
+      Berlinerisch. Colouring ambiguous entries would paint ordinary German
+      red on a recording with no detectable dialect at all.
+- [x] **So it stays dark on the audio path by design**, for the same reason
+      item 5 was dormant: Whisper normalises dialect to standard orthography.
+      It earns its place on typed input, where the spelling survives — checked
+      in the browser: `Ick`, `keene`, `wat`, `dit` marked, `mehr` not, zero
+      marks in the translation.
+- [ ] **The per-dialect narrowing is inert until the lexicon catches up.**
+      Every unambiguous entry in `dialects.txt` is untagged, so selecting
+      Berlinerisch versus Hessisch changes nothing about what gets marked. The
+      filter is written and tested against a controlled lexicon; tagging the
+      61 unambiguous entries by dialect is the remaining work, and it is data
+      entry, not code.
 
 ### 4. Output quality, which lag work does not touch
 Ground truth now exists: `tools/dump_transcripts.py` over **five** slices of
