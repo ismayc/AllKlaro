@@ -324,6 +324,91 @@ def test_out_of_pair_detection_is_retried_pinned(client, stub_transcribe,
     assert stub_transcribe.calls[-1]["language"] == "de"  # retry was pinned
 
 
+# The measured failure: forcing "German → English" pins Whisper to German, so
+# an English utterance in the same conversation decodes as a German repetition
+# loop. has_phrase_loop now rejects that text, which keeps it off the screen but
+# turns the utterance into a silent discard — the speech is lost either way.
+LOOPED = ("Und so haben wir so ein Problem, wo sie sich und die Füße starete, "
+          "die sich so starete, die Füße starete, die Füße starete.")
+
+
+def test_forced_direction_falls_back_to_auto_when_the_decode_loops(
+        client, stub_transcribe, monkeypatch):
+    import server as srv
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    stub_transcribe.queue = [
+        {"text": LOOPED, "language": "de"},                 # pinned, degenerate
+        {"text": "We had some sort of problem.", "language": "en"},
+    ]
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "de-en"}))
+        speak(ws)
+        msgs = collect_until(ws)
+
+    final = next(m for m in msgs if m["type"] == "final")
+    assert final["text"] == "We had some sort of problem."
+    # Rescued *and* pointed the right way: without this the English would be
+    # handed to the translator labelled German, the same error one stage later.
+    assert final["source"] == "en"
+    assert final["target"] == "de"
+    # The chip has to appear, because the direction came from the audio rather
+    # than from the mode the user picked.
+    assert final["auto"] is True
+    assert stub_transcribe.calls[0]["language"] == "de"    # first pinned
+    assert stub_transcribe.calls[1]["language"] is None    # retry set it free
+
+
+def test_forced_direction_does_not_redo_a_short_rejected_decode(
+        client, stub_transcribe, monkeypatch):
+    """The redo costs a full decode on the one Whisper thread, so it must fire
+    only when a *substantial* decode was thrown away. This text is rejected by
+    the loop filter exactly like the long one, but at 28 characters it is the
+    noise-shaped garbage a second decode would not improve — so the length
+    threshold, not the rejection, is what has to decide."""
+    import server as srv
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    short_loop = "ab cd ef, ab cd ef, ab cd ef"
+    assert len(short_loop) < srv.FORCED_REDO_MIN_CHARS
+    assert srv.clean_transcript({"text": short_loop}) == ""   # rejected
+    stub_transcribe.queue = [{"text": short_loop, "language": "de"}]
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "de-en"}))
+        speak(ws)
+        msgs = collect_until(ws)
+    assert any(m["type"] == "discard" for m in msgs)
+    assert len(stub_transcribe.calls) == 1        # no second decode
+
+
+def test_auto_mode_never_uses_the_forced_fallback(client, stub_transcribe,
+                                                  monkeypatch):
+    """An auto mode never pinned anything, so a loop there is a real loop —
+    redoing it would just spend a second decode to get the same answer."""
+    import server as srv
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    stub_transcribe.queue = [{"text": LOOPED, "language": "de"}]
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en"}))
+        speak(ws)
+        msgs = collect_until(ws)
+    assert any(m["type"] == "discard" for m in msgs)
+    assert len(stub_transcribe.calls) == 1
+
+
+def test_multi_target_forced_mode_keeps_its_pinned_decode(client,
+                                                          stub_transcribe,
+                                                          monkeypatch):
+    """"de-en+es" has no single language to fall back to — resolve_targets
+    would have to pick one of the targets as the new source. Left pinned."""
+    import server as srv
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    stub_transcribe.queue = [{"text": LOOPED, "language": "de"}]
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "de-en+es"}))
+        speak(ws)
+        collect_until(ws)
+    assert len(stub_transcribe.calls) == 1
+
+
 def test_glossary_terms_reach_whisper(client, stub_transcribe, monkeypatch,
                                       tmp_path):
     import server as srv

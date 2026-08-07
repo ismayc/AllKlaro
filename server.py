@@ -161,6 +161,15 @@ ECHO_WINDOW_SEC = 6.0              # cross-channel duplicate suppression window
 ECHO_MIN_CHARS = 16                # never dedupe short phrases ("Genau!") —
                                    # people legitimately repeat those
 STATS_INTERVAL_SEC = 0.5           # how often the pipeline overlay is updated
+# Forcing a direction pins Whisper's language, so the *other* language in a
+# bilingual conversation gets decoded as the forced one and comes out as a
+# repetition loop ("…die Füße starete, die Füße starete"). has_phrase_loop now
+# catches that text, which stops it reaching the screen but turns the utterance
+# into a silent discard — the speech is still lost, just quietly. When a decode
+# this size is rejected outright, decode it once more with the language free.
+# Sized so ordinary silence and one-word noise never trigger a second decode:
+# only a substantial decode that cleaning threw away entirely qualifies.
+FORCED_REDO_MIN_CHARS = 40
 
 # A transcript that ends mid-sentence (no terminal punctuation) is a merge
 # candidate — crucial for German, where the meaning-carrying verb comes last.
@@ -2271,6 +2280,24 @@ def lang_hint(mode: str) -> str | None:
     return src if src in LANG_NAMES else None
 
 
+def forced_pair(mode: str) -> tuple[str, str] | None:
+    """The (src, tgt) of a plain forced mode like "de-en"; None otherwise.
+
+    The mirror of `mode_pair`: that one names the languages an *auto* mode
+    chooses between, this one names the direction a forced mode pins. Multi-
+    target modes ("de-en+es") are deliberately excluded — there is no single
+    language to fall back to, so they keep the pinned decode.
+    """
+    if "+" in mode or mode == "auto":
+        return None
+    parts = mode.split("-")
+    if len(parts) == 2:
+        src, tgt = parts
+        if src in LANG_NAMES and tgt in LANG_NAMES and src != tgt:
+            return src, tgt
+    return None
+
+
 def mode_pair(mode: str) -> tuple[str, str] | None:
     """The (a, b) pair of an "auto-a-b" mode; None for forced directions."""
     m = "auto-de-en" if mode == "auto" else mode
@@ -2536,6 +2563,7 @@ async def ws_endpoint(ws: WebSocket):
                 result = await submit_transcribe(loop, audio, lang_hint(mode),
                                                  whisper_prompt(), timing=meta)
             detected = result.get("language", "de")
+            mode_for_utterance = mode
             pair = auto_pair()
             if pair and detected not in pair:
                 # Whisper picked a language outside the active pair (e.g. Dutch
@@ -2548,6 +2576,26 @@ async def ws_endpoint(ws: WebSocket):
             t1 = loop.time()
             meta["transcribe_ms"] = int((t1 - t0) * 1000)
             text = clean_transcript(result)
+            forced = forced_pair(mode)
+            if (not text and forced
+                    and len((result.get("text") or "").strip())
+                    >= FORCED_REDO_MIN_CHARS):
+                # A forced direction pinned the wrong language onto this
+                # utterance and Whisper looped; cleaning threw all of it away.
+                # Decode once more with the language free, so the other half of
+                # a bilingual conversation is rescued instead of vanishing.
+                meta["redo_forced"] = True
+                result = await submit_transcribe(loop, audio, None,
+                                                 whisper_prompt())
+                text = clean_transcript(result)
+                detected = result.get("language", detected)
+                if text and detected != forced[0]:
+                    # Translate it the way it was actually spoken, for this
+                    # utterance only — the mode is left alone. Without this the
+                    # rescued English would be handed to the translator labelled
+                    # German, which is the same error one stage later.
+                    meta["redo_direction"] = detected
+                    mode_for_utterance = f"auto-{forced[0]}-{forced[1]}"
             if not text or HALLUCINATION_RE.match(text):
                 meta["outcome"] = "discard_empty"
                 await safe_send(ws, {"type": "discard", "id": my_uid})
@@ -2561,7 +2609,7 @@ async def ws_endpoint(ws: WebSocket):
                 meta["outcome"] = "discard_echo"
                 await safe_send(ws, {"type": "discard", "id": my_uid})
                 return
-            source, targets = resolve_targets(mode, detected)
+            source, targets = resolve_targets(mode_for_utterance, detected)
 
             # Merge with the previous utterance when it did not finish — no
             # terminal punctuation, or a trailing-off ellipsis — and this one
@@ -2594,7 +2642,10 @@ async def ws_endpoint(ws: WebSocket):
                                                     flavor_for(source)),
                          # Whisper picked this language from the audio; a tap
                          # on the chip re-runs the translation the other way.
-                         "auto": bool(pair)}
+                         # A rescued forced decode counts too: the direction
+                         # came from the audio, not from the mode, so the user
+                         # needs the same escape hatch.
+                         "auto": bool(pair) or "redo_direction" in meta}
             if replaces is not None:
                 final_msg["replaces"] = replaces
                 meta["merged"] = True
