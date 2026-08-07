@@ -31,136 +31,37 @@ synthetic `say` audio, which cannot reproduce the load (it never queues).
 ## The finding that reframes the rest
 
 **The bottleneck has moved off Whisper.** Whisper queue sits at 1–2, `queue_ms`
-p50 is 0, decode is ~1.3–2.3 s. Meanwhile `translate_ms` p50 ranges 2.9–7.7 s
-and the refine pass hits its 10 s timeout on 8–42% of utterances with 12–32
-more shed. Further Whisper-side optimisation has little left to win.
+p50 is 0, decode is ~1.3–2.3 s. Meanwhile `translate_ms` p50 ranges 2.9–7.7 s,
+and the refine pass — the other big Ollama consumer — is where the remaining
+argument is. Further Whisper-side optimisation has little left to win.
+
+*(The refine timeout is now `REFINE_TIMEOUT_SEC` 20 s, not 10; the "hits its
+10 s timeout on 8–42% of utterances" that stood here read a censored metric.
+Item 2 has the corrected accounting.)*
 
 ---
 
 ## Open
 
-### 5. Dialect selection was dormant on the audio path — fixed
-- [x] **Confirmed dormant.** Whisper normalises dialect to standard
-      orthography. Over **514 word tokens** of the real Berlin recording,
-      zero unambiguous dialect markers appeared — only `des`×2 and `mehr`×1,
-      both ambiguous — so the hint could not fire once. The archived
-      conversation transcript agrees: 0 of 15 utterances.
-- [x] **Fixed by using the dialect the user selected** instead of inferring
-      one from spelling. The flavor selector only ever steered *output*; it
-      now also tells the source side what is being heard. An asserted dialect
-      makes the ambiguous entries usable on their own, which is where the
-      actual repair lives — `? nett = net (nicht)` was in the lexicon all
-      along and unreachable.
-- [x] **Verified against the real model**, not just the prompt text:
-      "Ich habe das nett verstarne." went from *"I understood that nicely"*
-      — the exact inversion — to *"I didn't understand."*
-- [x] **Ambiguous entries now name their dialect.** Without this, selecting
-      Berlinerisch would have offered the Rhine-Hessian reading of "mehr"
-      (= *mer*, wir) to a Berlin speaker: a new error rather than a fix.
-- [x] **Dormancy confirmed at 4.4x the original sample.** Across five slices
-      of the recording — **2277 German word tokens** — there are **zero**
-      unambiguous dialect markers from the 97-key lexicon. Only the ambiguous
-      `mehr` ×10 and `des` ×4 appear. The spelling-based hint could never have
-      fired, and asserting the selected dialect was the right repair.
-- [ ] **The remaining gap cannot be closed from transcripts, which is why it
-      is still open.** Cataloguing Berlinerisch mis-hearings needs to know
-      what Whisper writes when a Berliner speaks — but Whisper writes standard
-      orthography, so the transcript route yields nothing by construction. It
-      needs someone listening to the audio next to the text, not another dump.
-      Every ambiguous entry remains Hessian / Rhine-Hessian, so the
-      Berlinerisch setting still offers only the general comprehension note.
-
-### 3. The measurement rig cannot resolve what it is tuning — fixed at p50
-- [x] **Translation stage separated from model-server noise.**
-      `tools/fake_ollama.py` serves `/api/chat` at a latency you choose,
-      defaulting to the measured real p50s (draft 2600 ms, refine 8800 ms).
-      `OLLAMA_URL` is now `ALLKLARO_OLLAMA_URL`-overridable so both arms of an
-      A/B run identical source, the same rationale as `REFINE_MAX_IN_FLIGHT`.
-- [x] **Repeatability measured, not assumed.** Two *identical* arms over the
-      real 240 s slice, 42 utterances each: `first_word_lag` p50 differed by
-      **130 ms**, against **3600 ms** for two identical live-Ollama arms.
-      `translate_ms` p50 delta 0 ms, stdev 17 ms within a run. The rig now
-      resolves sub-second effects, so items 1 and 2 are decidable.
-- [ ] **Residual noise is Whisper, and it lives in the tail.** Every large
-      p90 delta between the identical arms is an ASR metric — `decode_ms`
-      1022 ms, `transcribe_ms` 828 ms — while `translate_ms` p90 moved 84 ms.
-      A fixed-cost ASR stub is the fix, deliberately *not* built yet: p50
-      resolution decides items 1 and 2, and tail precision buys nothing until
-      a p90 claim is load-bearing.
-- [ ] **Arms are not bit-identical.** Run 2 produced 41 finals to run 1's 40
-      and 32 speculation hits to 31, so a small part of any delta is a
-      different utterance set rather than timing. Compare distributions, and
-      do not read a sub-100 ms difference as signal.
-
-*Done second, as planned: it is what makes items 1 and 2 decidable instead of
-arguable.*
-
-### 1. Audio accumulation — largest remaining component, cut by ~3.5 s
-- [x] **Confirmed as the dominant term.** Pooled over the stub runs, the
-      emitted chunk is **65%** of first-word lag at p50 (5.76 s of 8.71 s).
-      The earlier 36–52% was measured against live Ollama, where a 2.9–7.7 s
-      translate leg dilutes accumulation's share; both are right about their
-      own run.
-- [x] **The split points already existed.** `split_at` is updated at *every*
-      micro-pause and was then ignored until `SOFT_MAX_SEC` (8 s) elapsed, so
-      usable cuts were being found seconds early and discarded.
-- [x] **Swept bracketed A-B-A**, on the chunk-count-invariant metric — lag at
-      speech-run starts, which a lower cap cannot flatter by manufacturing
-      more, shorter utterances:
-
-      | cap | runstart p50 | vs 8.0    | verdict |
-      |-----|--------------|-----------|---------|
-      | 8.0 | 9092 ms      | —         | baseline |
-      | 6.0 | 8631 ms      | −460 ms   | inside its 366 ms control spread |
-      | 5.0 | 6827 ms      | −2264 ms  | real |
-      | 4.0 | 6417 ms      | −2800 ms  | real, but pays steeply for 400 ms |
-
-- [x] **Default is now 5.0.** Confirmed against live Ollama, where the
-      expected cost did not appear: more, shorter chunks did **not** congest
-      it. Translate p50 fell 3000 → 1744 ms and its worst case 14.7 s → 4.4 s,
-      because a shorter chunk is a shorter prompt. Live first-word lag fell
-      **10444 → 6932 ms**, a larger win than the stub predicted.
-- [ ] **Speculation coverage is the real cost.** `spec:none` went 6 → 20 live:
-      a cut at a 6-frame micro-pause can fire before the 10-frame silence that
-      launches a speculation, so `EARLY_SILENCE_FRAMES` / `MICRO_PAUSE_FRAMES`
-      want revisiting now that the cap is lower. Refines also shed more
-      (37 → 49) but `refine_ms` sits at its 10 s timeout in *both* arms, so
-      that is shedding work already failing — see item 2.
-- [x] **Validated on a second, harder slice — the refine pass was hiding it.**
-      At 40:00 with refine on, the bracket gave a 1170/1207 ms gain against a
-      1034/810 ms control spread across two runs: not demonstrable. Suppress
-      the refine pass (`ALLKLARO_REFINE_MAX_IN_FLIGHT=-1`) and the control
-      spread collapses to **82 ms**, whereupon cap 5.0 shows a **2272 ms**
-      gain — against demo4's 2264 ms. They agree to 8 ms on different slices.
-      The weak slice40 result was a measurement artifact, not a weaker effect.
-- [ ] **Residual tail cost, roughly halved by removing refine.** Utterances
-      unfinished within the 120 s drain, at 40:00: cap 8.0 drops 1 either way;
-      cap 5.0 drops 3 with refine on and 2 with it off. Note this is a replay
-      deadline — in a live call these arrive very late rather than vanish.
-- [ ] Translating from partials rather than chunk boundaries is still
-      untried, and is the next lever if more is wanted.
-
-### 6. One mic carries everyone, and nothing says who spoke
-Multi-speaker *load* is already covered: the 54-minute recording is a real
-group conversation captured through a single mic, which is the only setup
-intended, so every lag number here already includes overlap and turn-taking.
-That also explains why `soft_max` dominates (22 of 40 splits) — several
-people trading turns rarely leave the ~700 ms gap that closes an utterance,
-so the audio reads as continuous speech. This is a cause of item 1, not a
-separate load risk.
-
-- [ ] **`SPEAKERS = {0: "you", 1: "them"}` is a channel tag, not
-      diarization** — it records which input stream the audio arrived on, set
-      by the client. With one mic for the whole room every card is `"you"`,
-      so a group transcript cannot show who said what.
-- [ ] Whether that matters is a product call: for *listening along* to a
-      conversation it may not, and diarization on a single stream is a real
-      cost. Worth deciding before it gets built by accident.
-
 ### 2. Does the refine pass still earn its place?
-- [ ] It times out or is shed on a large fraction of utterances, spending
-      Ollama time rewriting text already on screen — in a pipeline where
-      Ollama is now the constraint.
+- [x] **Every refine's actual fate, counted.** `refines_shed` increments in
+      *two* places — the gate at `server.py:2653` and the timeout at `:2666` —
+      so it cannot distinguish "never tried" from "tried and gave up", and
+      `refine_ms` is stamped on every utterance whether the pass ran or not
+      (`:2693`). Splitting the live traces by elapsed time separates them:
+
+      | fate | cap 8.0 | cap 5.0 |
+      |------|---------|---------|
+      | gate skipped it outright (~0 ms) | 13 | 19 |
+      | **attempted, timed out at 10 s** | **25 (62%)** | **32 (62%)** |
+      | a refine actually landed | 2 (5%) | 1 (2%) |
+
+      The reconstruction agrees with the trace's own `refines_shed` sum to
+      within 1–2 events in each arm. The landed count is threshold-sensitive
+      at the low end — a 566 ms value sits right at the boundary — so read it
+      as "1–6 of 52", not a hard 1; even the generous reading is ~12%.
+      **The dominant outcome is a full 10 s of the constrained resource spent
+      to produce nothing**, on 62% of utterances in both arms.
 - [x] **Measured with the pass switched off entirely, and it earns nothing.**
       Same slice, same cap, refine on vs off: runstart lag 8720 vs 8852 ms —
       132 ms, nothing — while refine *on* delivers two *fewer* completed
@@ -171,13 +72,14 @@ separate load risk.
       weigh against that, so the burden is now on keeping it, not cutting it.
       Next: decide between dropping it and making it much cheaper, and if it
       stays, judge quality with real models rather than the stub.
-- [ ] **Against live Ollama it is worse than "a large fraction":
-      `refine_ms` p50 is 10003 ms at cap 8.0 and 10001 ms at cap
-      5.0 — the 10 s timeout itself, in both arms.** The median refine does
-      not complete. Shed counts were 37 of 40 and 49 of 52. So the pass is
-      near-totally ineffective in practice while still costing queue time,
-      and the stub hides this completely (it sheds 7 at the same cap, because
-      a fixed-cost server cannot time out).
+- [x] ~~**Against live Ollama it is worse than "a large fraction":
+      `refine_ms` p50 is 10003 ms at cap 8.0 and 10001 ms at cap 5.0 — the
+      10 s timeout itself, in both arms.**~~ **Superseded — do not quote
+      this.** It rests entirely on the 2026-08-06 traces, which do not
+      reproduce (see below), and it reads a *censored* metric as if it were
+      the real distribution: everything over the timeout is recorded as
+      exactly the timeout. The stub point stands — a fixed-cost server cannot
+      time out, so it sheds 7 at the same cap and hides the failure mode.
 - [x] **Settled: keep the draft, the second pass is what is in question.**
       The two halves of the two-tier design were measured separately and the
       evidence points opposite ways.
@@ -212,10 +114,346 @@ separate load risk.
       in 707 ms (draft) and 1165 ms (main) in steady state. Refine only fails
       when the pipeline is busy — which is exactly when it is also taking
       capacity from the cards ahead of it. The `prewarm_model` call added at
-      `server.py:~2591` is why delivery is 39% now and was 6-8% before.
-- [ ] Remaining call, and it is a product one, not a measurement one: drop the
-      refine pass, or hard-gate it to genuinely idle stretches. The rig cannot
-      decide whether 1-in-20 better wording is worth two lost utterances.
+      `server.py:~2591` removed the cold-load failure mode.
+- [x] **The "delivery is 39%" figure was computed the wrong way.** It counted
+      utterances whose `refine_ms` was under the 10 s timeout — but a refine
+      the gate skipped also lands in that bucket, at ~0 ms. On the 2026-08-06
+      traces the honest delivery number is **2%**, not 39%. Whenever this is
+      re-measured, exclude the ~0 ms rows.
+- [x] **...but the 2026-08-06 traces themselves do not reproduce, and the
+      pass is in far better shape than they say.** Re-run in-session on the
+      *same* slice, cap and timeout (`ALLKLARO_REFINE_TIMEOUT_SEC`, added for
+      this):
+
+      | demo4, cap 5.0, 10 s timeout | attempts | landed | timing out | first-word lag p50 |
+      |---|---|---|---|---|
+      | live trace 2026-08-06 | 33 | 1 | **97%** | 6702 ms |
+      | today | 25 | 19 | **24%** | 11798 ms |
+
+      slice10 today agrees with demo4 today (22%, 21 landed), so it is the
+      08-06 run that is the outlier, not the slice. Uncensored — timeout
+      raised to 60 s — the median attempted refine is **4.6 s** and the ones
+      the 10 s ceiling was killing need 14-17 s (max 16.9 s); nothing
+      approached 60 s. So "the median refine does not complete" was true of
+      that one run and is not true generally.
+- [x] **Caveat on today's numbers, and it is not small.** These runs had a
+      second full server (his `--reload` instance on 8710) resident with its
+      own Whisper and Parakeet copies, on a 48 GB machine. That is the likely
+      reason first-word lag reads 11798 ms today against 6702 ms on 08-06.
+      The *refine* comparison is still apples-to-apples — both arms today
+      carried the same load — but neither lag figure should be quoted against
+      a run made without the second server.
+- [x] **"Hard-gate it to idle stretches" is not an available option — it is
+      already gated that way.** `server.py:2647` attempts a refine only when
+      `whisper_pending <= 2` **and** `in_flight <= 2` **and** the utterance is
+      not stale. So all 33 attempts at cap 5.0 had *already* passed an
+      idleness check, and 32 of them timed out regardless. Idleness at gate
+      time does not predict the next 10 seconds, so a stricter gate cannot
+      rescue the pass — it can only shed the last 2%. That collapses the
+      choice: the two options were never drop-vs-gate, they are drop-vs-keep.
+- [x] **Raised the ceiling to 20 s — on mechanism, not on a measured win.**
+      The killed refines were slow, not hung: 14-17 s against a 4.6 s median,
+      nothing near 60 s. Killing them throws away capacity already spent.
+- [x] **The bracket refused to confirm the single pair, and that is the
+      finding.** A-B-A on demo4:
+
+      | arm | landed | killed | kill % | first-word lag p50 |
+      |-----|--------|--------|--------|--------------------|
+      | A1 10 s | 19 | 6 | 24% | 11798 ms |
+      | B  20 s | 22 | 2 | 8%  | 11296 ms |
+      | A2 10 s | 10 | 9 | 47% | 14355 ms |
+
+      The two *identical* control arms disagree by **23 points of kill-rate
+      and 2556 ms of lag**. Against that spread: landed refines +7.5 (spread
+      9) and lag -1781 ms (spread 2556) are both **inside noise**. Only
+      kill-rate clears, 27 against 23 — and that is near-tautological, since a
+      higher ceiling mechanically kills fewer things that exceed it. The
+      earlier single pair looked convincing and was not. This is the second
+      time this rig has done that (see item 1's slice40 result); the lesson is
+      not "pair the arms", it is **bracket them, or claim nothing**.
+- [x] **The rig drifts *within* a session.** A2 is much worse than A1 on every
+      column despite identical config, so arm order is itself a variable and
+      even in-session pairing is not safe. Anything measured here needs A-B-A
+      with the spread reported, and effects smaller than ~2.5 s of lag are
+      currently unresolvable on this rig at n=1 per arm.
+- [x] **Four hypotheses for the timeouts were tested and killed** before the
+      censoring turned out to be the whole story, all against real models:
+      concurrent refines invisible to the gate (no — `in_flight` is
+      decremented after `run_translations` returns, so refines are counted);
+      unbounded prompt growth (no — `history` is a `deque(maxlen=6)`, and
+      timeout rates are flat across a run, 92%→93%); draft-vs-main contention
+      in Ollama (no — 1.0x, measured directly); GPU contention with MLX
+      Whisper and Parakeet (no — 0.9x Whisper-only, 1.2x with draft as well,
+      and **zero** timeouts in any arm, max 3.3 s).
+- [x] **Decided: the pass stays, and the timeouts were the thing to fix.**
+      On the 08-06 traces the case for dropping it looked strong — 1 landed
+      refine per slice against a 10 s occupancy on 62% of utterances. That
+      case rested on a run that does not reproduce. Today the pass lands on
+      **42%** of utterances at a 4.6 s median, which is a different feature
+      from the one the drop argument described.
+- [x] **The refines that land live were captured and read.** `wording_ab.py`
+      answered this offline, where every utterance got both answers; this
+      captures what the pipeline actually replaced under real pacing
+      (`capture_refines.py` records the streamed draft and the
+      `translation_revised` text per uid, joined to the trace so only real
+      refines count — `enforce_agreement` changes are excluded, and there
+      happened to be none). One run: 33 utterances survive merging and
+      discards, a refine ran on 11, and **9 changed the text**.
+- [x] **Two of the nine fix outright errors, and they are exactly the errors
+      a learner would be misled by:**
+      - `er hat keinen Solar` — draft *"he doesn't have central heating"*,
+        refined *"he doesn't have solar panels"*.
+      - `damit es noch in den Skimmer geht` — draft *"into the filter"*,
+        refined *"into the skimmer"*; same utterance, `abstellen` went from
+        *"adjust that"* to *"turn that off"*.
+      A third (`mächtig` → *"pretty intense"*, not the draft's *"really quite
+      warm"*) is a fidelity gain. The other five are cosmetic, and one
+      (uid 8) is arguably a slight regression. So roughly **3 of 9 are real
+      improvements and 2 of those are corrections, not polish** — a better
+      hit rate than the offline 13%, on a much smaller sample.
+- [x] **The LLM judge failed and should not be trusted here.** Blind pairwise
+      judging with `qwen2.5:32b-instruct`, each pair scored twice with the
+      candidates swapped, returned **67% inconsistent** — the verdict flipped
+      with position on 6 of 9, including the unambiguous solar/central-heating
+      pair. Only 3 were decisive (refined 2, draft 1), which is noise at n=9.
+      The two-order design is the only reason this was visible; a single-order
+      run would have reported a clean 4-2 and been meaningless. Judging
+      translation quality here needs a human reading or a much better
+      protocol, not a bigger sample of the same judge.
+- [ ] Still worth building regardless: an on-demand "improve this card" tap.
+      It puts the main model where the offline win was measured — no time
+      pressure, the user waiting on purpose — and would catch the draft's
+      1-in-254 catastrophic output (Chinese, leaked role marker) on the card
+      where it happened.
+
+### 1. Audio accumulation — largest remaining component, cut by ~3.5 s
+- [x] **Confirmed as the dominant term.** Pooled over the stub runs, the
+      emitted chunk is **65%** of first-word lag at p50 (5.76 s of 8.71 s).
+      The earlier 36–52% was measured against live Ollama, where a 2.9–7.7 s
+      translate leg dilutes accumulation's share; both are right about their
+      own run.
+- [x] **The split points already existed.** `split_at` is updated at *every*
+      micro-pause and was then ignored until `SOFT_MAX_SEC` (8 s) elapsed, so
+      usable cuts were being found seconds early and discarded.
+- [x] **Swept bracketed A-B-A**, on the chunk-count-invariant metric — lag at
+      speech-run starts, which a lower cap cannot flatter by manufacturing
+      more, shorter utterances:
+
+      | cap | runstart p50 | vs 8.0    | verdict |
+      |-----|--------------|-----------|---------|
+      | 8.0 | 9092 ms      | —         | baseline |
+      | 6.0 | 8631 ms      | −460 ms   | inside its 366 ms control spread |
+      | 5.0 | 6827 ms      | −2264 ms  | real |
+      | 4.0 | 6417 ms      | −2800 ms  | real, but pays steeply for 400 ms |
+
+- [x] **Default is now 5.0.** Confirmed against live Ollama, where the
+      expected cost did not appear: more, shorter chunks did **not** congest
+      it. Translate p50 fell 3000 → 1744 ms and its worst case 14.7 s → 4.4 s,
+      because a shorter chunk is a shorter prompt. Live first-word lag fell
+      **10444 → 6932 ms**, a larger win than the stub predicted.
+- [x] **Speculation coverage was *not* the real cost — that reading was
+      wrong.** `spec:none` did go 6 → 20 live, but taking that as the cap's
+      price does not survive looking at which utterances they are. Every
+      `spec:none` is a `soft_max` split; every `pause` split is a hit (19/19
+      at cap 8.0, 15/15 at cap 5.0). `specs_shed` is **0 in both arms**, so
+      none of it is backlog shedding, and `spec:miss` — the only outcome that
+      actually wastes a decode — barely moved, 2 → 3.
+
+      The 20 split into two mechanisms, both pinned by tests in
+      `tests/test_vad.py`:
+
+      | mechanism | n (cap 5.0) | dead time | recoverable? |
+      |-----------|-------------|-----------|--------------|
+      | over-cap: no dip until past 5 s, so the first micro-pause sets `split_at` **and** fires the cut on the same frame | 13 | none | no — and nothing to gain |
+      | stale `split_at` from a 6–9 frame dip, cut when `seconds` crosses the cap | 7 | p50 1.45 s | in principle |
+
+      The first is the majority and is **free**: the cut is simultaneous with
+      the split decision, so a speculation would submit the same audio at the
+      same instant. Only the second leaves usable dead time, and filling it
+      means speculating at *every* micro-pause — the redundant decoding the
+      backlog gates exist to shed, on a Whisper thread already at 1.11x
+      realtime.
+- [x] **Sized before building, and it is too small to build.** `queue_ms` p50
+      is **0** in every group, so a speculation is worth only the head start,
+      not queue avoidance. A complete fix for the recoverable mechanism saves
+      at most one decode (p50 **0.68 s**) on **7 of 52** utterances — about
+      **92 ms** against a first-word lag p50 of 6.3 s, or **1.5%**. The
+      remaining headroom is in translation, not transcription: `translate_ms`
+      p50 1744–3243 ms with refine at its 10 s timeout — see item 2.
+      Refines also shed more (37 → 49) but `refine_ms` sits at that timeout in
+      *both* arms, so that is shedding work already failing.
+- [x] **Validated on a second, harder slice — the refine pass was hiding it.**
+      At 40:00 with refine on, the bracket gave a 1170/1207 ms gain against a
+      1034/810 ms control spread across two runs: not demonstrable. Suppress
+      the refine pass (`ALLKLARO_REFINE_MAX_IN_FLIGHT=-1`) and the control
+      spread collapses to **82 ms**, whereupon cap 5.0 shows a **2272 ms**
+      gain — against demo4's 2264 ms. They agree to 8 ms on different slices.
+      The weak slice40 result was a measurement artifact, not a weaker effect.
+- [x] **Residual tail cost, roughly halved by removing refine.** Utterances
+      unfinished within the 120 s drain, at 40:00: cap 8.0 drops 1 either way;
+      cap 5.0 drops 3 with refine on and 2 with it off. **A measurement
+      artifact, not a defect**: this is a replay deadline, and in a live call
+      those utterances arrive very late rather than vanishing. Recorded so the
+      drop counts in a replay summary are not read as lost speech.
+- [ ] Translating from partials rather than chunk boundaries is still
+      untried, and is the next lever if more is wanted.
+
+### 3. The measurement rig cannot resolve what it is tuning — fixed at p50
+- [x] **Translation stage separated from model-server noise.**
+      `tools/fake_ollama.py` serves `/api/chat` at a latency you choose,
+      defaulting to the measured real p50s (draft 2600 ms, refine 8800 ms).
+      `OLLAMA_URL` is now `ALLKLARO_OLLAMA_URL`-overridable so both arms of an
+      A/B run identical source, the same rationale as `REFINE_MAX_IN_FLIGHT`.
+- [x] **Repeatability measured, not assumed.** Two *identical* arms over the
+      real 240 s slice, 42 utterances each: `first_word_lag` p50 differed by
+      **130 ms**, against **3600 ms** for two identical live-Ollama arms.
+      `translate_ms` p50 delta 0 ms, stdev 17 ms within a run. The rig now
+      resolves sub-second effects, so items 1 and 2 are decidable.
+- [x] **Residual noise is Whisper, and it lives in the tail.** Every large
+      p90 delta between the identical arms is an ASR metric — `decode_ms`
+      1022 ms, `transcribe_ms` 828 ms — while `translate_ms` p90 moved 84 ms.
+      A fixed-cost ASR stub is the fix, deliberately *not* built: p50
+      resolution decides items 1 and 2, and tail precision buys nothing until
+      a p90 claim is load-bearing. **This is a decision, not a backlog item**
+      — it stays closed until something actually needs a p90.
+- [x] **Arms are not bit-identical.** Run 2 produced 41 finals to run 1's 40
+      and 32 speculation hits to 31, so a small part of any delta is a
+      different utterance set rather than timing. Compare distributions, and
+      do not read a sub-100 ms difference as signal. **A standing rule for
+      reading this rig, not work to be done.**
+- [x] **The live-Ollama spread is worse than the 3600 ms recorded above, and
+      it drifts *within* a session.** A-B-A on demo4 (2026-08-07) gave
+      identical 10 s control arms of 11798 and 14355 ms first-word lag —
+      **2556 ms** — and, less expected, refine counts swung just as hard:
+      24% vs 47% kill-rate, 19 vs 10 landed. So "how many refines landed" is
+      *not* one of the audio-determined counts that are safe at n=1. An
+      in-session pair showed a clean 24%→8% win that the third arm destroyed.
+- [ ] **The bind this creates for item 2, and there is no rig answer yet.**
+      The stub is what makes lag decidable — but a fixed-cost stub *cannot
+      time out*, so it cannot measure anything about the refine timeout, which
+      is the one knob item 2 turns. That question is therefore stuck between a
+      rig that is precise and blind to it, and one that can see it and cannot
+      resolve it. A stub that models a *latency distribution* rather than a
+      fixed cost would close this; not built.
+
+*Done second, as planned: it is what makes items 1 and 2 decidable instead of
+arguable — but only against the stub. Live-Ollama arms remain unresolvable
+below ~2.5 s, which is where item 2's remaining questions live.*
+
+### 4. Output quality, which lag work does not touch
+Ground truth now exists: `tools/dump_transcripts.py` over **five** slices of
+the recording — 1:00, 10:00, 25:00, 40:00, 50:00 — **259 utterances**, with
+auto-detect and forced-`de` side by side. One slice was not enough: the first
+version of the loop filter looked perfect on 51 utterances and had a false
+positive waiting at 10:00. Rebuild the extra slices the same way as
+`demo4.wav` (see the `/test-allklaro-translating` skill), varying the offset.
+
+**The conversation shifts language as it goes**, which no single slice shows:
+English is 12% of utterances at 1:00, 6% at 10:00, 19% at 25:00, 31% at 40:00
+and **60% at 50:00**. Any behaviour keyed to a fixed source language gets
+worse the longer the conversation runs.
+
+- [x] **"German transcribed as English" is largely a misdiagnosis.** Six of
+      51 utterances auto-detected as English, and on inspection most are
+      *correct* — the conversation is genuinely bilingual. #49 stays
+      `"We had..."` even when Whisper is forced to German, and #50/#51 are
+      fluent English sentences. Auto-detect was right; the cards were not
+      wrong for the reason assumed.
+- [x] **The real failure is the mirror image, and it is reachable from the
+      UI.** `lang_hint(mode)` pins Whisper's language for any *forced*
+      direction (`de-en` → always German) and only returns `None` for
+      `auto-*` modes. Pick "German → English" during a bilingual conversation
+      and every English utterance is decoded as German. Measured on the same
+      audio, that turns *"we had some sort of problem where they came and
+      fixed something"* into *"Und so haben wir so ein Problem, wo sie sich
+      und die Füße starete, die sich so starete, die Füße starete, die Füße
+      starete."*
+- [x] **Fixed by falling back, not by changing the default.** The loop filter
+      already stopped that text reaching the screen — which quietly made it
+      *worse*: the utterance became a silent `discard_empty`, so the English
+      was lost rather than mangled. Now, when a forced decode is rejected
+      outright and the raw text was substantial (`FORCED_REDO_MIN_CHARS`, 40),
+      the audio is decoded once more with the language free, and if the
+      detected language is not the pinned one that utterance is translated the
+      way it was actually spoken. The mode is untouched — only the utterance
+      is redirected — and the card carries the `auto` chip, because the
+      direction came from the audio rather than from the user's choice.
+      Multi-target modes (`de-en+es`) are excluded: there is no single
+      language to fall back to.
+      The cost is one extra Whisper decode on the one thread, and only on a
+      substantial decode that cleaning threw away entirely — never on the
+      silence and short noise that make up most rejected chunks.
+- [ ] **Left open deliberately: the default is still `auto-de-en`.** Changing
+      the default is a product call, and the fallback removes the sharp edge
+      that made it urgent. Whether a forced mode should exist at all — it now
+      un-forces itself whenever it is clearly wrong — is worth deciding.
+- [x] **A phrase-level repetition loop passed every filter — now caught by
+      `has_phrase_loop`**, which flags any 3-word phrase occurring 3+ times.
+      It runs *after* `collapse_repeats`, not before: a "L-L-L-…" tail is 100
+      repeated tokens to a word-level check, so testing raw text would throw
+      away the real speech in front of a loop the collapser can rescue.
+      Validated end to end on the dump — 0 of 51 real utterances dropped, and
+      exactly the one garbage utterance removed. Original evidence: That same
+      utterance: `is_degenerate` compression 1.33 (needs > 4.0), Whisper's own
+      `compression_ratio` 1.57 (drops at > 2.4), `collapse_repeats` unchanged
+      (needs 8+ repeats of a unit ≤ 12 chars). It is a ~17-char phrase
+      repeated 3–4 times, which is too few repeats and too long a unit for
+      all three guards. `cleaned == raw`; nothing caught it. Note this is not
+      a `HALLUCINATION_RE` gap as originally written — that is a blocklist of
+      stock phrases and was never the mechanism.
+- [x] **Loops are their own defect, not a symptom of the forced language** —
+      corrected on the wider corpus. Under plain auto-detect, 4 of 259
+      utterances are degenerate: "EP" ×32 at 25:00, "PPE" ×60 at 40:00, "I"
+      ×50 and "I'd like to" ×5 at 50:00. The first pass looked at one slice,
+      found none, and drew the wrong conclusion.
+- [x] **Forcing German is damaging, but less uniformly than first written.**
+      On the 32 English utterances at 50:00 it produced *zero* loops and only
+      2 garbage drops; most came back as fluent, often *correct* German
+      ("Yeah, I see them." → "Ja, ah, ich sehe sie."), because a language hint
+      makes Whisper translate rather than transcribe. One case went the other
+      way entirely — auto-detect emitted "I I I I…" where forced German gave a
+      clean "Ja!". So the fix is not simply "always auto": it is worth
+      measuring which mode wins per utterance before changing the default.
+- [ ] A wrong card is worse than a slow one.
+
+### 10. Dialect words are marked in the heard text
+- [x] **Built, and deliberately narrow.** Unambiguous forms only, coloured in
+      the source line and never in the translation (which is standard German
+      by design). Red plus a dotted underline, so it survives colourblindness
+      and printing.
+- [x] **Measured before building, and the measurement is the design.** Over
+      2267 German word tokens of the real recording the lexicon matched **14
+      times, every hit ambiguous** ("mehr" ×10, "des" ×4) and none of them
+      Berlinerisch. Colouring ambiguous entries would paint ordinary German
+      red on a recording with no detectable dialect at all.
+- [x] **So it stays dark on the audio path by design**, for the same reason
+      item 5 was dormant: Whisper normalises dialect to standard orthography.
+      It earns its place on typed input, where the spelling survives — checked
+      in the browser: `Ick`, `keene`, `wat`, `dit` marked, `mehr` not, zero
+      marks in the translation.
+- [ ] **The per-dialect narrowing is inert until the lexicon catches up.**
+      Every unambiguous entry in `dialects.txt` is untagged, so selecting
+      Berlinerisch versus Hessisch changes nothing about what gets marked. The
+      filter is written and tested against a controlled lexicon; tagging the
+      61 unambiguous entries by dialect is the remaining work, and it is data
+      entry, not code.
+
+### 6. One mic carries everyone, and nothing says who spoke
+Multi-speaker *load* is already covered: the 54-minute recording is a real
+group conversation captured through a single mic, which is the only setup
+intended, so every lag number here already includes overlap and turn-taking.
+That also explains why `soft_max` dominates (22 of 40 splits) — several
+people trading turns rarely leave the ~700 ms gap that closes an utterance,
+so the audio reads as continuous speech. This is a cause of item 1, not a
+separate load risk.
+
+- [ ] **`SPEAKERS = {0: "you", 1: "them"}` is a channel tag, not
+      diarization** — it records which input stream the audio arrived on, set
+      by the client. With one mic for the whole room every card is `"you"`,
+      so a group transcript cannot show who said what.
+- [ ] Whether that matters is a product call: for *listening along* to a
+      conversation it may not, and diarization on a single stream is a real
+      cost. Worth deciding before it gets built by accident.
 
 ### 7. A running gist, pinned above the feed
 - [x] **Built.** A short summary sits above the conversation and is *folded*
@@ -260,8 +498,51 @@ separate load risk.
 - [ ] Still unverified over a *full* call: six folds is not fifty, and slow
       semantic drift (fold 6 already conflated who was displeased about what)
       is the failure mode a 54-minute conversation would expose.
-- [ ] The gist is per-WebSocket-session, so a reconnect starts it over. The
-      old text stays on screen until the first new fold rather than blanking.
+- [x] **A reconnect no longer restarts the gist.** It lives in the WebSocket
+      session, so a dropped connection began a second summary underneath text
+      describing the first. The client is the only party that survives a
+      reconnect, so it hands the gist back in `config` (`gist_text`) and the
+      next fold continues. It only ever *seeds an empty* gist — every settings
+      change resends config, and none of those may roll a live summary back —
+      and it is bounded at `GIST_SEED_MAX_CHARS`, since the value re-enters
+      the fold prompt and would otherwise be a client-controlled prompt of any
+      length.
+
+### 5. Dialect selection was dormant on the audio path — fixed
+- [x] **Confirmed dormant.** Whisper normalises dialect to standard
+      orthography. Over **514 word tokens** of the real Berlin recording,
+      zero unambiguous dialect markers appeared — only `des`×2 and `mehr`×1,
+      both ambiguous — so the hint could not fire once. The archived
+      conversation transcript agrees: 0 of 15 utterances.
+- [x] **Fixed by using the dialect the user selected** instead of inferring
+      one from spelling. The flavor selector only ever steered *output*; it
+      now also tells the source side what is being heard. An asserted dialect
+      makes the ambiguous entries usable on their own, which is where the
+      actual repair lives — `? nett = net (nicht)` was in the lexicon all
+      along and unreachable.
+- [x] **Verified against the real model**, not just the prompt text:
+      "Ich habe das nett verstarne." went from *"I understood that nicely"*
+      — the exact inversion — to *"I didn't understand."*
+- [x] **Ambiguous entries now name their dialect.** Without this, selecting
+      Berlinerisch would have offered the Rhine-Hessian reading of "mehr"
+      (= *mer*, wir) to a Berlin speaker: a new error rather than a fix.
+- [x] **Dormancy confirmed at 4.4x the original sample.** Across five slices
+      of the recording — **2277 German word tokens** — there are **zero**
+      unambiguous dialect markers from the 97-key lexicon. Only the ambiguous
+      `mehr` ×10 and `des` ×4 appear. The spelling-based hint could never have
+      fired, and asserting the selected dialect was the right repair.
+- [ ] **The remaining gap cannot be closed from transcripts, which is why it
+      is still open.** Cataloguing Berlinerisch mis-hearings needs to know
+      what Whisper writes when a Berliner speaks — but Whisper writes standard
+      orthography, so the transcript route yields nothing by construction. It
+      needs someone listening to the audio next to the text, not another dump.
+      Every ambiguous entry remains Hessian / Rhine-Hessian, so the
+      Berlinerisch setting still offers only the general comprehension note.
+
+## Closed
+
+Kept in full rather than deleted: each one records a failure mode that
+looked like something else at first, and the reasoning is the point.
 
 ### 8. Sentence fragments were left stranded as their own cards — fixed
 - [x] **Cause: an ellipsis was being read as a full stop.** `SENTENCE_END_RE`
@@ -295,84 +576,3 @@ separate load risk.
       the same repetition checks the finals get. The two are separate
       guarantees — Parakeet also loops on *real* words — and are tested as
       such.
-
-### 10. Dialect words are marked in the heard text
-- [x] **Built, and deliberately narrow.** Unambiguous forms only, coloured in
-      the source line and never in the translation (which is standard German
-      by design). Red plus a dotted underline, so it survives colourblindness
-      and printing.
-- [x] **Measured before building, and the measurement is the design.** Over
-      2267 German word tokens of the real recording the lexicon matched **14
-      times, every hit ambiguous** ("mehr" ×10, "des" ×4) and none of them
-      Berlinerisch. Colouring ambiguous entries would paint ordinary German
-      red on a recording with no detectable dialect at all.
-- [x] **So it stays dark on the audio path by design**, for the same reason
-      item 5 was dormant: Whisper normalises dialect to standard orthography.
-      It earns its place on typed input, where the spelling survives — checked
-      in the browser: `Ick`, `keene`, `wat`, `dit` marked, `mehr` not, zero
-      marks in the translation.
-- [ ] **The per-dialect narrowing is inert until the lexicon catches up.**
-      Every unambiguous entry in `dialects.txt` is untagged, so selecting
-      Berlinerisch versus Hessisch changes nothing about what gets marked. The
-      filter is written and tested against a controlled lexicon; tagging the
-      61 unambiguous entries by dialect is the remaining work, and it is data
-      entry, not code.
-
-### 4. Output quality, which lag work does not touch
-Ground truth now exists: `tools/dump_transcripts.py` over **five** slices of
-the recording — 1:00, 10:00, 25:00, 40:00, 50:00 — **259 utterances**, with
-auto-detect and forced-`de` side by side. One slice was not enough: the first
-version of the loop filter looked perfect on 51 utterances and had a false
-positive waiting at 10:00. Rebuild the extra slices the same way as
-`demo4.wav` (see the `/test-allklaro-translating` skill), varying the offset.
-
-**The conversation shifts language as it goes**, which no single slice shows:
-English is 12% of utterances at 1:00, 6% at 10:00, 19% at 25:00, 31% at 40:00
-and **60% at 50:00**. Any behaviour keyed to a fixed source language gets
-worse the longer the conversation runs.
-
-- [x] **"German transcribed as English" is largely a misdiagnosis.** Six of
-      51 utterances auto-detected as English, and on inspection most are
-      *correct* — the conversation is genuinely bilingual. #49 stays
-      `"We had..."` even when Whisper is forced to German, and #50/#51 are
-      fluent English sentences. Auto-detect was right; the cards were not
-      wrong for the reason assumed.
-- [ ] **The real failure is the mirror image, and it is reachable from the
-      UI.** `lang_hint(mode)` pins Whisper's language for any *forced*
-      direction (`de-en` → always German) and only returns `None` for
-      `auto-*` modes (`server.py:2000`, used at `server.py:2261`). Pick
-      "German → English" during a bilingual conversation and every English
-      utterance is decoded as German. Measured on the same audio, that turns
-      *"we had some sort of problem where they came and fixed something"*
-      into *"Und so haben wir so ein Problem, wo sie sich und die Füße
-      starete, die sich so starete, die Füße starete, die Füße starete."*
-      Consider defaulting to auto, or falling back when the forced decode
-      looks degenerate.
-- [x] **A phrase-level repetition loop passed every filter — now caught by
-      `has_phrase_loop`**, which flags any 3-word phrase occurring 3+ times.
-      It runs *after* `collapse_repeats`, not before: a "L-L-L-…" tail is 100
-      repeated tokens to a word-level check, so testing raw text would throw
-      away the real speech in front of a loop the collapser can rescue.
-      Validated end to end on the dump — 0 of 51 real utterances dropped, and
-      exactly the one garbage utterance removed. Original evidence: That same
-      utterance: `is_degenerate` compression 1.33 (needs > 4.0), Whisper's own
-      `compression_ratio` 1.57 (drops at > 2.4), `collapse_repeats` unchanged
-      (needs 8+ repeats of a unit ≤ 12 chars). It is a ~17-char phrase
-      repeated 3–4 times, which is too few repeats and too long a unit for
-      all three guards. `cleaned == raw`; nothing caught it. Note this is not
-      a `HALLUCINATION_RE` gap as originally written — that is a blocklist of
-      stock phrases and was never the mechanism.
-- [x] **Loops are their own defect, not a symptom of the forced language** —
-      corrected on the wider corpus. Under plain auto-detect, 4 of 259
-      utterances are degenerate: "EP" ×32 at 25:00, "PPE" ×60 at 40:00, "I"
-      ×50 and "I'd like to" ×5 at 50:00. The first pass looked at one slice,
-      found none, and drew the wrong conclusion.
-- [x] **Forcing German is damaging, but less uniformly than first written.**
-      On the 32 English utterances at 50:00 it produced *zero* loops and only
-      2 garbage drops; most came back as fluent, often *correct* German
-      ("Yeah, I see them." → "Ja, ah, ich sehe sie."), because a language hint
-      makes Whisper translate rather than transcribe. One case went the other
-      way entirely — auto-detect emitted "I I I I…" where forced German gave a
-      clean "Ja!". So the fix is not simply "always auto": it is worth
-      measuring which mode wins per utterance before changing the default.
-- [ ] A wrong card is worse than a slow one.
