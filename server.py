@@ -99,7 +99,32 @@ REFINE_MAX_QUEUE = 2               # skip the second-pass refine past this depth
 # (model swapping), and because lag was clocked after it, cards that appeared
 # in ~13 s were reported as 125 s. Bound it, and drop it once the utterance is
 # old enough that better wording no longer matters.
-REFINE_TIMEOUT_SEC = 10.0
+# Overridable for the same reason SOFT_MAX_SEC is: the timeout *censors* the
+# thing it is measuring. The traces could only ever say "> 10 s", never how
+# much more, so the pass looked unsalvageable when it was not.
+#
+# Uncensored at 60 s on the real slice: the median attempted refine is 4.6 s,
+# and the ones a 10 s ceiling was killing need 14-17 s (max 16.9 s). Nothing
+# came close to 60 s, so these are slow refines, not hung ones — and killing
+# them threw away work that was nearly done.
+#
+# 20 s is set on that mechanism, NOT on a demonstrated lag win. Bracketed
+# A-B-A on demo4, which is what a single pair could not show:
+#   arm       landed   killed         first-word lag p50
+#   A1 10 s   19       6 (24% of att) 11798 ms
+#   B  20 s   22       2 ( 8% of att) 11296 ms
+#   A2 10 s   10       9 (47% of att) 14355 ms
+# The two identical control arms disagree by 23 points of kill-rate and 2556 ms
+# of lag, so the control spread swallows almost everything: landed refines
+# (+7.5 vs a spread of 9) and lag (-1781 vs 2556) are both INSIDE noise. Only
+# kill-rate clears, and barely (27 vs 23) — which is close to tautological,
+# since a higher ceiling mechanically kills fewer things that exceed it.
+# So: this setting is justified by "a refine at 14-17 s is nearly finished and
+# throwing it away wastes the capacity already spent", not by any measured
+# improvement. Nothing here shows it costs anything either. Do not quote a lag
+# benefit for it, and note the rig drifts *within* a session (A2 is much worse
+# than A1), so arm order matters and even paired arms are not safe.
+REFINE_TIMEOUT_SEC = float(os.environ.get("ALLKLARO_REFINE_TIMEOUT_SEC", "20"))
 REFINE_MAX_AGE_SEC = 20.0
 # ...and the same for the translation backlog. `whisper_pending` says nothing
 # about how many utterances are waiting on Ollama, which is the queue the next

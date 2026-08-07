@@ -371,3 +371,27 @@ def test_soft_max_sec_is_env_overridable():
         else:
             os.environ["ALLKLARO_SOFT_MAX_SEC"] = prev
         importlib.reload(srv)                 # leave the module as we found it
+
+
+def test_refine_timeout_is_env_overridable():
+    """The refine timeout censors its own measurement — every attempt that
+    exceeds it is recorded as exactly the timeout, so the traces cannot say
+    whether a refine needed 11 s or 60 s. Sweeping it is how that was
+    resolved (it needed 14-17 s), which only works if the override lands."""
+    import importlib
+    import os
+
+    import server as srv
+
+    assert srv.REFINE_TIMEOUT_SEC == 20.0     # measured default when unset
+    prev = os.environ.get("ALLKLARO_REFINE_TIMEOUT_SEC")
+    os.environ["ALLKLARO_REFINE_TIMEOUT_SEC"] = "60"
+    try:
+        reloaded = importlib.reload(srv)
+        assert reloaded.REFINE_TIMEOUT_SEC == 60.0
+    finally:
+        if prev is None:
+            del os.environ["ALLKLARO_REFINE_TIMEOUT_SEC"]
+        else:
+            os.environ["ALLKLARO_REFINE_TIMEOUT_SEC"] = prev
+        importlib.reload(srv)                 # leave the module as we found it
