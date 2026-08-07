@@ -126,25 +126,17 @@ arguable.*
       want revisiting now that the cap is lower. Refines also shed more
       (37 → 49) but `refine_ms` sits at its 10 s timeout in *both* arms, so
       that is shedding work already failing — see item 2.
-- [ ] **The 5.0 default is validated on demo4 only, and slice40 disputes it.**
-      Repeating the bracket at 40:00 — a harder stretch: 23 soft_max to 15
-      pause, speculation 26 hit / 5 miss, baseline lag ~0.9 s worse — gave a
-      1170 ms gain against a **1034 ms control spread**, so it does not clear
-      its own noise. That run sat at machine load 10–11, so it neither
-      confirms nor refutes; it is a failed measurement, not a negative result.
-      B's runstart median also rests on 7 samples against the controls' 15–16.
-- [ ] **A cost that does look real: cap 5.0 lost 3 utterances at 40:00.**
-      Both control arms delivered 40/40 with no drain warning; B delivered
-      49 of 52. Bracketed, same load, same run — unlike demo4, where the
-      warning appeared in *both* arms and was correctly blamed on load.
-      Against "a wrong card is worse than a slow one", 3 missing cards per
-      4 minutes outweighs a second of lag. Re-measuring on a quiet machine
-      before deciding whether to revert to 8.0.
-- [ ] **The more interesting reading: the right cap may be per-conversation.**
-      demo4 (early, German, frequent clean pauses) and slice40 (later,
-      bilingual, continuous speech) plausibly want different values, and the
-      recording drifts from one to the other. A fixed constant may be the
-      wrong shape of answer.
+- [x] **Validated on a second, harder slice — the refine pass was hiding it.**
+      At 40:00 with refine on, the bracket gave a 1170/1207 ms gain against a
+      1034/810 ms control spread across two runs: not demonstrable. Suppress
+      the refine pass (`ALLKLARO_REFINE_MAX_IN_FLIGHT=-1`) and the control
+      spread collapses to **82 ms**, whereupon cap 5.0 shows a **2272 ms**
+      gain — against demo4's 2264 ms. They agree to 8 ms on different slices.
+      The weak slice40 result was a measurement artifact, not a weaker effect.
+- [ ] **Residual tail cost, roughly halved by removing refine.** Utterances
+      unfinished within the 120 s drain, at 40:00: cap 8.0 drops 1 either way;
+      cap 5.0 drops 3 with refine on and 2 with it off. Note this is a replay
+      deadline — in a live call these arrive very late rather than vanish.
 - [ ] Translating from partials rather than chunk boundaries is still
       untried, and is the next lever if more is wanted.
 
@@ -169,8 +161,18 @@ separate load risk.
 - [ ] It times out or is shed on a large fraction of utterances, spending
       Ollama time rewriting text already on screen — in a pipeline where
       Ollama is now the constraint.
-- [ ] **Now measured against live Ollama, and it is worse than "a large
-      fraction": `refine_ms` p50 is 10003 ms at cap 8.0 and 10001 ms at cap
+- [x] **Measured with the pass switched off entirely, and it earns nothing.**
+      Same slice, same cap, refine on vs off: runstart lag 8720 vs 8852 ms —
+      132 ms, nothing — while refine *on* delivers two *fewer* completed
+      utterances (37/38 against 39/40) and one more drain casualty at cap 5.0.
+      It is also the dominant source of run-to-run variance: turning it off
+      took the control spread from 810 ms to **82 ms**, which is what finally
+      made item 1 measurable on this slice. The rig sees no wording benefit to
+      weigh against that, so the burden is now on keeping it, not cutting it.
+      Next: decide between dropping it and making it much cheaper, and if it
+      stays, judge quality with real models rather than the stub.
+- [ ] **Against live Ollama it is worse than "a large fraction":
+      `refine_ms` p50 is 10003 ms at cap 8.0 and 10001 ms at cap
       5.0 — the 10 s timeout itself, in both arms.** The median refine does
       not complete. Shed counts were 37 of 40 and 49 of 52. So the pass is
       near-totally ineffective in practice while still costing queue time,
