@@ -167,6 +167,59 @@ def test_cut_fragment_is_merged_into_next_utterance(client, stub_transcribe):
                               "nächste Woche abschließen werden.")
 
 
+def test_trailing_off_fragment_is_merged(client, stub_transcribe):
+    """Whisper ends a cut-off utterance with an ellipsis, and that used to
+    read as terminal punctuation — so the two halves of this real sentence
+    from 25:00 became separate cards, each translated blind to the other
+    ("They were called Gottbergs, where one was as…" / "as a kitchen boy.").
+    23% of real utterances end this way, 86% of them cut mid-speech."""
+    stub_transcribe.result = {"text": "Von Gottbergs hießen die, wo man da als...",
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        msgs1 = collect_until(ws)
+        stub_transcribe.result = {"text": "als Küchenbammser gearbeitet hat.",
+                                  "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+
+    final1 = next(m for m in msgs1 if m["type"] == "final")
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert final2["replaces"] == final1["id"]
+    assert final2["text"] == ("Von Gottbergs hießen die, wo man da als... "
+                              "als Küchenbammser gearbeitet hat.")
+
+
+def test_the_single_character_ellipsis_counts_too(client, stub_transcribe):
+    """Whisper emits both "..." and "…"; only spelling one of them would fix
+    half the cases and look like it worked."""
+    stub_transcribe.result = {"text": "Sie hatte da überhaupt gar nicht die "
+                                      "Energie oder den auch so…",
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        msgs1 = collect_until(ws)
+        stub_transcribe.result = {
+            "text": "sie konnte sich damit gar nicht auseinandersetzen.",
+            "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    final1 = next(m for m in msgs1 if m["type"] == "final")
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert final2["replaces"] == final1["id"]
+
+
+def test_a_real_full_stop_still_ends_a_sentence():
+    """The point of the change is narrow. If it also swallowed ordinary full
+    stops, every consecutive sentence would be glued into one card."""
+    assert server.looks_finished("Das war klar.")
+    assert server.looks_finished("Wie geht es dir?")
+    assert server.looks_finished('Er sagte "ja."')
+    assert not server.looks_finished("Von Gottbergs hießen die, wo man da als...")
+    assert not server.looks_finished("oder den auch so…")
+    assert not server.looks_finished("und dann haben wir")
+
+
 def test_complete_sentence_is_not_merged(client, stub_transcribe):
     with client.websocket_connect("/ws") as ws:
         speak(ws)                      # "Wie geht es dir?" ends a sentence

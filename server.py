@@ -131,6 +131,25 @@ STATS_INTERVAL_SEC = 0.5           # how often the pipeline overlay is updated
 # A transcript that ends mid-sentence (no terminal punctuation) is a merge
 # candidate — crucial for German, where the meaning-carrying verb comes last.
 SENTENCE_END_RE = re.compile(r"[.!?…]['\")\]]?\s*$")
+# ...but an ellipsis is not a full stop, it is Whisper saying the speaker was
+# still going. Measured over 254 real utterances: 58 (23%) end this way and 50
+# of those 58 were `soft_max` splits — cut at a micro-pause mid-speech, not at
+# the end of a thought. Counting them as finished stranded every one as its own
+# card ("Von Gottbergs hießen die, wo man da als…" / "als Küchenbammser
+# gearbeitet hat."), each translated with no sight of the other half. Only 28
+# utterances end in no punctuation at all, so this is the *majority* of the
+# merge opportunity, not an edge case.
+ELLIPSIS_END_RE = re.compile(r"(\.\.\.|…)['\")\]]?\s*$")
+
+
+def looks_finished(text: str) -> bool:
+    """True when an utterance reads as a completed sentence.
+
+    Kept separate from the regex because "ends with punctuation" and "is
+    finished" are not the same question, and the difference is where the
+    fragment merging lives.
+    """
+    return bool(SENTENCE_END_RE.search(text)) and not ELLIPSIS_END_RE.search(text)
 
 WHISPER_REPO = "mlx-community/whisper-large-v3-turbo"
 # Overridable so a benchmark can point the translation stage at a
@@ -2450,15 +2469,16 @@ async def ws_endpoint(ws: WebSocket):
                 return
             source, targets = resolve_targets(mode, detected)
 
-            # Merge with the previous utterance when it was cut mid-sentence
-            # (no terminal punctuation) and this one resumed right after —
-            # rejoins German verb-final clauses split by a short pause.
+            # Merge with the previous utterance when it did not finish — no
+            # terminal punctuation, or a trailing-off ellipsis — and this one
+            # resumed right after. Rejoins German verb-final clauses split by
+            # a short pause, where the fragment alone cannot be translated.
             replaces = None
             gap = (t0 - len(audio) / SAMPLE_RATE - prev["t_end"]) if prev else 99
             if (prev and prev["speaker"] == speaker and prev["source"] == source
                     and gap < MERGE_GAP_SEC
                     and len(prev["text"]) < MERGE_MAX_CHARS
-                    and not SENTENCE_END_RE.search(prev["text"])):
+                    and not looks_finished(prev["text"])):
                 text = prev["text"] + " " + text
                 replaces = prev["uid"]
                 if history and history[-1].get("uid") == replaces:

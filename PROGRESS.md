@@ -263,6 +263,24 @@ separate load risk.
 - [ ] The gist is per-WebSocket-session, so a reconnect starts it over. The
       old text stays on screen until the first new fold rather than blanking.
 
+### 8. Sentence fragments were left stranded as their own cards — fixed
+- [x] **Cause: an ellipsis was being read as a full stop.** `SENTENCE_END_RE`
+      matched `…` and `...`, so the merge rule treated a cut-off utterance as
+      a finished sentence and refused to join it to its continuation. But
+      Whisper writes an ellipsis precisely when the speaker was *still going*.
+- [x] **It was the majority of the merge opportunity, not an edge case.** Over
+      the 254 dumped utterances: **58 (23%) end in an ellipsis, and 50 of
+      those 58 were `soft_max` splits** — cut at a micro-pause mid-speech.
+      Only 28 end in no punctuation at all, which is all the old rule could
+      ever catch. Replaying the rule over the real transcripts: **21 merges
+      before, 67 after.**
+- [x] **Visible on screen**, which is how it was found: "Von Gottbergs hießen
+      die, wo man da als…" and "als Küchenbammser gearbeitet hat." arrived as
+      two cards, each translated with no sight of the other half. Same slice
+      after the fix: 50 cards → 37, short fragments 17 → 11.
+- [x] Split out as `looks_finished()`, because "ends with punctuation" and
+      "is finished" are different questions and the difference is the bug.
+
 
 ### 4. Output quality, which lag work does not touch
 Ground truth now exists: `tools/dump_transcripts.py` over **five** slices of
