@@ -126,6 +126,25 @@ arguable.*
       want revisiting now that the cap is lower. Refines also shed more
       (37 → 49) but `refine_ms` sits at its 10 s timeout in *both* arms, so
       that is shedding work already failing — see item 2.
+- [ ] **The 5.0 default is validated on demo4 only, and slice40 disputes it.**
+      Repeating the bracket at 40:00 — a harder stretch: 23 soft_max to 15
+      pause, speculation 26 hit / 5 miss, baseline lag ~0.9 s worse — gave a
+      1170 ms gain against a **1034 ms control spread**, so it does not clear
+      its own noise. That run sat at machine load 10–11, so it neither
+      confirms nor refutes; it is a failed measurement, not a negative result.
+      B's runstart median also rests on 7 samples against the controls' 15–16.
+- [ ] **A cost that does look real: cap 5.0 lost 3 utterances at 40:00.**
+      Both control arms delivered 40/40 with no drain warning; B delivered
+      49 of 52. Bracketed, same load, same run — unlike demo4, where the
+      warning appeared in *both* arms and was correctly blamed on load.
+      Against "a wrong card is worse than a slow one", 3 missing cards per
+      4 minutes outweighs a second of lag. Re-measuring on a quiet machine
+      before deciding whether to revert to 8.0.
+- [ ] **The more interesting reading: the right cap may be per-conversation.**
+      demo4 (early, German, frequent clean pauses) and slice40 (later,
+      bilingual, continuous speech) plausibly want different values, and the
+      recording drifts from one to the other. A fixed constant may be the
+      wrong shape of answer.
 - [ ] Translating from partials rather than chunk boundaries is still
       untried, and is the next lever if more is wanted.
 
