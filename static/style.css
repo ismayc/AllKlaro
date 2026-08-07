@@ -52,6 +52,32 @@ select, input[type=range] {
 .dot.live { background: var(--err); animation: blink 1.2s infinite; }
 @keyframes blink { 50% { opacity: .35; } }
 
+/* The running gist. Capped and scrollable: the model is told to write three
+   bullets, but nothing except this stops a chatty one from pushing the
+   conversation off a phone screen. */
+#gist {
+  position: relative; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 34px 10px 12px;
+  font-size: 13px; line-height: 1.45; color: var(--muted);
+  max-height: 22vh; overflow-y: auto;
+}
+#gist.hidden { display: none; }
+/* Collapsing hides the text, not the panel: the chevron has to stay reachable
+   or there is no way to get the gist back. */
+#gist.collapsed { padding: 2px 34px 2px 12px; max-height: none; }
+#gist.collapsed #gistText { display: none; }
+#gist.collapsed::before {
+  content: "Summary"; font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; opacity: .7;
+}
+#gistText { white-space: pre-wrap; }
+.gist-toggle {
+  position: absolute; top: 4px; right: 6px;
+  background: none; border: 0; color: var(--muted);
+  font-size: 14px; line-height: 1; cursor: pointer; padding: 4px 6px;
+}
+.gist-toggle[aria-expanded="false"] { transform: rotate(-90deg); }
 main {
   flex: 1; overflow-y: auto; padding: 20px;
   display: flex; flex-direction: column; gap: 14px;

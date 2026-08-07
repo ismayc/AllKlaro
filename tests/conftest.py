@@ -192,6 +192,9 @@ def fake_ollama(monkeypatch):
                 return JSONResponse({"message": {"content":
                     "**Summary** They planned a project meeting.\n"
                     "**Vocabulary** das Projekt — the project"}, "done": True})
+            if body["messages"][0]["content"].startswith("You keep a running"):
+                return JSONResponse({"message": {"content":
+                    "• They discussed the garden."}, "done": True})
             # Non-streaming translation = the refinement pass.
             return JSONResponse({"message": {"content": "Refined translation."},
                                  "done": True})

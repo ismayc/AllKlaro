@@ -98,6 +98,28 @@ REFINE_MAX_AGE_SEC = 20.0
 # one waiting; past that, a background rewrite of text already on screen is
 # worth less than the card nobody has seen yet.
 REFINE_MAX_IN_FLIGHT = int(os.environ.get("ALLKLARO_REFINE_MAX_IN_FLIGHT", "2"))
+# The running gist shown at the top of the screen. It is *folded* forward --
+# each refresh sees the previous gist plus only what was said since -- so its
+# cost is flat over a 54-minute call instead of growing with the transcript.
+# Everything here exists to stop it becoming a second refine pass: measured on
+# the real recording, an ungated background job on this Ollama loses to the
+# translation backlog on most utterances and takes capacity from the cards
+# someone is actually waiting for. One refresh a minute, never while the
+# pipeline is behind, and bounded when it runs.
+GIST_INTERVAL_SEC = float(os.environ.get("ALLKLARO_GIST_INTERVAL_SEC", "60"))
+GIST_MAX_QUEUE = 2                 # no refresh past this Whisper depth
+GIST_MAX_IN_FLIGHT = 2             # ...or this translation backlog
+GIST_TIMEOUT_SEC = 20.0            # longer than a refine: nobody is waiting
+GIST_MAX_LINES = 60                # utterances folded in one refresh
+GIST_MAX_PENDING = 200             # backlog kept if refreshes keep failing
+# Yielding to the backlog is right, but yielding *forever* is not a policy, it
+# is the feature not existing. Measured on 240 s of the real recording at
+# 25:00: `in_flight` sat at 3-6 for the whole slice and touched 2 only during
+# the drain, so with the idle gate alone the gist never refreshed once. Past
+# this long without one, take the turn anyway — a summary that never appears
+# is worse than one utterance's wait, and at one fold a minute this costs a
+# fraction of what the per-utterance refine pass does.
+GIST_MAX_STALE_SEC = float(os.environ.get("ALLKLARO_GIST_MAX_STALE_SEC", "180"))
 HISTORY_TURNS = 6                  # recent exchanges fed to the translator
 MERGE_GAP_SEC = 2.0                # resumed-within window for fragment merging
 MERGE_MAX_CHARS = 300              # never grow merged utterances beyond this
@@ -1524,6 +1546,103 @@ SUMMARY_PROMPT = (
 )
 
 
+GIST_PROMPT = (
+    "You keep a running gist of a live bilingual conversation for someone "
+    "following it through translation. You are given the gist so far (it may "
+    "be empty) and the lines spoken since, one per line, prefixed with their "
+    "language. Rewrite the gist so it covers the whole conversation, "
+    "including the new lines.\n"
+    "Format: one to three lines, each starting with \"- \". Nothing else — no "
+    "preamble, no heading, no closing remark. Asking for \"bullets\" is not "
+    "enough on its own; gemma3:12b answers with a paragraph unless the line "
+    "format is spelled out.\n"
+    "Write in English, under 20 words a line. Say what is being discussed and "
+    "any decision or follow-up.\n"
+    "Keep the concrete details already in the gist — names, places, dates, "
+    "numbers, decisions. Do not generalise them away: \"fly to Hawaii in "
+    "March\" must not become \"their trip\". Folding a summary into a summary "
+    "loses specifics unless it is told not to; measured at 50% loss of a "
+    "named destination after a single fold without this instruction.\n"
+    "Three lines total, not three new ones — replace and merge rather than "
+    "append, or the list grows every minute.\n"
+    "Summarise the lines; never copy them through, and never repeat the "
+    "\"[DE]\" / \"[EN]\" language tags in your answer.\n"
+    "Speech recognition makes "
+    "mistakes, so ignore lines that are garbled or repeat a word over and "
+    "over rather than trying to make sense of them."
+)
+
+
+def remember_for_gist(pending: list[dict], uid: int, source: str, text: str,
+                      replaces: int | None = None) -> None:
+    """Queue one utterance for the next fold.
+
+    `replaces` is the uid of a fragment this utterance was merged with. The
+    fragment's words are a prefix of this one, so keeping both would show the
+    gist the same half-sentence twice — the same reason the translator pops it
+    off `history`.
+    """
+    if replaces is not None and pending and pending[-1].get("uid") == replaces:
+        pending.pop()
+    pending.append({"uid": uid, "source": source, "text": text})
+    # If folds keep failing, keep the newest rather than growing without bound:
+    # an old gist plus recent lines still describes the call, and a 54-minute
+    # conversation must not sit in memory waiting for an Ollama that is wedged.
+    del pending[:-GIST_MAX_PENDING]
+
+
+# The fold is shown the transcript as "[DE] …" / "[EN] …" so it knows who is
+# speaking which language, and on a long conversation the model eventually
+# copies a line through verbatim, tags and all, instead of summarising it.
+# Observed on fold 6 of a six-fold run. The prompt asks it not to; this makes
+# sure, because the tags are meaningless to someone reading the panel.
+LANG_TAG_RE = re.compile(r"\[(?:DE|EN|ES)\]\s*", re.I)
+
+
+def strip_lang_tags(text: str) -> str:
+    return LANG_TAG_RE.sub("", text or "").strip()
+
+
+def gist_messages(previous: str, lines: list[str]) -> list[dict]:
+    """The fold step's prompt: the gist so far, plus what was said since."""
+    body = ("Gist so far:\n" + (previous.strip() or "(nothing yet)")
+            + "\n\nLines spoken since:\n" + "\n".join(lines))
+    return [{"role": "system", "content": GIST_PROMPT},
+            {"role": "user", "content": body}]
+
+
+async def fold_gist(previous: str, lines: list[str], model: str) -> str | None:
+    """One rolling-summary step; None on any failure, leaving the old gist up.
+
+    Deliberately shaped like translate_once rather than /api/summarize: this
+    runs inside a live session competing with the translator, so a failure
+    has to be survivable rather than reported.
+    """
+    if not lines:
+        return None
+    body = {
+        "model": model,
+        "messages": gist_messages(previous, lines),
+        "stream": False,
+        "options": {"temperature": 0.2},
+        "keep_alive": "60m",
+    }
+    if any(k in model.lower() for k in ("qwen3", "deepseek-r1", "gpt-oss")):
+        body["think"] = False
+    try:
+        async with ollama_client() as client:
+            r = await client.post("/api/chat", json=body,
+                                  timeout=GIST_TIMEOUT_SEC)
+            if r.status_code != 200:
+                log.warning("gist failed: %s", r.text[:200])
+                return None
+            answer = r.json().get("message", {}).get("content", "").strip()
+            return strip_lang_tags(answer) or None
+    except Exception as exc:
+        log.warning("gist failed: %s", exc)
+        return None
+
+
 @app.post("/api/summarize")
 async def summarize(payload: dict):
     items = payload.get("items", []) or []
@@ -2238,6 +2357,13 @@ async def ws_endpoint(ws: WebSocket):
 
     def flavor_for(target: str) -> str:
         return {"de": de_flavor, "es": es_flavor}.get(target, "")
+    gist_on = True                   # running gist pinned above the feed
+    gist = ""                        # the gist as last folded
+    gist_pending: list[dict] = []    # utterances not yet folded into it
+    gist_busy = False                # a fold is in flight
+    # Started now, not at 0.0: against a monotonic clock the interval would
+    # already be satisfied, and the first gist would summarize one utterance.
+    last_gist = loop.time()
     corrected_uids: set[int] = set()  # user edits that refinement must not undo
     pause_frames = END_SILENCE_FRAMES
     uid = 0
@@ -2343,6 +2469,7 @@ async def ws_endpoint(ws: WebSocket):
                     "speaker": speaker, "t_end": t0}
             recent_finals.append({"norm": normalize_text(text),
                                   "speaker": speaker, "t": t0})
+            remember_for_gist(gist_pending, my_uid, source, text, replaces)
             final_msg = {"type": "final", "id": my_uid, "text": text,
                          "source": source, "target": targets[0],
                          "targets": targets, "speaker": speaker,
@@ -2471,6 +2598,32 @@ async def ws_endpoint(ws: WebSocket):
             # still occupies Ollama while the next utterance waits its turn.
             meta["refine_ms"] = int((loop.time() - t2) * 1000)
 
+    async def refresh_gist():
+        """Fold the utterances since the last refresh into the running gist.
+
+        The batch is only dropped once the fold succeeds, so a failed or
+        timed-out refresh costs nothing but a minute -- and because new
+        utterances are only ever appended, taking a prefix is safe even though
+        the conversation keeps moving while this runs.
+        """
+        nonlocal gist, gist_busy
+        gist_busy = True
+        try:
+            batch = gist_pending[:GIST_MAX_LINES]
+            lines = [f"[{b['source'].upper()}] {b['text']}" for b in batch]
+            updated = await fold_gist(gist, lines, model)
+            if updated:
+                gist = updated
+                # By uid, not by index: the list can be trimmed from the front
+                # while this await is outstanding, and dropping the wrong
+                # utterances would silently lose them from the conversation.
+                done = {b["uid"] for b in batch}
+                gist_pending[:] = [p for p in gist_pending
+                                   if p["uid"] not in done]
+                await safe_send(ws, {"type": "gist", "text": gist})
+        finally:
+            gist_busy = False
+
     def forget(old_uid):
         """Drop a superseded utterance from the conversation context, so a
         redirected card's mistranslation stops steering later turns."""
@@ -2586,6 +2739,8 @@ async def ws_endpoint(ws: WebSocket):
                     model = cfg.get("model", model)
                     if "stats" in cfg:  # live pipeline overlay on/off
                         stats_on = bool(cfg["stats"])
+                    if "gist" in cfg:   # running gist above the feed on/off
+                        gist_on = bool(cfg["gist"])
                     if "draft_model" in cfg:  # "" means draft pass off
                         draft_model = cfg["draft_model"] or None
                     if draft_model and draft_model != model:
@@ -2710,6 +2865,16 @@ async def ws_endpoint(ws: WebSocket):
             if any(c["vad"].in_speech for c in channels.values()):
                 asyncio.create_task(maybe_partial())
             now = loop.time()
+            # The running gist, on the same terms as the refine pass: it is a
+            # background improvement to a screen the user can already read, so
+            # it yields to anything anyone is waiting on.
+            idle = (in_flight <= GIST_MAX_IN_FLIGHT
+                    and whisper_pending <= GIST_MAX_QUEUE)
+            if (gist_on and gist_pending and not gist_busy
+                    and now - last_gist >= GIST_INTERVAL_SEC
+                    and (idle or now - last_gist >= GIST_MAX_STALE_SEC)):
+                last_gist = now
+                asyncio.create_task(refresh_gist())
             if stats_on and now - last_stats >= STATS_INTERVAL_SEC:
                 last_stats = now
                 # Audio already spoken that is still growing into a chunk —

@@ -419,6 +419,45 @@ async def test_real_ollama_mexican_flavor_produces_mexican_spanish():
     assert "móvil" not in low and "vosotros" not in low
 
 
+async def test_real_ollama_folds_a_gist_from_a_bilingual_exchange():
+    """The stub cannot tell a summary from any other string. This checks the
+    thing that actually matters: a real model, given lines in two languages,
+    answers in English about what was said rather than translating them."""
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    gist = await server.fold_gist("", [
+        "[DE] Wir müssen den Garten bewässern, der Rasen ist völlig trocken.",
+        "[EN] Forget the lawn, I only care about the palm and the bushes.",
+        "[DE] Gut, dann sammeln wir das Wasser über Nacht in der Tonne.",
+    ], server.DEFAULT_MODEL)
+    assert gist
+    low = gist.lower()
+    assert any(w in low for w in ("water", "garden", "lawn", "palm")), gist
+    # An English gist, not a translation of the German lines.
+    assert "bewässern" not in low and "völlig" not in low
+
+
+async def test_real_ollama_gist_carries_earlier_context_forward():
+    """The fold is only worth doing if the previous gist survives it: this is
+    what keeps a 54-minute call from restarting every minute."""
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    gist = await server.fold_gist(
+        "• They agreed to fly to Hawaii in March.",
+        ["[EN] So the overnight flight is the cheaper one.",
+         "[DE] Ja, dann nehmen wir den Nachtflug."],
+        server.DEFAULT_MODEL)
+    assert gist
+    low = gist.lower()
+    # Without the "keep concrete details" instruction in GIST_PROMPT this
+    # retained the destination only 4 times in 8; with it, 8 in 8. Left as a
+    # hard assertion deliberately — if it starts flaking again, the fold has
+    # regressed to generalising specifics away, which is the failure mode.
+    assert "hawaii" in low, f"earlier context dropped: {gist}"
+    assert "night" in low or "overnight" in low, gist
+    assert "[de]" not in low and "[en]" not in low, f"raw tags leaked: {gist}"
+
+
 async def test_real_ollama_barcelona_flavor_produces_peninsular_spanish():
     if not ollama_up():
         pytest.skip("Ollama not running")

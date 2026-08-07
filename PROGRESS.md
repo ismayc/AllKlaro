@@ -217,6 +217,52 @@ separate load risk.
       refine pass, or hard-gate it to genuinely idle stretches. The rig cannot
       decide whether 1-in-20 better wording is worth two lost utterances.
 
+### 7. A running gist, pinned above the feed
+- [x] **Built.** A short summary sits above the conversation and is *folded*
+      forward — each refresh sees the previous gist plus only the lines since,
+      so cost is flat over a 54-minute call instead of growing with the
+      transcript. `fold_gist` / `gist_messages` / `remember_for_gist` in
+      `server.py`, rendered by `showGist` in `static/app.js`.
+- [x] **Built to lose.** This is a second background job on the Ollama the
+      translator is using — the exact shape that makes the refine pass fail —
+      so it is gated the same way and more tightly: once a minute
+      (`GIST_INTERVAL_SEC`), never while anything is in flight or queued
+      (`GIST_MAX_IN_FLIGHT`, `GIST_MAX_QUEUE`, both ≤ the refine thresholds
+      and asserted to stay that way), bounded batch, bounded backlog, and a
+      reentrancy guard so a slow fold cannot pile up duplicates.
+- [x] **A failure costs nothing.** The batch is dropped only once a fold
+      succeeds, and is re-identified by uid rather than index so a concurrent
+      trim cannot silently lose utterances. A blank or failed answer leaves
+      the previous gist on screen.
+- [x] **The bullet format had to be spelled out.** Asking gemma3:12b for
+      "at most 3 short bullets" produced prose every time; naming the line
+      format (`- `) fixed it. Recorded in the prompt itself so it is not
+      re-litigated.
+- [x] **Tested**: 22 new tests, all 10 mutations of the guarantees caught,
+      plus two integration tests against the real model — one that a bilingual
+      exchange yields an *English* gist rather than a translation, one that
+      earlier context survives a fold.
+- [x] **Driven on the real recording, and it was broken in four ways.** A
+      240 s slice at 25:00 through the app's own audio path:
+      - *It never fired once.* Gated at or below the refine thresholds,
+        `in_flight` sat at 3-6 for the whole slice and touched 2 only during
+        the drain. Yielding to the backlog forever is not a policy, it is the
+        feature not existing — hence `GIST_MAX_STALE_SEC`.
+      - *It lost the specifics.* "fly to Hawaii in March" became "their trip"
+        in **4 of 8** folds. The prompt now defends names, places, dates and
+        numbers explicitly: **8 of 8**.
+      - *It grew.* 4 bullets → 8 across two live folds. Told to produce three
+        lines *total* rather than three new ones, it holds at 3 over a
+        six-fold run (293 → 430 chars).
+      - *It leaked the transcript format.* By fold 6 it copied a line through
+        verbatim as `- [DE] Ich habe in Opas Bericht gelesen.` Stripped on the
+        response, not merely forbidden in the prompt.
+- [ ] Still unverified over a *full* call: six folds is not fifty, and slow
+      semantic drift (fold 6 already conflated who was displeased about what)
+      is the failure mode a 54-minute conversation would expose.
+- [ ] The gist is per-WebSocket-session, so a reconnect starts it over. The
+      old text stays on screen until the first new fold rather than blanking.
+
 
 ### 4. Output quality, which lag work does not touch
 Ground truth now exists: `tools/dump_transcripts.py` over **five** slices of

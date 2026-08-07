@@ -13,6 +13,10 @@ const fontSize = document.getElementById("fontSize");
 const speakChk = document.getElementById("speakChk");
 const focusChk = document.getElementById("focusChk");
 const statsChk = document.getElementById("statsChk");
+const gistChk = document.getElementById("gistChk");
+const gistPanel = document.getElementById("gist");
+const gistText = document.getElementById("gistText");
+const gistToggle = document.getElementById("gistToggle");
 const pipeline = document.getElementById("pipeline");
 const pauseSlider = document.getElementById("pause");
 const pauseVal = document.getElementById("pauseVal");
@@ -71,6 +75,8 @@ function saveSettings() {
     speak: speakChk.checked,
     focus: focusChk.checked,
     stats: statsChk.checked,
+    gist: gistChk.checked,
+    gistCollapsed: gistPanel.classList.contains("collapsed"),
     pause: pauseSlider.value,
     pinnedSource,
     controlsHidden: controls.classList.contains("hidden"),
@@ -81,6 +87,12 @@ if (saved.fontSize) fontSize.value = saved.fontSize;
 if (saved.speak) speakChk.checked = true;
 if (saved.focus) { focusChk.checked = true; feed.classList.add("focus"); }
 if (saved.stats) { statsChk.checked = true; pipeline.classList.remove("hidden"); }
+// Defaults on, so an absent key is not "off" the way it is for the others.
+if (saved.gist === false) gistChk.checked = false;
+if (saved.gistCollapsed) {
+  gistPanel.classList.add("collapsed");
+  gistToggle.setAttribute("aria-expanded", "false");
+}
 if (saved.mode && [...modeSel.options].some((o) => o.value === saved.mode)) {
   modeSel.value = saved.mode;
 }
@@ -293,6 +305,7 @@ function sendConfig() {
                              address: addressSel.value,
                              model: modelSel.value, draft_model: draftSel.value,
                              stats: statsChk.checked,
+                             gist: gistChk.checked,
                              pause_ms: +pauseSlider.value }));
   }
 }
@@ -736,6 +749,8 @@ function handleMessage(msg) {
       renderFinalRow(c, t);
       row.el.classList.add("revised"); // brief flash marks the swap
     }
+  } else if (msg.type === "gist") {
+    showGist(msg.text);
   } else if (msg.type === "stats") {
     showStats(msg);
   } else if (msg.type === "discard") {
@@ -744,6 +759,39 @@ function handleMessage(msg) {
     showError(msg.message);
   }
 }
+
+// --------------------------------------------------------------- running gist
+
+// Swapped wholesale, never streamed: this sits above text the user is reading,
+// and rewriting it token by token would move the conversation under their eyes
+// — the same reason the refine pass replaces a card in one go.
+function showGist(text) {
+  const clean = (text || "").trim();
+  if (!clean) return;
+  // textContent, not innerHTML: this string came out of a language model.
+  // Markers are stripped rather than rendered, so ** never shows up raw.
+  gistText.textContent = clean
+    .replace(/\*\*/g, "")
+    .replace(/^\s*[-*]\s+/gm, "• ");
+  gistPanel.classList.remove("hidden");
+}
+
+function clearGist() {
+  gistText.textContent = "";
+  gistPanel.classList.add("hidden");
+}
+
+gistToggle.onclick = () => {
+  const collapsed = gistPanel.classList.toggle("collapsed");
+  gistToggle.setAttribute("aria-expanded", String(!collapsed));
+  saveSettings();
+};
+
+gistChk.onchange = () => {
+  if (!gistChk.checked) clearGist();
+  sendConfig();
+  saveSettings();
+};
 
 // ------------------------------------------------------------- export & summary
 
@@ -780,6 +828,7 @@ clearBtn.onclick = () => {
   window.speechSynthesis?.cancel();
   cards.clear();
   lastSummary = ""; // a stale summary must not leak into the next export
+  clearGist();      // ...and the pinned gist described the cleared conversation
   clearPartial();
   feed.replaceChildren(hint);
 };

@@ -94,12 +94,22 @@
     <label class="chk"><input type="checkbox" id="speakChk" /> Speak</label>
     <label class="chk" title="Keep the newest text near mid-screen instead of the bottom">
       <input type="checkbox" id="focusChk" /> Center latest</label>
+    <label class="chk" title="Keep a short running summary of the conversation pinned above the feed, refreshed about once a minute while the pipeline is idle">
+      <input type="checkbox" id="gistChk" checked /> Summary</label>
     <label class="chk" title="Show what the pipeline is doing — how much speech is still waiting to be cut into an utterance, how much work is queued, and how far behind the last card landed">
       <input type="checkbox" id="statsChk" /> Pipeline</label>
     <button id="summarizeBtn" class="tool-btn">Summarize</button>
     <button id="exportBtn" class="tool-btn">Export</button>
     <button id="clearBtn" class="tool-btn" title="Clear the conversation">Clear</button>
     <button id="aboutBtn" class="tool-btn" title="About AllKlaro">About</button>
+    </div>
+    <!-- Running gist: rewritten wholesale about once a minute, never while
+         the pipeline is behind. Collapsible because a pinned block is
+         expensive real estate on a phone. -->
+    <div id="gist" class="hidden">
+      <button id="gistToggle" class="gist-toggle" aria-expanded="true"
+              title="Collapse / expand the running summary">▾</button>
+      <div id="gistText"></div>
     </div>
   </header>
 
