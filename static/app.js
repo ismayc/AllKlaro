@@ -306,6 +306,14 @@ function sendConfig() {
                              model: modelSel.value, draft_model: draftSel.value,
                              stats: statsChk.checked,
                              gist: gistChk.checked,
+                             // The gist lives in the WebSocket session, so a
+                             // reconnect would restart the summary from nothing
+                             // while the old text sat on screen. The client is
+                             // the only thing that survives the reconnect, so
+                             // it hands the current gist back and the next fold
+                             // continues the conversation instead of the fold
+                             // history being silently truncated.
+                             gist_text: gistCurrent,
                              pause_ms: +pauseSlider.value }));
   }
 }
@@ -770,9 +778,15 @@ function handleMessage(msg) {
 // Swapped wholesale, never streamed: this sits above text the user is reading,
 // and rewriting it token by token would move the conversation under their eyes
 // — the same reason the refine pass replaces a card in one go.
+// The server's copy of the gist, verbatim — not the display text below, which
+// has had its markers rewritten for reading. Sent back on reconnect so a fold
+// resumes rather than restarting.
+let gistCurrent = "";
+
 function showGist(text) {
   const clean = (text || "").trim();
   if (!clean) return;
+  gistCurrent = clean;
   // textContent, not innerHTML: this string came out of a language model.
   // Markers are stripped rather than rendered, so ** never shows up raw.
   gistText.textContent = clean
@@ -782,6 +796,7 @@ function showGist(text) {
 }
 
 function clearGist() {
+  gistCurrent = "";
   gistText.textContent = "";
   gistPanel.classList.add("hidden");
 }

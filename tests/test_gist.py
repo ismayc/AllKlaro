@@ -7,6 +7,7 @@ that it yields to a busy pipeline, that a failure costs nothing, and that it
 never grows without bound over a 54-minute call.
 """
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -317,3 +318,89 @@ def test_the_gist_yields_to_the_same_backlog_the_refine_pass_does():
     run in conditions where refinement is already considered too expensive."""
     assert srv.GIST_MAX_IN_FLIGHT <= srv.REFINE_MAX_IN_FLIGHT
     assert srv.GIST_MAX_QUEUE <= srv.REFINE_MAX_QUEUE
+
+
+# ------------------------------------------------- surviving a reconnect
+#
+# The gist lives in the WebSocket session, so a reconnect used to restart the
+# summary from nothing while the old text stayed on screen — the panel would
+# describe the first half of the call and then quietly begin a second one. The
+# client is the only party that survives a reconnect, so it hands the gist back.
+
+
+def _fold_prompts(fake_ollama):
+    """Bodies of the fold calls, which are the only ones with the gist prompt."""
+    return [b for b in fake_ollama.get("all", [])
+            if b.get("messages")
+            and b["messages"][0]["content"].startswith("You keep a running")]
+
+
+def test_a_reconnect_resumes_the_gist_instead_of_restarting_it(
+        client, monkeypatch, fake_ollama):
+    monkeypatch.setattr(srv, "GIST_INTERVAL_SEC", 0.0)
+    seed = "- They had been arguing about the boiler."
+    cfg = json.dumps({"type": "config", "stats": True, "gist_text": seed})
+    drain_after_speaking(client, monkeypatch, config=cfg)
+    folds = _fold_prompts(fake_ollama)
+    assert folds, "no fold ran, so this asserts nothing"
+    assert any(seed in m["content"] for m in folds[0]["messages"]), \
+        "the returned gist never reached the fold, so it restarted"
+
+
+def test_a_live_gist_is_never_overwritten_by_a_later_config(
+        client, monkeypatch, fake_ollama):
+    """Only ever *seeds* an empty gist. A client that keeps resending config —
+    every settings change does — must not be able to roll the summary back to
+    whatever its panel happened to be showing."""
+    monkeypatch.setattr(srv, "GIST_INTERVAL_SEC", 0.0)
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    monkeypatch.setattr(srv, "STATS_INTERVAL_SEC", 0.0)
+    stale = "- A summary from some other conversation."
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text('{"type": "config", "stats": true}')
+        speak(ws)
+        collect_until(ws)
+        for _ in range(60):          # let the first fold land
+            ws.send_bytes(SILENCE_CHUNK)
+        [ws.receive_json() for _ in range(40)]
+        # Now the server holds a real gist. A reconnecting-looking config
+        # arrives with different text; it must be ignored.
+        ws.send_text(json.dumps({"type": "config", "stats": True,
+                                 "gist_text": stale}))
+        speak(ws)
+        collect_until(ws)
+        for _ in range(60):
+            ws.send_bytes(SILENCE_CHUNK)
+        [ws.receive_json() for _ in range(40)]
+    assert not any(stale in m["content"]
+                   for b in _fold_prompts(fake_ollama) for m in b["messages"]), \
+        "a config message overwrote a gist the session had already folded"
+
+
+def test_the_seeded_gist_is_bounded(client, monkeypatch, fake_ollama):
+    """It re-enters the fold prompt, so an unbounded value here would be a
+    client-controlled prompt of any length. Three short lines is the design.
+
+    The sizes below are literals on purpose. Deriving them from
+    GIST_SEED_MAX_CHARS would make the test move with the constant it is
+    checking, so removing the cap entirely would still pass.
+    """
+    monkeypatch.setattr(srv, "GIST_INTERVAL_SEC", 0.0)
+    cfg = json.dumps({"type": "config", "stats": True,
+                      "gist_text": "x" * 50_000})
+    drain_after_speaking(client, monkeypatch, config=cfg)
+    folds = _fold_prompts(fake_ollama)
+    assert folds
+    body = "".join(m["content"] for m in folds[0]["messages"])
+    assert "x" in body                     # it was seeded at all...
+    assert "x" * 10_000 not in body        # ...but nothing like 50k of it
+    assert srv.GIST_SEED_MAX_CHARS <= 10_000
+
+
+def test_a_non_string_gist_text_is_ignored(client, monkeypatch):
+    """The client is trusted, but a malformed config must not take the socket
+    down mid-call — that would cost the conversation, not just the gist."""
+    monkeypatch.setattr(srv, "GIST_INTERVAL_SEC", 0.0)
+    cfg = json.dumps({"type": "config", "stats": True, "gist_text": {"a": 1}})
+    msgs = drain_after_speaking(client, monkeypatch, config=cfg)
+    assert any(m["type"] in ("final", "stats") for m in msgs)

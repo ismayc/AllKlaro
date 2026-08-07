@@ -146,6 +146,11 @@ GIST_MAX_IN_FLIGHT = 2             # ...or this translation backlog
 GIST_TIMEOUT_SEC = 20.0            # longer than a refine: nobody is waiting
 GIST_MAX_LINES = 60                # utterances folded in one refresh
 GIST_MAX_PENDING = 200             # backlog kept if refreshes keep failing
+# A reconnect hands the gist back from the client, which is the only party that
+# survives one. Bounded because it re-enters the fold prompt: the gist is three
+# short lines by design, so anything near this is already malformed, and an
+# unbounded string here would be a client-controlled prompt of any length.
+GIST_SEED_MAX_CHARS = 2000
 # Yielding to the backlog is right, but yielding *forever* is not a policy, it
 # is the feature not existing. Measured on 240 s of the real recording at
 # 25:00: `in_flight` sat at 3-6 for the whole slice and touched 2 only during
@@ -2916,6 +2921,14 @@ async def ws_endpoint(ws: WebSocket):
                         stats_on = bool(cfg["stats"])
                     if "gist" in cfg:   # running gist above the feed on/off
                         gist_on = bool(cfg["gist"])
+                    if not gist and isinstance(cfg.get("gist_text"), str):
+                        # Reconnect: the client is handing back the gist it is
+                        # still displaying, so the next fold continues the
+                        # conversation instead of starting a second one under
+                        # text that describes the first. Only ever *seeds* an
+                        # empty gist — a live session's own fold always wins,
+                        # and a client cannot overwrite it mid-call.
+                        gist = cfg["gist_text"].strip()[:GIST_SEED_MAX_CHARS]
                     if "draft_model" in cfg:  # "" means draft pass off
                         draft_model = cfg["draft_model"] or None
                     if draft_model and draft_model != model:
