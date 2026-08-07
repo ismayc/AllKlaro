@@ -178,8 +178,45 @@ separate load risk.
       near-totally ineffective in practice while still costing queue time,
       and the stub hides this completely (it sheds 7 at the same cap, because
       a fixed-cost server cannot time out).
-- [ ] Make it much cheaper, make it conditional, or drop it and put a single
-      good model on the critical path.
+- [x] **Settled: keep the draft, the second pass is what is in question.**
+      The two halves of the two-tier design were measured separately and the
+      evidence points opposite ways.
+      - *Single-pass on the main model is 8.2 s worse, not better.* Bracketed
+        A1→B→A2 on slice40 against live Ollama: runstart lag **20052 ms**
+        against an 11864 ms two-pass baseline, control spread **1101 ms**.
+        Mechanism confirmed — `translate_ms` p50 goes 3243 → 7142 ms (max
+        8623 → 18042) with the 12B model in front of the user. B completed
+        *more* utterances (51 vs 49) while being far slower, so this is not a
+        dropped-work artifact. **The fast draft is what makes a card appear;
+        it stays.**
+      - *The refine pass buys about one card in twenty to one in a hundred.*
+        Delivery is load-dependent: 39% of utterances on slice40 (both A arms
+        agreeing exactly) but 6-8% on the earlier demo4 runs. When it does
+        land, the main model is materially better on ~13% of en→de utterances
+        and *worse* on ~4 of 62 (`South Carolina` → `Südkaroina`, "fly to
+        work" → `mit dem Fly`). Net: 0.8%-5% of cards improved, against two
+        fewer completed utterances per slice.
+- [x] **The wording question is answered, by real models rather than the
+      stub.** 254 real utterances translated by draft and main through the
+      app's own prompts (`wording_ab.py`): 85% differ, 15% are identical, 31%
+      differ substantially. The main model fixes real errors a learner would
+      care about — `aufgrund des Überschwemmungs` → `Das liegt an der
+      Überschwemmung`, `Vorstellungsscheu` → `Lampenfieber`, `Hetzische` →
+      `hessische` — and the draft produced 1 catastrophic output of 254
+      (emitted Chinese, leaked a `user` role marker, echoed the prompt) to the
+      main model's 0. So "earns nothing" was too strong: it earns a little,
+      rarely.
+- [x] **The 10 s timeouts are contention, not model swapping.** `server.py:89`
+      blamed swapping and `OLLAMA_CONTEXT_LENGTH=131072` made that plausible.
+      Falsified directly: with 51.5 GB both models stay co-resident and answer
+      in 707 ms (draft) and 1165 ms (main) in steady state. Refine only fails
+      when the pipeline is busy — which is exactly when it is also taking
+      capacity from the cards ahead of it. The `prewarm_model` call added at
+      `server.py:~2591` is why delivery is 39% now and was 6-8% before.
+- [ ] Remaining call, and it is a product one, not a measurement one: drop the
+      refine pass, or hard-gate it to genuinely idle stretches. The rig cannot
+      decide whether 1-in-20 better wording is worth two lost utterances.
+
 
 ### 4. Output quality, which lag work does not touch
 Ground truth now exists: `tools/dump_transcripts.py` over **five** slices of
