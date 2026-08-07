@@ -936,6 +936,26 @@ def _clean_segment(raw: str) -> str | None:
     return collapsed
 
 
+# Parakeet writes its unknown-token literal straight into the text, and unlike
+# Whisper it has no temperature ladder or compression threshold to fall back on
+# when a decode degenerates. Seen live on the 25:00 slice: 390 consecutive
+# `<unk>` with no spaces between them, held on screen for seconds. Every
+# repetition filter missed it — they split on whitespace, so all 1950
+# characters were a single "word".
+UNK_TOKEN_RE = re.compile(r"(?:<unk>)+")
+
+
+def clean_partial(text: str) -> str:
+    """Usable live-partial text; "" when the fast decode produced nothing real.
+
+    The fast path cannot use `clean_transcript` — that reads Whisper's segment
+    structure and its per-segment confidences, which Parakeet does not produce
+    — so the repetition checks have to be applied here too, or they only ever
+    protected the finals.
+    """
+    return (_clean_segment(UNK_TOKEN_RE.sub(" ", text)) or "").strip()
+
+
 def clean_transcript(result: dict) -> str:
     """Drop low-confidence and degenerate segments (music, jingles, repetition
     loops) the hallucination blocklist has never seen, using Whisper's own
@@ -2732,6 +2752,8 @@ async def ws_endpoint(ws: WebSocket):
             if fast:
                 text = await loop.run_in_executor(partial_executor,
                                                   transcribe_partial, audio)
+                if text is not None:     # None still means "no fast model"
+                    text = clean_partial(text)
             if text is None:             # no fast model — Whisper does it
                 result = await submit_transcribe(loop, audio, lang_hint(mode),
                                                  whisper_prompt())

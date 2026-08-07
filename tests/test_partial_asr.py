@@ -110,6 +110,62 @@ def test_falls_back_to_whisper_without_the_fast_model(client, stub_transcribe,
     assert len(stub_transcribe.calls) > 1
 
 
+def test_a_degenerate_fast_decode_never_reaches_the_screen(
+        client, stub_transcribe, stub_partial, monkeypatch):
+    """Seen live: Parakeet emitted 390 consecutive `<unk>` and the app held
+    them on screen for seconds. The fast path skipped `clean_transcript`
+    entirely, so every repetition filter that protects the finals was simply
+    not run — and none would have matched anyway, because with no spaces
+    between the tokens the whole thing is one 1950-character "word"."""
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 0.0)
+    stub_partial.text = "<unk>" * 390
+    with client.websocket_connect("/ws") as ws:
+        speak(ws, speech_chunks=40)
+        msgs = collect_until(ws)
+    assert stub_partial.calls, "the fast model was never called"
+    assert not [m for m in msgs if m["type"] == "partial"], \
+        "a partial made of unknown-token noise was shown"
+
+
+def test_stray_unknown_tokens_are_stripped_but_the_speech_kept(
+        client, stub_transcribe, stub_partial, monkeypatch):
+    """Dropping the whole partial for one bad token would throw away good
+    live text; the token is the artifact, not the utterance."""
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 0.0)
+    stub_partial.text = "Ich habe <unk> das gesagt"
+    with client.websocket_connect("/ws") as ws:
+        speak(ws, speech_chunks=40)
+        msgs = collect_until(ws)
+    partials = [m for m in msgs if m["type"] == "partial"]
+    assert partials, "the whole partial was dropped over one token"
+    assert "<unk>" not in partials[0]["text"]
+    assert "Ich habe" in partials[0]["text"] and "gesagt" in partials[0]["text"]
+
+
+def test_a_repetition_loop_without_unknown_tokens_is_caught_too(
+        client, stub_transcribe, stub_partial, monkeypatch):
+    """The unknown-token strip and the repetition checks are separate
+    guarantees. Parakeet can loop on real words — "EP" ×32 and "PPE" ×60 both
+    appear in the finals from this recording — and stripping `<unk>` does
+    nothing for those."""
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 0.0)
+    stub_partial.text = "die Füße starete, " * 6
+    with client.websocket_connect("/ws") as ws:
+        speak(ws, speech_chunks=40)
+        msgs = collect_until(ws)
+    assert not [m for m in msgs if m["type"] == "partial"], \
+        "a repetition loop was shown as live text"
+
+
+def test_clean_partial_keeps_ordinary_live_text_untouched():
+    """The filter runs on every partial, so anything it mangles is mangled
+    two times a second."""
+    assert srv.clean_partial("und dann sind wir nach Hause") == \
+        "und dann sind wir nach Hause"
+    assert srv.clean_partial("Ja, ja, ja") == "Ja, ja, ja"
+    assert srv.clean_partial("<unk>" * 390) == ""
+
+
 def test_transcribe_partial_reports_no_model_rather_than_raising(monkeypatch):
     """maybe_partial() distinguishes 'no fast model' from a real failure by
     the None return, so the contract matters."""

@@ -281,6 +281,21 @@ separate load risk.
 - [x] Split out as `looks_finished()`, because "ends with punctuation" and
       "is finished" are different questions and the difference is the bug.
 
+### 9. Live partials could show pure noise — fixed
+- [x] **The fast partial path skipped every filter that protects the finals.**
+      `maybe_partial` sent Parakeet's output straight to the screen past only
+      `HALLUCINATION_RE`; `clean_transcript` ran solely on the *Whisper*
+      fallback. Unlike Whisper, Parakeet has no temperature ladder and no
+      compression-ratio threshold to fall back on when a decode degenerates.
+- [x] **Seen live: 390 consecutive `<unk>`, held on screen for seconds.** And
+      no existing filter would have matched even if it had run — with no
+      whitespace between the tokens, `collapse_repeats` and `has_phrase_loop`
+      both saw one 1950-character "word".
+- [x] Fixed with `clean_partial()`: strip the unknown-token literal, then run
+      the same repetition checks the finals get. The two are separate
+      guarantees — Parakeet also loops on *real* words — and are tested as
+      such.
+
 
 ### 4. Output quality, which lag work does not touch
 Ground truth now exists: `tools/dump_transcripts.py` over **five** slices of
