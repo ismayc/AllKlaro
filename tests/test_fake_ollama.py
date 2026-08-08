@@ -101,3 +101,66 @@ def test_stats_report_what_the_pipeline_asked_for():
     assert stats["requests"] == 4
     assert stats["by_model"]["qwen2.5:7b-instruct"] == 3
     assert stats["by_model"]["gemma3:12b"] == 1
+
+
+# ------------------------------------------------- latency distribution
+
+def draws(n, seed=0, p50=8000, p90=14000):
+    lat = fake_ollama.Latency(seed)
+    return [lat.lognormal(p50, p90) * 1000 for _ in range(n)]
+
+
+def test_the_quantiles_are_the_ones_asked_for():
+    """The stub is pointed straight at a measurement, so it has to honour the
+    quantiles a trace reports rather than a mean nobody measured."""
+    xs = sorted(draws(4000))
+    p50, p90 = xs[len(xs) // 2], xs[int(len(xs) * 0.9)]
+    assert 7500 < p50 < 8500, f"p50 {p50:.0f} is not near 8000"
+    assert 13000 < p90 < 15200, f"p90 {p90:.0f} is not near 14000"
+
+
+def test_the_same_seed_gives_the_identical_sequence():
+    """This is what makes an A/B possible at all. Repeatability never came
+    from the latency being constant — it comes from the draws being
+    reproducible, which survives making them variable."""
+    assert draws(50, seed=7) == draws(50, seed=7)
+    assert draws(50, seed=7) != draws(50, seed=8)
+
+
+def test_a_timeout_ceiling_can_actually_bite():
+    """The whole point. A fixed-cost server cannot time out, so it was blind
+    to the one knob the refine argument turns."""
+    over = [d for d in draws(2000) if d > 20_000]
+    assert over, "nothing ever exceeded a 20 s ceiling — still un-timeout-able"
+    assert len(over) < 400, "more than a fifth over 20 s is not this recording"
+
+
+def test_a_degenerate_spread_falls_back_to_the_median():
+    """p90 <= p50 is a misconfiguration, not a request for a weird
+    distribution: serve the median rather than something unusable."""
+    lat = fake_ollama.Latency(0)
+    assert lat.lognormal(5000, 5000) == pytest.approx(5.0)
+    assert lat.lognormal(5000, 1000) == pytest.approx(5.0)
+
+
+def test_fixed_remains_the_default_and_is_unchanged():
+    """Every number recorded before this change was measured at fixed cost;
+    the default must not silently move under them."""
+    c = make(dist="fixed", seed=0, main_p90=99999, draft_p90=99999)
+    t0 = time.monotonic()
+    c.post("/api/chat", json={"model": "gemma3:12b", "stream": False,
+                              "messages": []})
+    assert 0.10 < time.monotonic() - t0 < 0.30       # main_ms=120, as before
+
+
+def test_the_prewarm_ping_does_not_consume_a_draw():
+    """It fires once per session and is not a translation. Letting it take a
+    draw would shift every latency after it, so two arms would differ for a
+    reason that is not the pipeline."""
+    c = make(dist="lognormal", seed=3, main_p90=400, draft_p90=200)
+    body = {"model": "gemma3:12b", "stream": False, "messages": []}
+    first = c.post("/api/chat", json=body) and c.app.state.calls[-1]["delay"]
+    c2 = make(dist="lognormal", seed=3, main_p90=400, draft_p90=200)
+    c2.post("/api/chat", json={**body, "options": {"num_predict": 1}})
+    c2.post("/api/chat", json=body)
+    assert c2.app.state.calls[-1]["delay"] == pytest.approx(first)
