@@ -440,13 +440,45 @@ separate load risk.
       unambiguous dialect markers from the 97-key lexicon. Only the ambiguous
       `mehr` ×10 and `des` ×4 appear. The spelling-based hint could never have
       fired, and asserting the selected dialect was the right repair.
-- [ ] **The remaining gap cannot be closed from transcripts, which is why it
-      is still open.** Cataloguing Berlinerisch mis-hearings needs to know
-      what Whisper writes when a Berliner speaks — but Whisper writes standard
-      orthography, so the transcript route yields nothing by construction. It
-      needs someone listening to the audio next to the text, not another dump.
-      Every ambiguous entry remains Hessian / Rhine-Hessian, so the
-      Berlinerisch setting still offers only the general comprehension note.
+- [x] **The gap is open a crack: the first entries keyed on a mis-hearing,
+      and they fire.** The transcript route did yield something after all —
+      not by looking for dialect spellings, which are absent by construction,
+      but by finding an utterance whose *translation* was nonsense. Over the
+      full 54 minutes, transcribed with the app's own Whisper (8299 word
+      tokens) and cross-checked against an independent decoder of the same
+      audio:
+
+          both systems wrote : "Ich kicke ja immer nicht.
+                                Meistens *guckt* der Arvid nach."
+          actually said      : ick kieke ja immer nich   (kieken = gucken)
+          both translated    : kicking a ball
+
+      Two independent decoders making the identical mistake is the audio, not
+      one model's quirk — and the speaker gives the meaning away in the next
+      breath by using the standard word. So `kicke`, `kickt` and `gekickt`
+      are now in `dialects.txt`, keyed on what Whisper *writes*.
+      Necessarily **ambiguous and `[berlin]`-tagged**: kicken is an ordinary
+      German verb, so the reading is only offered to someone who has said
+      they are listening to a Berliner, and hedged even then. Verified
+      against gemma3:12b, which is the only test that counts here:
+
+          without the hint : "I never actually do it, though."
+          Berlinerisch     : "I never really look, mostly Arvid checks."
+- [x] **Phonetic search for more of them does not work, in either
+      direction** — `tools/dialect_mishearings.py`, kept as the record.
+      Filtering to words absent from the 368k-entry Wiktionary lexicon gives
+      five candidates and all five are *English*: the conversation is
+      bilingual, so `what`~`wat`, `next`~`net`, `hot`~`hoscht`. Dropping the
+      filter is worse — `die`~`dit`, `ist`~`nischt`, `auch`~`aach`, dozens of
+      times each. The mis-hearings that matter land on **real German words**,
+      which is precisely why nothing downstream catches them, and precisely
+      why a dictionary filter cannot find them.
+- [ ] **The rest still needs an ear.** One entry from one utterance is not a
+      catalogue. The method that worked — read the utterances whose
+      translation is implausible, confirm against a second decoder — is
+      repeatable but manual, and the recording contains little detectable
+      dialect to begin with (zero unambiguous markers in 2277 tokens). Every
+      *other* ambiguous entry remains Hessian / Rhine-Hessian.
 
 ## Closed
 

@@ -184,3 +184,41 @@ def test_marker_path_still_glosses_ambiguous_words_of_any_dialect():
     so the tags must not start filtering the typed-input path."""
     note = server.dialect_notes("Nochemol, des war nett.", "de")
     assert note and '"des" = das' in note and '"nett" = net (nicht)' in note
+
+
+def test_the_lexicon_keys_on_what_whisper_actually_writes():
+    """The first entries that can fire on the audio path.
+
+    Every other unambiguous entry keys on dialect spelling — `kiek`, `ick`,
+    `wat` — which Whisper never produces, so they were dormant on speech by
+    construction. These key on the mis-hearing instead. Evidence from the real
+    Berlin recording: two independent decoders both wrote "gekickt" and
+    "kicke", and the next sentence gives the meaning away by using the
+    standard word ("Meistens *guckt* der Arvid nach").
+    """
+    lex = server.load_dialects()["de"]
+    for heard in ("kicke", "kickt", "gekickt"):
+        gloss, ambiguous, flavors = lex[heard]
+        assert ambiguous, f"{heard} is ordinary German too — must stay hedged"
+        assert flavors == frozenset({"berlin"})
+        assert "kiek" in gloss or "jekiek" in gloss
+
+
+def test_a_mis_hearing_is_only_offered_to_a_berlin_listener():
+    """kicken is an ordinary German verb. Offering the Berlin reading
+    unprompted would break football; offering it to someone who told us they
+    are listening to a Berliner is the whole point."""
+    heard = "Ich kicke ja immer nicht."
+    assert server.dialect_notes(heard, "de") is None
+    assert server.dialect_notes(heard, "de", asserted="hessian") is None
+    note = server.dialect_notes(heard, "de", asserted="berlin")
+    assert note and "kieke" in note
+    # ...and hedged, never asserted: it really might be football.
+    assert "whichever fits" in note
+
+
+def test_the_mis_hearings_are_never_coloured():
+    """They are ordinary German on the page, so marking them red would put a
+    dialect claim on a sentence about football."""
+    assert server.dialect_markers("Ich kicke ja immer nicht", "de",
+                                  "berlin") == []

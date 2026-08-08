@@ -517,3 +517,26 @@ def test_real_voice_change_separates_two_speakers(tmp_path):
     assert same < server.VOICE_CHANGE_DIST < diff, (
         f"same-speaker {same:.3f}, different {diff:.3f}, "
         f"threshold {server.VOICE_CHANGE_DIST}")
+
+
+async def test_real_model_reads_the_berlin_mis_hearing_as_looking():
+    """The end the whole dialect feature exists for, against the real model.
+
+    On the real recording both Whisper and an independent decoder wrote "ich
+    kicke ja immer nicht" for Berlinerisch "ick kieke ja immer nich" — "I
+    never look" — and both translations came out as kicking a ball. With
+    Berlinerisch selected the lexicon now offers the intended reading.
+    """
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    heard = "Ich kicke ja immer nicht. Meistens guckt der Arvid nach."
+    plain = await server.translate_once(heard, "de", "en", server.DEFAULT_MODEL,
+                                        [], heard_flavor=None)
+    berlin = await server.translate_once(heard, "de", "en",
+                                         server.DEFAULT_MODEL, [],
+                                         heard_flavor="berlin")
+    assert plain and berlin
+    low = berlin.lower()
+    assert any(w in low for w in ("look", "check", "watch")), (
+        f"Berlin reading did not recover the meaning: {berlin!r} "
+        f"(without the hint: {plain!r})")

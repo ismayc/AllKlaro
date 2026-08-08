@@ -94,7 +94,23 @@ isses = ist es
 kannste = kannst du
 
 # --- Ambiguous: standard words that are often mis-heard dialect
-# All of these are Hessian / Rhine-Hessian forms (Berlinerisch has det/dit,
+#
+# The Berlin group below is the first entry keyed on what speech recognition
+# actually WRITES rather than on how the dialect is spelled, which is the only
+# way any of this fires on audio. Evidence: on the real Berlin recording two
+# independent decoders both produced "gekickt" and "kicke" for what the
+# speaker said, and the next sentence gives the meaning away by using the
+# standard word — "Ich kicke ja immer nicht. Meistens *guckt* der Arvid nach."
+# Berlinerisch kieken = gucken, so "ich kieke ja immer nich" is "I never
+# look", and both systems translated it as kicking a ball.
+#
+# Necessarily ambiguous: kicken is an ordinary German verb, so these may only
+# be offered when the speaker's dialect is asserted, and hedged even then.
+? kicke = kieke (gucke — Berlin "kieken" = schauen, nicht Fußball) [berlin]
+? kickt = kiekt (guckt) [berlin]
+? gekickt = jekiekt (geguckt) [berlin]
+#
+# The rest are Hessian / Rhine-Hessian forms (Berlinerisch has det/dit,
 # nich and ma, not des, net and mol).
 ? des = das [hessian worms]
 ? nett = net (nicht) [hessian worms]
