@@ -216,6 +216,13 @@ main {
   background: var(--bg); color: var(--text); font: inherit; line-height: 1.45;
   border: 1px solid var(--muted); border-radius: 7px; padding: 6px 8px;
 }
+/* Says the voice changed; deliberately does not say whose. */
+.voice-break { display: flex; align-items: center; gap: 10px;
+  margin: 14px 2px 10px; color: var(--muted); }
+.voice-break::before, .voice-break::after { content: ""; flex: 1;
+  border-top: 1px dashed var(--border); }
+.voice-break span { font-size: 10.5px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase; }
 .edited { font-size: 10.5px; font-weight: 700; letter-spacing: .05em;
   color: var(--muted); border: 1px solid var(--border); border-radius: 20px;
   padding: 1px 7px; margin-left: 8px; vertical-align: 2px; }

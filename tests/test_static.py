@@ -53,6 +53,20 @@ def test_the_improve_tap_sends_what_the_server_reads():
         assert field in call.group(), f"improve message drops `{field}`"
 
 
+def test_the_voice_break_is_drawn_from_the_servers_field():
+    server_py = (Path(__file__).parent.parent / "server.py").read_text()
+    # \b, not a substring test: `msg.voice_changed` contains `msg.voice_change`
+    # and would sail past a plain `in` check while reading a field the server
+    # never sends.
+    assert re.search(r"\bmsg\.voice_change\b", JS), \
+        "app.js ignores the voice-change flag"
+    assert re.search(r'"voice_change":', server_py), \
+        "the server no longer sends voice_change"
+    assert '"voice-break"' in JS
+    # A break, not an identity: the mark must not claim to name anyone.
+    assert "new voice" in JS
+
+
 def test_html_references_existing_static_assets():
     for ref in re.findall(r'/static/([\w.-]+)', HTML):
         assert (STATIC / ref).exists(), f"index.html references missing {ref}"

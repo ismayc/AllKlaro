@@ -25,6 +25,7 @@ from pathlib import Path
 import httpx
 import numpy as np
 
+import voiceprint
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -170,6 +171,21 @@ IMPROVE_MAX_IN_FLIGHT = 2          # taps served at once; the rest are told to w
 # Generous rather than absent: nobody is racing this, but a wedged Ollama must
 # not leave the button spinning for the rest of the conversation.
 IMPROVE_TIMEOUT_SEC = float(os.environ.get("ALLKLARO_IMPROVE_TIMEOUT_SEC", "90"))
+# A visible break when the voice changes, and deliberately nothing more — no
+# names, no identities, no diarization. `SPEAKERS` below is a channel tag, so
+# with one microphone carrying a room every card reads "you"; this at least
+# says where one person stopped and another started.
+#
+# The threshold is NOT the highest-scoring one. Swept over 6 synthetic voices
+# x 6 lines (`tools/voice_eval.py`), F1 peaks around 0.15 — and that is the
+# wrong choice for the same reason the language detector did not ship its best
+# score: the two errors are not symmetric. A false mark asserts a speaker
+# change that did not happen; a missed one merely omits a divider. 0.35 sits
+# above the synthetic same-speaker p90 (0.161) and just above the
+# different-speaker p10 (0.295), which is the gap those two distributions
+# leave — with headroom for what synthetic voices do not have, namely varying
+# distance from the mic and one person's own loudness drifting.
+VOICE_CHANGE_DIST = float(os.environ.get("ALLKLARO_VOICE_CHANGE_DIST", "0.35"))
 HISTORY_TURNS = 6                  # recent exchanges fed to the translator
 MERGE_GAP_SEC = 2.0                # resumed-within window for fragment merging
 MERGE_MAX_CHARS = 300              # never grow merged utterances beyond this
@@ -2522,6 +2538,7 @@ async def ws_endpoint(ws: WebSocket):
     last_gist = loop.time()
     corrected_uids: set[int] = set()  # user edits that refinement must not undo
     improving: set[int] = set()       # cards being re-translated on demand
+    last_voice: dict[int, dict] = {}  # per channel: the last describable voice
     pause_frames = END_SILENCE_FRAMES
     uid = 0
     last_partial = 0.0
@@ -2668,10 +2685,17 @@ async def ws_endpoint(ws: WebSocket):
                          # A rescued forced decode counts too: the direction
                          # came from the audio, not from the mode, so the user
                          # needs the same escape hatch.
-                         "auto": bool(pair) or "redo_direction" in meta}
+                         "auto": bool(pair) or "redo_direction" in meta,
+                         # A break, not a name — see VOICE_CHANGE_DIST.
+                         "voice_change": bool(meta.get("voice_change"))}
             if replaces is not None:
                 final_msg["replaces"] = replaces
                 meta["merged"] = True
+                # A merged fragment is the *same* person carrying on through a
+                # micro-pause — that is the entire reason it merged. Drawing a
+                # "new voice" break above the joined card would contradict the
+                # merge that just happened.
+                final_msg["voice_change"] = False
             await safe_send(ws, final_msg)
             meta["outcome"] = "final"
             meta["chars"] = len(text)
@@ -3184,6 +3208,22 @@ async def ws_endpoint(ws: WebSocket):
                     partials_skipped = 0
                     specs_shed = refines_shed = 0
                     refines_gated = refines_timeout = 0
+                    # Compared here rather than in `handle_utterance`, because
+                    # this is the only place utterances are still in order.
+                    # Handlers run concurrently and finish out of order, so a
+                    # comparison made there would sometimes be against the
+                    # wrong neighbour. It costs about a millisecond of numpy on
+                    # audio already in memory — no model, no GPU.
+                    sig = voiceprint.voice_signature(utterance)
+                    dist = voiceprint.voice_distance(last_voice.get(tag), sig)
+                    meta["voice_dist"] = None if dist is None else round(dist, 3)
+                    meta["voice_change"] = bool(dist is not None
+                                                and dist > VOICE_CHANGE_DIST)
+                    if sig is not None:
+                        # Only a describable utterance becomes the new
+                        # reference: letting a 300 ms "mhm" overwrite it would
+                        # make the next real utterance look like a new voice.
+                        last_voice[tag] = sig
                     await safe_send(ws, {"type": "segment_start", "id": uid,
                                          "speaker": SPEAKERS[tag]})
                     asyncio.create_task(

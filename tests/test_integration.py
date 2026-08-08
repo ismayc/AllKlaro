@@ -494,3 +494,26 @@ def test_real_improve_tap_returns_the_main_models_translation(tmp_path):
     assert reply["type"] == "improved", reply
     assert "error" not in reply, reply
     assert "evaporat" in reply["text"].lower(), reply["text"]
+
+
+def test_real_voice_change_separates_two_speakers(tmp_path):
+    """Two macOS voices, which is the only ground truth available without
+    someone labelling the real recording by hand.
+
+    Synthetic voices are more separable than two people sharing one
+    microphone, so this is an upper bound — it can show the detector works at
+    all, never that the shipped threshold is right for a room.
+    """
+    import voiceprint as vp
+
+    a1 = np.frombuffer(tts_wav(tmp_path, GERMAN_TEXT, "Anna"), dtype=np.int16)
+    a2 = np.frombuffer(tts_wav(tmp_path, SPANISH_TEXT, "Anna"), dtype=np.int16)
+    other = np.frombuffer(
+        tts_wav(tmp_path, GERMAN_TEXT, "Reed (German (Germany))"),
+        dtype=np.int16)
+
+    same = vp.voice_distance(vp.voice_signature(a1), vp.voice_signature(a2))
+    diff = vp.voice_distance(vp.voice_signature(a1), vp.voice_signature(other))
+    assert same < server.VOICE_CHANGE_DIST < diff, (
+        f"same-speaker {same:.3f}, different {diff:.3f}, "
+        f"threshold {server.VOICE_CHANGE_DIST}")

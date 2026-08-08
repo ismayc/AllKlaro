@@ -423,6 +423,16 @@ function newCard(msg) {
     cards.get(msg.replaces)?.card.remove();
     cards.delete(msg.replaces);
   }
+  // A break, not a name. One mic cannot tell you *who* is talking, and the
+  // channel tag ("you"/"them") only knows which input stream the audio came
+  // in on — with everyone on one mic that is "you" for the whole room. This
+  // says the voice changed and claims nothing further.
+  if (msg.voice_change) {
+    const sep = document.createElement("div");
+    sep.className = "voice-break";
+    sep.innerHTML = "<span>new voice</span>";
+    feed.appendChild(sep);
+  }
   const card = document.createElement("div");
   card.className = "card " + msg.source;
   const orig = document.createElement("div");
