@@ -16,6 +16,43 @@ def test_every_js_element_lookup_exists_in_html():
     assert not missing, f"app.js references ids missing from index.html: {missing}"
 
 
+def test_every_message_the_client_sends_is_handled_by_the_server():
+    """The websocket contract, checked in the direction a browser would.
+
+    A typo on either side is silent: the server ignores the message and the
+    button simply does nothing, which looks like a broken feature rather than
+    a broken name. Nothing else in the suite would catch it, because the
+    server tests construct their own payloads.
+    """
+    server_py = (Path(__file__).parent.parent / "server.py").read_text()
+    sent = set(re.findall(r'type: "([a-z_]+)"', JS))
+    handled = set(re.findall(r'cfg\.get\("type"\) == "([a-z_]+)"', server_py))
+    assert sent, "no outbound message types found — did app.js move?"
+    assert sent <= handled, \
+        f"app.js sends message types the server ignores: {sent - handled}"
+
+
+def test_every_message_the_client_handles_is_one_the_server_sends():
+    server_py = (Path(__file__).parent.parent / "server.py").read_text()
+    handled = set(re.findall(r'msg\.type === "([a-z_]+)"', JS))
+    sent = set(re.findall(r'"type": "([a-z_]+)"', server_py))
+    assert handled, "no inbound message types found — did app.js move?"
+    assert handled <= sent, \
+        f"app.js handles messages the server never sends: {handled - sent}"
+
+
+def test_the_improve_tap_sends_what_the_server_reads():
+    """The card is re-translated from text the *client* sends back, the same
+    way the language-chip flip works, so a card older than the server's
+    context window still improves. That only holds if the field names line
+    up."""
+    call = re.search(r'ws\.send\(JSON\.stringify\(\{ type: "improve"[^)]*\)',
+                     JS, re.S)
+    assert call, "app.js no longer sends an improve message"
+    for field in ("id", "target", "text", "source"):
+        assert field in call.group(), f"improve message drops `{field}`"
+
+
 def test_html_references_existing_static_assets():
     for ref in re.findall(r'/static/([\w.-]+)', HTML):
         assert (STATIC / ref).exists(), f"index.html references missing {ref}"
@@ -126,12 +163,36 @@ def test_words_are_lookupable_on_long_press():
 def test_row_buttons_are_finger_visible_on_touch_screens():
     # Touch has no hover-reveal: 12px at 45% opacity made the silver
     # clipboard emoji effectively invisible on iPhone screens.
+    #
+    # Written against the button classes rather than one exact selector list,
+    # so a new row button has to meet the same bar instead of quietly
+    # slipping past by not being named here.
     css = (STATIC / "style.css").read_text()
-    base = re.search(r"\.edit-btn, \.copy-btn \{[^}]*\}", css, re.S).group()
-    assert re.search(r"font-size:\s*1[6-9]px", base)
-    assert not re.search(r"opacity:\s*\.[0-4]", base)
     mobile = css[css.index("@media (max-width: 640px)"):]
-    assert re.search(r"\.edit-btn, \.copy-btn \{[^}]*font-size:\s*1[89]px", mobile)
+    js = (STATIC / "app.js").read_text()
+    classes = set(re.findall(r'className = "(copy-btn|edit-btn|improve-btn)"', js))
+    assert classes == {"copy-btn", "edit-btn", "improve-btn"}, \
+        f"row buttons in app.js not covered by this test: {classes}"
+    for cls in sorted(classes):
+        rules = [m.group() for m in re.finditer(r"\.[^{}]*\{[^}]*\}", css, re.S)
+                 if f".{cls}" in m.group().split("{")[0]]
+        sized = [r for r in rules if "font-size" in r]
+        assert sized, f"{cls} sets no font-size at all"
+        assert re.search(r"font-size:\s*1[6-9]px", sized[0]), f"{cls} too small"
+        # Every rule, not just the first: CSS cascades, so a later
+        # `.improve-btn { font-size: 11px }` would quietly undo the one above
+        # and a check that stops at the first match would never see it.
+        for rule in rules:
+            base = rule if "@media" not in rule else ""
+            for size in re.findall(r"font-size:\s*(\d+)px", base):
+                assert int(size) >= 16, f"{cls} shrunk to {size}px by: {rule}"
+            for opacity in re.findall(r"opacity:\s*\.(\d)", base):
+                # ...except the disabled state, which is meant to look
+                # unavailable rather than merely faint.
+                if ":disabled" not in rule.split("{")[0]:
+                    assert int(opacity) >= 5, f"{cls} too faint: {rule}"
+        assert re.search(rf"\.{cls}[^{{}}]*\{{[^}}]*font-size:\s*1[89]px",
+                         mobile), f"{cls} not enlarged on phones"
 
 
 def test_asset_urls_are_cache_busted_and_build_is_visible():

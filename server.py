@@ -160,6 +160,16 @@ GIST_SEED_MAX_CHARS = 2000
 # is worse than one utterance's wait, and at one fold a minute this costs a
 # fraction of what the per-utterance refine pass does.
 GIST_MAX_STALE_SEC = float(os.environ.get("ALLKLARO_GIST_MAX_STALE_SEC", "180"))
+# The on-demand "improve this card" tap. This is the refine pass with its two
+# handicaps removed: no backlog to yield to, and no deadline to beat. Both of
+# those exist because the refine competes with the card nobody has read yet —
+# and neither applies when the user has asked for this one and is watching it.
+# The offline comparison measured the main model's advantage under exactly
+# these conditions, which is why the tap is where that advantage is reachable.
+IMPROVE_MAX_IN_FLIGHT = 2          # taps served at once; the rest are told to wait
+# Generous rather than absent: nobody is racing this, but a wedged Ollama must
+# not leave the button spinning for the rest of the conversation.
+IMPROVE_TIMEOUT_SEC = float(os.environ.get("ALLKLARO_IMPROVE_TIMEOUT_SEC", "90"))
 HISTORY_TURNS = 6                  # recent exchanges fed to the translator
 MERGE_GAP_SEC = 2.0                # resumed-within window for fragment merging
 MERGE_MAX_CHARS = 300              # never grow merged utterances beyond this
@@ -2511,6 +2521,7 @@ async def ws_endpoint(ws: WebSocket):
     # already be satisfied, and the first gist would summarize one utterance.
     last_gist = loop.time()
     corrected_uids: set[int] = set()  # user edits that refinement must not undo
+    improving: set[int] = set()       # cards being re-translated on demand
     pause_frames = END_SILENCE_FRAMES
     uid = 0
     last_partial = 0.0
@@ -2822,6 +2833,70 @@ async def ws_endpoint(ws: WebSocket):
             meta["refine_changed"] = refine_changed
             meta["agreement_changed"] = agreement_changed
 
+    async def improve_card(card_uid, text: str, source: str, target: str):
+        """Re-translate one card with the main model because the user asked.
+
+        Deliberately not gated on the backlog. Every other Ollama job here
+        yields to the pipeline, and that is right for work nobody requested —
+        but a tap is a person waiting on purpose, and making them lose to a
+        queue they cannot see is how the refine pass ended up invisible.
+
+        The heard text arrives from the client, exactly as the language-chip
+        flip does, so a card older than the context window still works.
+        """
+        if (not isinstance(card_uid, int) or target not in LANG_NAMES
+                or source not in LANG_NAMES or source == target):
+            return
+        if card_uid in improving:
+            return                       # already running; a second tap is a no-op
+        if len(improving) >= IMPROVE_MAX_IN_FLIGHT:
+            await safe_send(ws, {"type": "improved", "id": card_uid,
+                                 "target": target, "error": "busy"})
+            return
+        improving.add(card_uid)
+        try:
+            # Context as it stood *before* this card. Anything later describes
+            # a part of the conversation that had not happened yet, and for a
+            # card older than the deque there is simply no context left —
+            # which is honest, and better than borrowing someone else's.
+            context = [h for h in history if h.get("uid", 0) < card_uid]
+            try:
+                improved = await asyncio.wait_for(
+                    translate_once(text, source, target, model, context,
+                                   flavor=flavor_for(target), address=address,
+                                   heard_flavor=flavor_for(source)),
+                    timeout=IMPROVE_TIMEOUT_SEC)
+            except (asyncio.TimeoutError, TimeoutError):
+                improved = None
+            except Exception:
+                log.exception("improve failed")
+                improved = None
+            if not improved:
+                await safe_send(ws, {"type": "improved", "id": card_uid,
+                                     "target": target, "error": "failed"})
+                return
+            if target == "de" and de_flavor:
+                # Same exemption as the refine pass: the declension guard
+                # assumes standard German and would "correct" dialect back to
+                # Hochdeutsch.
+                final = improved
+            else:
+                final, _ = await enforce_agreement(text, source, target, model,
+                                                   context, improved, address)
+            # An improved card that is still in context should steer what
+            # follows — unless the user has already corrected it by hand,
+            # which outranks anything a model produces.
+            if card_uid not in corrected_uids:
+                for h in history:
+                    if h.get("uid") == card_uid and h.get("target") == target:
+                        h["translation"] = final
+            await safe_send(ws, {"type": "improved", "id": card_uid,
+                                 "target": target, "text": final})
+        finally:
+            # Held for the whole job, guard included: releasing the slot early
+            # would let a second tap start while this one is still on Ollama.
+            improving.discard(card_uid)
+
     async def refresh_gist():
         """Fold the utterances since the last refresh into the running gist.
 
@@ -3031,6 +3106,18 @@ async def ws_endpoint(ws: WebSocket):
                             handle_text(original.strip()[:2000], uid,
                                         pinned=cfg.get("source"),
                                         replaces=cfg.get("id")))
+                elif isinstance(cfg, dict) and cfg.get("type") == "improve":
+                    # The user tapped ✨ on a card: give it the main model with
+                    # no deadline and no backlog gate. The refine pass already
+                    # tried this under both, which is why it so often did not
+                    # land at all.
+                    original = cfg.get("text")
+                    if isinstance(original, str) and original.strip():
+                        asyncio.create_task(
+                            improve_card(cfg.get("id"),
+                                         original.strip()[:2000],
+                                         cfg.get("source") or "de",
+                                         cfg.get("target") or ""))
                 elif isinstance(cfg, dict) and cfg.get("type") == "correction":
                     # An edited translation also fixes the live context, so
                     # follow-up utterances build on the corrected phrasing.

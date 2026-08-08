@@ -1,5 +1,6 @@
 import json
 
+import anyio
 import httpx
 import numpy as np
 import pytest
@@ -268,3 +269,41 @@ def collect_until(ws, stop_types=("translation_done", "discard", "error"), limit
         if msg["type"] in stop_types:
             break
     return msgs
+
+
+def receive_bounded(ws, seconds=5.0):
+    """One message, or TimeoutError — never an indefinite block.
+
+    Some guarantees here are of the form "the server always answers": a tap
+    that fails still gets a reply, so the button stops spinning. The obvious
+    way to test that is to wait for the reply, and the obvious way is wrong —
+    when the guarantee regresses there is no reply, and a plain `receive_json`
+    hangs the whole suite instead of failing the one test. A mutation run is
+    where that first bites, because breaking the guarantee on purpose is the
+    entire point.
+    """
+    async def _recv():
+        with anyio.fail_after(seconds):
+            return await ws._send_rx.receive()
+
+    return ws.portal.call(_recv)
+
+
+def collect_until_bounded(ws, stop_types, limit=60, seconds=5.0):
+    """Messages up to and including the first of `stop_types`, on a deadline.
+
+    The bounded twin of `collect_until`. Worth preferring wherever the thing
+    under test is whether a message arrives at all: the unbounded version
+    turns "it stopped sending" into a hung suite instead of a failed test.
+    """
+    if isinstance(stop_types, str):
+        stop_types = (stop_types,)
+    msgs = []
+    for _ in range(limit):
+        raw = receive_bounded(ws, seconds)
+        msgs.append(json.loads(raw["text"]) if "text" in raw else raw)
+        if msgs[-1].get("type") in stop_types:
+            return msgs
+    raise AssertionError(
+        f"no {stop_types} in {limit} messages: "
+        f"{[m.get('type') for m in msgs]}")

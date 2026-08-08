@@ -512,9 +512,49 @@ function renderFinalRow(c, target) {
   btn.textContent = "✏️";
   btn.onclick = (e) => { e.stopPropagation(); startEdit(c, target); };
   row.el.append(btn);
+  // The refine pass is this same idea under a deadline, and the deadline is
+  // what makes it lose: behind a backlog it is skipped, and when it runs it
+  // competes with the card nobody has read yet. Asking on purpose removes
+  // both — which is the condition under which the big model's advantage was
+  // actually measured.
+  const imp = document.createElement("button");
+  imp.className = "improve-btn";
+  imp.textContent = "✨";
+  // The row is re-rendered on every state change, so the button is rebuilt
+  // from scratch each time — its disabled state has to come from the row,
+  // never from whatever the previous element happened to be set to.
+  imp.disabled = !!(row.improving || row.improved);
+  imp.title = row.improved
+    ? "Already re-translated with the main model"
+    : "Re-translate this card with the main model";
+  imp.onclick = (e) => { e.stopPropagation(); improveCard(c, target); };
+  row.el.append(imp);
+  if (row.improving) {
+    row.el.insertAdjacentHTML("beforeend",
+      '<span class="improving">improving…</span>');
+  }
+  if (row.improved) {
+    row.el.insertAdjacentHTML("beforeend",
+      '<span class="edited improved-tag">improved</span>');
+  }
   if (row.edited) {
     row.el.insertAdjacentHTML("beforeend", '<span class="edited">edited</span>');
   }
+}
+
+// Ask for the main model's answer to a card that is already on screen. The
+// heard text goes back with the request, exactly as the language-chip flip
+// does, so this still works on cards older than the server's context window.
+function improveCard(c, target) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return showError("Not connected — cannot improve that translation.");
+  }
+  const row = c.rows[target];
+  if (row.improving || row.improved) return;
+  row.improving = true;
+  renderFinalRow(c, target);
+  ws.send(JSON.stringify({ type: "improve", id: c.id, target,
+                           text: c.text, source: c.source }));
 }
 
 function startEdit(c, target) {
@@ -762,6 +802,28 @@ function handleMessage(msg) {
       renderFinalRow(c, t);
       row.el.classList.add("revised"); // brief flash marks the swap
     }
+  } else if (msg.type === "improved") {
+    const c = cards.get(msg.id);
+    if (!c) return;
+    const row = c.rows[msg.target];
+    if (!row) return;
+    row.improving = false;
+    if (msg.error) {
+      renderFinalRow(c, msg.target);
+      return showError(msg.error === "busy"
+        ? "Still improving another card — try again in a moment."
+        : "Could not improve that translation.");
+    }
+    // A user edit outranks a machine rewrite, here as in the refine pass.
+    if (!row.edited && msg.text) {
+      // Say so even when nothing changed: "the big model agrees" is a real
+      // answer to "is this right?", and silently doing nothing reads as a
+      // failed tap.
+      row.improved = true;
+      row.text = msg.text;
+    }
+    renderFinalRow(c, msg.target);
+    row.el.classList.add("revised");
   } else if (msg.type === "gist") {
     showGist(msg.text);
   } else if (msg.type === "stats") {

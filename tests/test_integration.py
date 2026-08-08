@@ -469,3 +469,28 @@ async def test_real_ollama_barcelona_flavor_produces_peninsular_spanish():
     low = text.lower()
     assert "podéis" in low or "enviadme" in low or "móvil" in low or "vale" in low
     assert "ustedes" not in low and "celular" not in low
+
+
+def test_real_improve_tap_returns_the_main_models_translation(tmp_path):
+    """The tap against real models, which is the only place its value lives.
+
+    The offline comparison found the main model fixing errors a learner would
+    care about on ~13% of utterances; under live pacing the automatic refine
+    reaches a minority of cards because it is gated and timed out. This asks
+    for one deliberately, with neither handicap, and checks a real answer
+    comes back — not that it is better, which needs a human reading.
+    """
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    with TestClient(server.app) as client:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_text(json.dumps({"type": "config", "mode": "de-en",
+                                     "model": server.DEFAULT_MODEL}))
+            ws.send_text(json.dumps({
+                "type": "improve", "id": 1, "source": "de", "target": "en",
+                "text": "Das verdunstet aber eigentlich auch eine Menge."}))
+            msgs = collect_until(ws, stop_types=("improved", "error"))
+    reply = msgs[-1]
+    assert reply["type"] == "improved", reply
+    assert "error" not in reply, reply
+    assert "evaporat" in reply["text"].lower(), reply["text"]
