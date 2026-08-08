@@ -288,12 +288,55 @@ separate load risk.
       0.45 — where the distributions stop overlapping. At 0.6 precision
       reaches 1.000 but recall falls to 0.69, because too many utterances
       lose their fundamental and fall back to timbre alone.
-- [ ] **Unmeasured on real speech, and this is the gap that matters.** Every
-      accuracy number here comes from synthesized voices. Confirming the
-      threshold on the actual recording needs someone listening to it beside
-      the marks — the same shape of problem as item 5's Berlinerisch
-      mis-hearings, and not solvable with another dump. `voice_dist` is in
-      the trace so a real call can be re-tuned from without re-instrumenting.
+- [x] **Measured on the real recording, and it does not work. Marks are now
+      OFF by default** (`ALLKLARO_VOICE_MARKS=1` to see them anyway).
+      The synthetic numbers above were not merely optimistic, they were
+      qualitatively wrong.
+
+      **The labels were available after all**, without diarization and
+      without anyone listening: the pipeline's own split reasons supply them.
+      A `soft_max` cut means the 5 s cap fired while someone was still
+      talking, so the *next* utterance continues the **same speaker**; a
+      `pause` cut is 700 ms of silence, which is where a turn actually
+      changes. Over the full 54 minutes — 706 utterances, 534 continuations,
+      171 pauses:
+
+      | threshold | marked across a continuation (same speaker) | marked across a pause |
+      |---|---|---|
+      | 0.25 | 45.7% | 47.4% |
+      | **0.35** (shipped) | **33.7%** | **35.1%** |
+      | 0.45 | 24.7% | 29.2% |
+      | 0.60 | 11.6% | 16.4% |
+
+      The two columns are the same column. If the signature carried speaker
+      identity, continuations would sit far below pauses; they do not. At the
+      shipped threshold **one mark in three would land mid-sentence**, and no
+      threshold repairs it — by 0.60 the gap is still inside noise and the
+      feature marks almost nothing.
+- [x] **Two false trails, recorded because both were convincing.** First:
+      comparing the two halves of one utterance looked like a label-free
+      same-speaker probe, and gave 30% above threshold — until the synthetic
+      control ran the same way and gave **33%** for a TTS voice with zero
+      speaker variation. Half an utterance is too short and too phonetically
+      idiosyncratic to describe a voice, so that probe measures *what was
+      said*, not *who said it*. Second: `soft_max` chunks might straddle a
+      speaker change and contaminate the set — checked, and pause-only chunks
+      were *worse*, not better, so contamination was not the explanation.
+- [x] **Why synthetic lied, mechanically.** Timbre survives real audio
+      (same-speaker p90 0.251); **F0 does not.** On real speech 6.8% of
+      same-speaker pairs differ by within 0.15 of a *full octave* — textbook
+      autocorrelation octave errors, which clean synthetic tones never
+      produce. At `PITCH_WEIGHT` 0.6 a single octave error contributes 0.6 to
+      the distance on its own. Octave-folding the comparison helps the
+      symptom and not the disease: folded, same-speaker p90 is 0.361 against
+      an adjacent-pair 0.377 — still no separation.
+- [ ] **What would actually work, and it is a real dependency.** A pretrained
+      speaker encoder (ECAPA/GE2E class) rather than 24 bands and a pitch
+      track. torch 2.13 and sklearn are already installed, so the marginal
+      cost is a small model, not a runtime — but it is a genuine new
+      dependency in an offline app and is Chester's call. The measurement rig
+      above is the part worth keeping: it can score any replacement against
+      real labels in one run, which is what this section lacked all along.
 
 ### 7. A running gist, pinned above the feed
 - [x] **Built.** A short summary sits above the conversation and is *folded*

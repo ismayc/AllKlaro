@@ -46,7 +46,7 @@ by default) that sees the conversation's recent context.
 | 🎯 **Focus mode** | Keep the newest text mid-screen ("Center latest") instead of at the bottom edge |
 | 🔎 **Big-text view** | Tap a card's background and the translation fills the screen — made for showing the person across the table |
 | 🗺️ **Dialect-aware** | Regional markers are detected and the intended forms hinted to the translator — German (Berlinerisch/Hessisch/Wormser: "dit", "ebbes", "nää", plus Whisper mis-hearings like "nett" for "net") *and* Spanish ("chamba", "ahorita", "plegar", "guay"); extend via `dialects.txt`, one `[lang]` section per language. Entries name the dialects they belong to (`ick = ich [berlin]`), so picking a style narrows what gets marked instead of painting a neighbouring dialect's words red; untagged means "every dialect" |
-| 🫱 **Voice-change marks** | A dashed *new voice* line between cards when the speaker changes — a break, never a name. One mic cannot tell you who is talking, so it does not claim to |
+| 🫱 **Voice-change marks** *(off — measured and it does not work)* | A dashed *new voice* line between cards when the speaker changes. Convincing on synthetic voices, useless on the real recording: it marks 33.7% of same-speaker continuations against 35.1% of real turn boundaries, so one mark in three would land mid-sentence. `ALLKLARO_VOICE_MARKS=1` to see it anyway |
 | 🎭 **German & Spanish style** | Optional dialect output: Berlinerisch, Hessisch, or Wormser Platt for German; Mexican or Barcelona Spanish — reply to your friends the way they write |
 | 🤝 **Address form** | Pin how "you" comes out — du/Sie/ihr in German, tú/usted/ustedes in Spanish — or leave it on Auto and let context decide |
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
@@ -218,11 +218,14 @@ conversation gets the full screen):
   asking by hand gives it no backlog to yield to and no deadline, which is
   where the bigger model is worth the wait. The card is marked *improved* when
   it lands, even if the answer comes back the same — that is an answer too.
-- **"New voice" between cards** — a dashed line when the voice changes. It
-  says only that: with one microphone for a whole room, *who* is speaking is
-  not something AllKlaro can know, and it does not guess. Set
-  `ALLKLARO_VOICE_CHANGE_DIST` (default 0.35) to make it more or less eager,
-  or very high to switch it off.
+- **"New voice" between cards** — a dashed line when the voice changes, off
+  by default. It says only that much: with one microphone for a whole room,
+  *who* is speaking is not something AllKlaro can know. It is off because
+  measuring it against the real recording showed it does not work — it marks
+  a third of *same-speaker* continuations, so a third of its lines would fall
+  mid-sentence. `ALLKLARO_VOICE_MARKS=1` enables it,
+  `ALLKLARO_VOICE_CHANGE_DIST` (default 0.35) tunes it. Doing this properly
+  needs a pretrained speaker encoder, not 24 spectral bands and a pitch track.
 - **Type to translate** — the text bar at the very bottom works without the
   mic; auto modes detect the typed language. The 📥 button pastes your
   clipboard and translates it in one tap — made for text copied out of

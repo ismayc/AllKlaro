@@ -181,6 +181,44 @@ def speak_with(ws, audio, silence_chunks=8):
         ws.send_bytes(SILENCE_CHUNK)
 
 
+def test_the_marks_are_off_by_default():
+    """Measured on the real 54-minute recording, this does not work.
+
+    Using the pipeline's own split reasons as labels — a `soft_max` cut means
+    the 5 s cap fired mid-sentence so the next utterance is the SAME speaker,
+    a `pause` cut is where a turn actually changes — the detector marks 33.7%
+    of continuations and 35.1% of pauses. The same number: one mark in three
+    would land in the middle of somebody's sentence.
+
+    Synthetic voices said the opposite (same-speaker p90 0.161 against
+    different-speaker p10 0.295) because TTS is far more self-consistent, and
+    far more mutually distinct, than three people round one microphone.
+
+    So the default is off, and this test is what stops it drifting back on
+    without new evidence.
+    """
+    assert srv.VOICE_MARKS_ON is False
+
+
+def test_the_distance_is_still_measured_while_the_marks_are_off(
+        client, stub_transcribe, trace_file, monkeypatch):
+    """Off means "do not claim it on screen", not "stop looking".
+
+    The distance is what a future attempt — a real speaker-embedding model,
+    say — would be re-tuned against, and it costs about a millisecond.
+    """
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    assert srv.VOICE_MARKS_ON is False
+    with client.websocket_connect("/ws") as ws:
+        speak_with(ws, synth_voice(seed=1, **LOW))
+        collect_until_bounded(ws, ("translation_done", "discard", "error"))
+        speak_with(ws, synth_voice(**HIGH))
+        msgs = collect_until_bounded(ws, ("translation_done", "discard", "error"))
+    assert next(m for m in msgs if m["type"] == "final")["voice_change"] is False
+    recs = [r for r in trace_records(trace_file) if r.get("uid")]
+    assert recs[-1]["voice_dist"] is not None, "stopped measuring as well"
+
+
 def test_the_first_utterance_is_never_a_change(client, stub_transcribe):
     """There is nothing to have changed from, and a break above the very first
     card would be pure noise."""
@@ -204,6 +242,7 @@ def test_a_new_voice_marks_and_the_same_voice_does_not(client,
                                                        stub_transcribe,
                                                        monkeypatch):
     monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    monkeypatch.setattr(srv, "VOICE_MARKS_ON", True)
     with client.websocket_connect("/ws") as ws:
         speak_with(ws, synth_voice(seed=1, **LOW))
         collect_until_bounded(ws, ("translation_done", "discard", "error"))
@@ -255,6 +294,7 @@ def test_an_undescribable_utterance_does_not_blind_the_next_comparison(
     speaker changed, and backchannels are most of a conversation's utterances.
     """
     monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    monkeypatch.setattr(srv, "VOICE_MARKS_ON", True)
     real = vp.voice_signature
     calls = {"n": 0}
 

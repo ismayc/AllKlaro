@@ -176,15 +176,32 @@ IMPROVE_TIMEOUT_SEC = float(os.environ.get("ALLKLARO_IMPROVE_TIMEOUT_SEC", "90")
 # with one microphone carrying a room every card reads "you"; this at least
 # says where one person stopped and another started.
 #
-# The threshold is NOT the highest-scoring one. Swept over 6 synthetic voices
-# x 6 lines (`tools/voice_eval.py`), F1 peaks around 0.15 — and that is the
-# wrong choice for the same reason the language detector did not ship its best
-# score: the two errors are not symmetric. A false mark asserts a speaker
-# change that did not happen; a missed one merely omits a divider. 0.35 sits
-# above the synthetic same-speaker p90 (0.161) and just above the
-# different-speaker p10 (0.295), which is the gap those two distributions
-# leave — with headroom for what synthetic voices do not have, namely varying
-# distance from the mic and one person's own loudness drifting.
+# OFF BY DEFAULT, because measured on the real recording it does not work.
+#
+# On 6 synthetic voices it looked strong: same-speaker p90 0.161 against
+# different-speaker p10 0.295, no overlap, precision ~1.0. On the real
+# 54-minute conversation it carries almost no speaker information at all.
+#
+# The test that settles it uses the pipeline's own split reasons. A `soft_max`
+# cut means the 5 s cap fired while someone was still talking, so the next
+# utterance continues the SAME speaker; a `pause` cut is 700 ms of silence,
+# where a turn actually changes. If the detector worked, continuations would
+# score far lower than pauses. Over the full hour (534 continuations, 171
+# pauses) at this threshold:
+#
+#     marked across a continuation (same speaker)  33.7%
+#     marked across a pause        (turn may change) 35.1%
+#
+# The same number. One in three marks would land mid-sentence. No threshold
+# fixes that — at 0.60 it is 11.6% against 16.4%, still overlapping, and by
+# then it marks almost nothing. Synthetic voices flattered it because TTS is
+# internally far more consistent, and mutually far more distinct, than three
+# people round one microphone at varying distance and vocal effort.
+#
+# Kept rather than deleted: the measurement is the useful part, and the
+# machinery is what a real speaker-embedding model would plug into. Set
+# ALLKLARO_VOICE_MARKS=1 to see it anyway.
+VOICE_MARKS_ON = os.environ.get("ALLKLARO_VOICE_MARKS", "") == "1"
 VOICE_CHANGE_DIST = float(os.environ.get("ALLKLARO_VOICE_CHANGE_DIST", "0.35"))
 HISTORY_TURNS = 6                  # recent exchanges fed to the translator
 MERGE_GAP_SEC = 2.0                # resumed-within window for fragment merging
@@ -3216,8 +3233,12 @@ async def ws_endpoint(ws: WebSocket):
                     # audio already in memory — no model, no GPU.
                     sig = voiceprint.voice_signature(utterance)
                     dist = voiceprint.voice_distance(last_voice.get(tag), sig)
+                    # Still measured with the marks off: the distance is what a
+                    # future attempt gets re-tuned from, and it costs a
+                    # millisecond. Only the on-screen claim is withheld.
                     meta["voice_dist"] = None if dist is None else round(dist, 3)
-                    meta["voice_change"] = bool(dist is not None
+                    meta["voice_change"] = bool(VOICE_MARKS_ON
+                                                and dist is not None
                                                 and dist > VOICE_CHANGE_DIST)
                     if sig is not None:
                         # Only a describable utterance becomes the new
