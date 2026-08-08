@@ -1,84 +1,99 @@
 # German dialect forms and common speech-recognition mis-hearings of them.
-# Format:  dialect = standard German (gloss)
+# Format:  dialect = standard German (gloss) [dialects it belongs to]
 # Lines starting with "?" are AMBIGUOUS: they are real standard-German words
 # too, so they are only hinted when the sentence also contains an
 # unambiguous dialect marker ("nett" only means "net" (nicht) in a sentence
 # that already says "nochemol").
+#
+# The trailing "[...]" names the dialects an entry belongs to, matching the
+# style selector (berlin / hessian / worms; mexico / barcelona). An entry with
+# no tag applies to EVERY dialect, which is the right answer for the enclitic
+# contractions (haste, biste, kannste) that are colloquial across the whole
+# language rather than regional.
+#
+# Tags decide two different things:
+#   - which words get COLOURED in the heard text once a style is selected
+#     (unambiguous entries), so choosing Berlinerisch does not paint a
+#     Rhine-Hessian form red;
+#   - which ambiguous entries may be glossed on their own under an asserted
+#     dialect, where offering the Rhine-Hessian reading of "mehr" (= mer, wir)
+#     to a Berlin speaker would be a new error rather than a fix.
+# Forms genuinely shared between dialects carry several tags — under-tagging
+# silently stops marking real dialect, so shared forms are tagged inclusively.
 
 # --- Berlinerisch
-ick = ich
-icke = ich
-dit = das
-det = das
-wat = was
-ooch = auch
-keene = keine
-keen = kein
-nüscht = nichts
-nischt = nichts
-kiek = guck (look)
-kiekma = guck mal (look)
-kieken = gucken (to look)
-jut = gut
-janz = ganz
-jenau = genau
-morjen = morgen
-uff = auf
-een = ein
-eene = eine
-haste = hast du
-biste = bist du
-isset = ist es
-Schrippe = Brötchen (bread roll)
-Molle = Bier (beer)
+ick = ich [berlin]
+icke = ich [berlin]
+dit = das [berlin]
+det = das [berlin]
+wat = was [berlin]
+ooch = auch [berlin]
+keene = keine [berlin]
+keen = kein [berlin]
+nüscht = nichts [berlin]
+nischt = nichts [berlin]
+kiek = guck (look) [berlin]
+kiekma = guck mal (look) [berlin]
+kieken = gucken (to look) [berlin]
+jut = gut [berlin]
+janz = ganz [berlin]
+jenau = genau [berlin]
+morjen = morgen [berlin]
+uff = auf [berlin hessian worms]
+een = ein [berlin]
+eene = eine [berlin]
+Schrippe = Brötchen (bread roll) [berlin]
+Molle = Bier (beer) [berlin]
 
 # --- Hessisch
-isch = ich
-aach = auch
-ebbes = etwas
-gell = nicht wahr (right?)
-gude = hallo / guten Tag
-nochemol = noch einmal
-net = nicht
-mer = wir
-babbele = reden (to talk)
-babbeln = reden (to talk)
-schwätze = reden (to talk)
-isses = ist es
-kannste = kannst du
-saache = sagen
-verstanne = verstanden
-Äbbelwoi = Apfelwein (apple cider)
-Ebbelwoi = Apfelwein (apple cider)
-Abbelwoi = Apfelwein (apple cider)
-Stöffche = Apfelwein (apple cider)
-Handkäs = Handkäse (sour-milk cheese)
-Bembel = Apfelwein-Krug (cider jug)
+isch = ich [hessian worms]
+aach = auch [hessian worms]
+ebbes = etwas [hessian worms]
+gell = nicht wahr (right?) [hessian worms]
+gude = hallo / guten Tag [hessian]
+nochemol = noch einmal [hessian worms]
+net = nicht [hessian worms]
+mer = wir [hessian worms]
+babbele = reden (to talk) [hessian worms]
+babbeln = reden (to talk) [hessian worms]
+schwätze = reden (to talk) [hessian worms]
+saache = sagen [hessian worms]
+verstanne = verstanden [hessian worms]
+Äbbelwoi = Apfelwein (apple cider) [hessian]
+Ebbelwoi = Apfelwein (apple cider) [hessian]
+Abbelwoi = Apfelwein (apple cider) [hessian]
+Stöffche = Apfelwein (apple cider) [hessian]
+Handkäs = Handkäse (sour-milk cheese) [hessian]
+Bembel = Apfelwein-Krug (cider jug) [hessian]
 
 # --- Rheinhessisch / Wormser Platt (Rhine Franconian; isch/aach/ebbes
 # --- shared with the Hessisch entries above). "nää" is the signature
 # --- Wormser word per Stadt Worms ("Worms mit eigenem Dialekt", 2014).
-nää = nein (no)
-redde = reden (to talk)
-alla = also / los geht's (well then / come on)
-gugge = gucken (to look)
-guggemol = guck mal (look)
-Grumbeere = Kartoffeln (potatoes)
-Grumbeer = Kartoffel (potato)
-Woi = Wein (wine)
-bischt = bist
-bischd = bist
-hoscht = hast
-hoschd = hast
-dabber = schnell (quick)
-Worschd = Wurst (sausage)
-Dorschd = Durst (thirst)
+nää = nein (no) [worms]
+redde = reden (to talk) [worms]
+alla = also / los geht's (well then / come on) [worms]
+gugge = gucken (to look) [hessian worms]
+guggemol = guck mal (look) [hessian worms]
+Grumbeere = Kartoffeln (potatoes) [worms]
+Grumbeer = Kartoffel (potato) [worms]
+Woi = Wein (wine) [worms]
+bischt = bist [worms]
+bischd = bist [worms]
+hoscht = hast [worms]
+hoschd = hast [worms]
+dabber = schnell (quick) [worms]
+Worschd = Wurst (sausage) [worms]
+Dorschd = Durst (thirst) [worms]
+
+# --- Enclitic contractions: colloquial everywhere, not regional. Left
+# --- untagged on purpose so they keep marking whatever style is selected.
+haste = hast du
+biste = bist du
+isset = ist es
+isses = ist es
+kannste = kannst du
 
 # --- Ambiguous: standard words that are often mis-heard dialect
-# The trailing [tags] name the dialects an entry belongs to. They matter only
-# once a dialect is *selected*: an ambiguous word is then hinted on its own,
-# and glossing "mehr" as Rhine-Hessian "mer (wir)" for a Berlin speaker would
-# be an error rather than a help. Untagged entries apply to every dialect.
 # All of these are Hessian / Rhine-Hessian forms (Berlinerisch has det/dit,
 # nich and ma, not des, net and mol).
 ? des = das [hessian worms]
@@ -91,34 +106,34 @@ Dorschd = Durst (thirst)
 # ===================================================================
 [es]
 # --- Mexican Spanish (colloquial forms a translator may take literally)
-órale = vaya / venga (wow, come on)
-orale = vaya / venga (wow, come on)
-chido = genial (cool)
-chida = genial (cool)
-padrísimo = genial (awesome)
-chamba = trabajo (job)
-chambear = trabajar (to work)
-platicar = charlar (to chat)
-ahorita = ahora mismo / en un ratito (right now, or soon-ish)
-güey = amigo / tío (dude)
-wey = amigo / tío (dude)
-popote = pajita (drinking straw)
-? padre = genial (cool — also 'father')
-? mande = ¿cómo? (polite 'what?' — also subjunctive of mandar)
-? onda = qué onda = qué tal (what's up — 'onda' alone is 'wave')
-? manches = no manches = no puede ser (no way — also 'you stain')
+órale = vaya / venga (wow, come on) [mexico]
+orale = vaya / venga (wow, come on) [mexico]
+chido = genial (cool) [mexico]
+chida = genial (cool) [mexico]
+padrísimo = genial (awesome) [mexico]
+chamba = trabajo (job) [mexico]
+chambear = trabajar (to work) [mexico]
+platicar = charlar (to chat) [mexico]
+ahorita = ahora mismo / en un ratito (right now, or soon-ish) [mexico]
+güey = amigo / tío (dude) [mexico]
+wey = amigo / tío (dude) [mexico]
+popote = pajita (drinking straw) [mexico]
+? padre = genial (cool — also 'father') [mexico]
+? mande = ¿cómo? (polite 'what?' — also subjunctive of mandar) [mexico]
+? onda = qué onda = qué tal (what's up — 'onda' alone is 'wave') [mexico]
+? manches = no manches = no puede ser (no way — also 'you stain') [mexico]
 
 # --- Barcelona / Peninsular Spanish (some are Catalan loans)
-guay = genial (cool)
-currar = trabajar (to work)
-curro = trabajo (job)
-flipar = alucinar (to be amazed)
-flipo = alucino (I can't believe it)
-enchegar = encender (to switch on; Catalan loan)
-rachola = baldosa (tile; Catalan loan)
-? plegar = terminar el trabajo (to finish work, Catalan loan — also 'to fold')
-? plego = termino el trabajo (I'm off work)
-? tío = colega (dude — also 'uncle')
-? tía = colega (dude, fem. — also 'aunt')
-? vale = de acuerdo (okay)
-? mola = está genial (it's cool)
+guay = genial (cool) [barcelona]
+currar = trabajar (to work) [barcelona]
+curro = trabajo (job) [barcelona]
+flipar = alucinar (to be amazed) [barcelona]
+flipo = alucino (I can't believe it) [barcelona]
+enchegar = encender (to switch on; Catalan loan) [barcelona]
+rachola = baldosa (tile; Catalan loan) [barcelona]
+? plegar = terminar el trabajo (to finish work, Catalan loan — also 'to fold') [barcelona]
+? plego = termino el trabajo (I'm off work) [barcelona]
+? tío = colega (dude — also 'uncle') [barcelona]
+? tía = colega (dude, fem. — also 'aunt') [barcelona]
+? vale = de acuerdo (okay) [barcelona]
+? mola = está genial (it's cool) [barcelona]

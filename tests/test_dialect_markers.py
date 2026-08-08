@@ -32,10 +32,9 @@ def test_a_selected_dialect_narrows_which_forms_count(monkeypatch):
     """Marking a Rhine-Hessian form for someone listening to a Berliner would
     be a new error, not a feature.
 
-    Tested against a controlled lexicon on purpose: today *every* unambiguous
-    entry in dialects.txt is untagged, so this branch is inert on the real
-    data. Covering it here means the filter is known-good the day someone
-    tags an entry, instead of shipping untested."""
+    Kept against a controlled lexicon even though the real data is now tagged:
+    it pins the *filter*, so a later edit to dialects.txt cannot make this pass
+    for the wrong reason."""
     monkeypatch.setattr(srv, "_dialects_cache", {"mtime": None, "map": {}})
     monkeypatch.setattr(srv, "load_dialects", lambda: {"de": {
         "keene":  ("keine", False, frozenset({"berlin"})),
@@ -48,13 +47,78 @@ def test_a_selected_dialect_narrows_which_forms_count(monkeypatch):
     assert srv.dialect_markers(text, "de") == ["ick", "keene", "nochemol"]
 
 
-def test_every_unambiguous_entry_is_currently_untagged():
-    """Documents why the filter above is inert, so a future reader does not
-    conclude the narrowing is broken. Delete this test when entries get
-    tagged — its failure is the signal that the data caught up."""
-    lexicon = srv.load_dialects()["de"]
-    tagged = [t for t, e in lexicon.items() if not e[1] and e[2]]
-    assert tagged == [], f"dialects.txt now tags {tagged} — enable narrowing"
+def test_the_narrowing_is_live_on_the_real_lexicon():
+    """The data caught up with the filter: selecting a dialect now changes
+    what gets coloured, which it did not while every entry was untagged."""
+    text = "Ick hab keene Ahnung, wat dit soll, gell"
+    assert srv.dialect_markers(text, "de", "berlin") == ["ick", "keene", "wat", "dit"]
+    assert srv.dialect_markers(text, "de", "hessian") == ["gell"]
+    # No selection still marks everything unambiguous, whatever dialect.
+    assert srv.dialect_markers(text, "de") == ["ick", "keene", "wat", "dit", "gell"]
+
+
+def test_forms_shared_by_two_dialects_are_marked_under_both():
+    """Under-tagging is the silent failure here — a Hessian form tagged only
+    [hessian] stops being marked the moment someone picks Wormser Platt, even
+    though the word is theirs too."""
+    for flavor in ("hessian", "worms"):
+        assert srv.dialect_markers("Isch hab ebbes net verstanne", "de",
+                                   flavor) == ["isch", "ebbes", "net",
+                                               "verstanne"]
+    # ...and the Berlin-only reading of the same sentence marks nothing.
+    assert srv.dialect_markers("Isch hab ebbes net verstanne", "de",
+                               "berlin") == []
+
+
+def test_wormser_forms_do_not_fire_for_a_frankfurt_speaker():
+    """-scht for -st is Rhine Franconian, not Hessisch: the two are separate
+    entries in the style selector and must behave that way."""
+    text = "bischt du dabber, hoscht du Dorschd"
+    assert srv.dialect_markers(text, "de", "worms") == [
+        "bischt", "dabber", "hoscht", "dorschd"]
+    assert srv.dialect_markers(text, "de", "hessian") == []
+
+
+def test_enclitic_contractions_are_deliberately_untagged():
+    """"haste"/"kannste" are colloquial across the language rather than
+    regional, so they stay untagged and keep marking under every selection.
+    An untagged entry is the parser's "applies to all", not an oversight."""
+    for flavor in ("berlin", "hessian", "worms", ""):
+        assert srv.dialect_markers("haste kannste biste", "de", flavor) == [
+            "haste", "kannste", "biste"]
+
+
+def test_every_unambiguous_entry_is_tagged_or_a_known_contraction():
+    """The tagging is complete, not partial. A new untagged dialect form would
+    be marked under every style — including the ones it does not belong to —
+    which is the error the tags exist to prevent."""
+    untagged = {t for t, e in srv.load_dialects()["de"].items()
+                if not e[1] and not e[2]}
+    assert untagged == {"haste", "biste", "isset", "isses", "kannste"}, (
+        "new untagged German entries: "
+        f"{untagged - {'haste', 'biste', 'isset', 'isses', 'kannste'}}")
+
+
+def test_no_entry_names_a_dialect_the_selector_does_not_offer():
+    """A typo'd tag ("[berlain]") is invisible: the entry simply stops being
+    marked under every real selection. Nothing else would catch it."""
+    for lang, offered in (("de", srv.FLAVOR_NOTES["de"]),
+                          ("es", srv.FLAVOR_NOTES["es"])):
+        used = set()
+        for _term, (_gloss, _amb, flavors) in srv.load_dialects()[lang].items():
+            used |= set(flavors or ())
+        assert used <= set(offered), (
+            f"dialects.txt [{lang}] tags {used - set(offered)}, "
+            f"which the style selector does not offer")
+
+
+def test_spanish_entries_narrow_the_same_way():
+    """The Spanish half had the same gap and the same fix — "mola" is
+    Peninsular and glossing it for a Mexican speaker is the mirror error."""
+    text = "qué chido, muy guay"
+    assert srv.dialect_markers(text, "es", "mexico") == ["chido"]
+    assert srv.dialect_markers(text, "es", "barcelona") == ["guay"]
+    assert srv.dialect_markers(text, "es") == ["chido", "guay"]
 
 
 def test_each_word_is_reported_once():

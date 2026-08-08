@@ -4,8 +4,11 @@ import server
 
 def test_dialects_file_parses_with_ambiguity_flags():
     lex = server.load_dialects()
-    assert lex["de"]["ick"] == ("ich", False, None)   # unambiguous marker
+    assert lex["de"]["ick"] == ("ich", False, frozenset({"berlin"}))
     assert lex["de"]["nochemol"][1] is False
+    # Untagged is still a meaningful state: it means "every dialect", which is
+    # correct for a contraction that is colloquial rather than regional.
+    assert lex["de"]["haste"] == ("hast du", False, None)
     assert lex["de"]["nett"][1] is True          # real standard word too
     assert lex["de"]["des"][1] is True
     # The [es] section holds the Spanish regional entries.
@@ -23,8 +26,10 @@ def test_ambiguous_entries_name_the_dialect_they_belong_to():
     assert lex["de"]["nett"][2] == frozenset({"hessian", "worms"})
     assert lex["de"]["mehr"][2] == frozenset({"hessian", "worms"})
     assert "berlin" not in lex["de"]["des"][2]
-    # Unambiguous markers stay untagged: "ick" is Berlin wherever it appears.
-    assert lex["de"]["ick"][2] is None
+    # Unambiguous markers name their dialect too, which is what makes the
+    # style selector change what gets coloured in the heard text.
+    assert lex["de"]["ick"][2] == frozenset({"berlin"})
+    assert lex["de"]["isch"][2] == frozenset({"hessian", "worms"})
 
 
 def test_markers_trigger_note_with_mishearing_hints():
