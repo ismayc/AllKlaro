@@ -520,6 +520,76 @@ understood removes the reason to practise.
       deployment would key on a frequency list or his own vocabulary history
       rather than the 300 commonest words of one conversation.
 
+### 12. Cut on the verb, not on a stopwatch — measured, premise wrong, declined
+The next lateral idea after 11, and the most plausible-sounding of them:
+`SOFT_MAX_SEC` (5 s) cuts an utterance short, German is verb-final, so the cut
+lands before the verb and the card cannot be translated — which would also
+explain why translating from partials was wrong 35% of the time (item 1). The
+intervention would be to close on syntactic completion instead of on elapsed
+time. Sized against the real hour first, and it does not survive.
+
+- [x] **The cap does not cut on a stopwatch.** `split_at` holds the *last
+      micro-pause* seen, and when the cap fires the VAD emits everything up to
+      that pause, not up to the 5 s mark. The app already cuts at the
+      speaker's own hesitation. Emitted `soft_max` chunks average 5.5 s and
+      run as short as 1.7 s, which is the giveaway.
+- [x] **And the utterance is not the card.** The merge from item 8 runs before
+      translation, so broken-ness measured on VAD utterances counts fragments
+      the pipeline already repairs. Scoring the wrong unit here would have
+      overstated the problem by 10 pp.
+- [x] **No difference between a cap cut and a real pause.** 54 minutes, 703
+      utterances, 522 German. The cap fires on **76% of all splits** — the app
+      is almost always cutting on the cap — and its boundaries are still no
+      worse than the ones 700 ms of silence produces:
+
+      | | soft_max | pause | p |
+      |---|---|---|---|
+      | raw utterances broken | 50.9% | 47.9% | 0.59 |
+      | merged cards broken | 41.1% | 38.7% | 0.70 |
+
+- [x] **The ceiling is what settles it**, with no significance test involved:
+      the boundary this idea wants to wait for is *itself* broken 38.7% of the
+      time. Cards are fragments because spontaneous speech is fragmentary, not
+      because of the cap. Closing on syntactic completion has ~2.5 pp of
+      headroom and costs latency, which is the one thing this pipeline cannot
+      spare. **Not built.**
+- [x] **The merge from item 8 is confirmed to earn its place** — it takes
+      broken cards from 50.4% to 40.7%.
+- [x] ⚠️ **The null is a null, not a proof.** The `pause` arm is small — 96
+      German utterances, 75 once merged — so the smallest difference this
+      design could detect is **15.8 pp** on raw utterances and **18.0 pp** on
+      cards. It rules out a large effect and not a small one, and
+      `tools/boundary_quality.py` prints that number next to every comparison
+      so the point cannot be quietly dropped.
+- [x] ⚠️ **No verb-specific rate exists.** Over 522 German utterances the
+      judge emitted 332 COMPLETE and 190 MISSING_VERB and *never once*
+      MISSING_OTHER, so the three-way collapsed to a binary. Broken-vs-whole
+      holds because the validated detector was the union of both broken
+      labels, but the narrow claim about the finite verb was not measurable
+      this way. Anything that needs it needs a parser, not a prompt.
+- [x] **The judge was validated before it was believed.** 51 hand-labelled
+      utterances. gemma3:12b is unusable here — precision **0.30**, it calls
+      "It's because of the flood." verb-missing — and few-shot moved it to
+      0.31. `qwen2.5:14b-instruct` plus a casing rule reproduces the hand
+      labels at 86% agreement (precision 0.84, recall 0.93) and matched
+      qwen2.5:32b within noise at a quarter of the wall clock.
+- [ ] **Sized but not built: merge on casing, not on punctuation.** German
+      capitalises every noun and every sentence start, so a chunk opening
+      lowercase is a continuation — free, no model call, precision 0.82
+      against hand labels. `looks_finished()` cannot see those, because the
+      evidence sits on the *current* chunk and the rule only inspects the
+      previous one. Over the hour it adds **44 German merges** and rejoins
+      exactly the verb-final splits this item was aimed at: *"...da haben sie
+      Kies in dem Bereich des Gartens."* + *"ausgestreut und..."*, and
+      *"Sommerhaus."* + *"sich zugelegt."*
+      Not a clean win, which is why it is still a box: endings do not improve
+      (25.3% → 29.2%, p=0.24 — merging moves a card's end to its
+      continuation's end), and some cards become run-ons. Display latency is
+      unaffected, since merges already go out as `replaces`. Chester's call.
+      ⚠️ It cannot be scored with the default metric: the casing rule is both
+      the intervention and half the detector, so the tool refuses that
+      combination rather than reporting a win it manufactured.
+
 ---
 
 ## Closed
