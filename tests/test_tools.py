@@ -12,6 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
 
 import capture_refines   # noqa: E402
+import partial_headroom  # noqa: E402
 import replay            # noqa: E402
 import trace_report      # noqa: E402
 
@@ -261,3 +262,47 @@ def test_report_prints_the_pairs_to_read(capsys):
     out = capsys.readouterr().out
     assert "into the filter" in out and "into the skimmer" in out
     assert "1 utterances translated" in out
+
+
+# ------------------------------------------------------ partial_headroom
+
+
+def parts(*pairs):
+    return list(pairs)
+
+
+def test_a_partial_qualifies_once_it_is_long_and_settled():
+    p = parts((1.0, "kurz"), (2.0, "Das ist eine ganze Menge Text hier"),
+              (3.0, "Das ist eine ganze Menge Text hier drin auch"))
+    # Long enough on the second, and the third extends it rather than
+    # revising, so a run of two is satisfied there.
+    assert partial_headroom.first_usable(p, 20, 1)[0] == 2.0
+    assert partial_headroom.first_usable(p, 20, 2)[0] == 3.0
+
+
+def test_a_revision_breaks_the_run():
+    """The distinction the sizing turned on. Parakeet extending its guess is
+    fine; Parakeet rewriting it means the words are still moving, and a
+    translation would be of something the speaker did not say."""
+    p = parts((1.0, "Das ist eine ganze Menge Text hier"),
+              (2.0, "Etwas völlig anderes steht jetzt hier stattdessen"))
+    assert partial_headroom.first_usable(p, 20, 2) is None
+    assert partial_headroom.first_usable(p, 20, 1)[0] == 1.0
+
+
+def test_too_short_never_qualifies():
+    p = parts((1.0, "ja"), (2.0, "mhm"), (3.0, "genau"))
+    assert partial_headroom.first_usable(p, 20, 1) is None
+
+
+def test_the_saving_is_never_negative(capsys):
+    """A partial cannot be emitted after the chunk that contains it; if the
+    arithmetic ever says so, the timeline is wrong, not the conversation."""
+    utterances = [{"t_emit": 5.0, "sec": 5.0, "split": "soft_max",
+                   "partials": parts((1.0, "Das ist eine ganze Menge Text"))},
+                  {"t_emit": 9.0, "sec": 4.0, "split": "pause",
+                   "partials": parts((8.0, "Noch eine ganze Menge Text hier"))}]
+    partial_headroom.report(utterances, 20, 1)
+    out = capsys.readouterr().out
+    assert "fires on   2/2" in out
+    assert "-" not in out.split("saving")[1][:20], "negative saving reported"

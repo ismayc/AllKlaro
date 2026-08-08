@@ -112,8 +112,34 @@ Item 2 has the corrected accounting.)*
       artifact, not a defect**: this is a replay deadline, and in a live call
       those utterances arrive very late rather than vanishing. Recorded so the
       drop counts in a replay summary are not read as lost speech.
-- [ ] Translating from partials rather than chunk boundaries is still
-      untried, and is the next lever if more is wanted.
+- [x] **Translating from partials: sized, and rejected for the same reason
+      the speculation fix was.** `tools/partial_headroom.py` measures it
+      offline on the real slice — the app's own VAD and partial ASR, no
+      Ollama, deterministic — by asking when a partial first becomes good
+      enough to translate versus when the chunk is actually emitted.
+
+      | rule | fires on | saving p50 | similarity to final | leading words surviving |
+      |---|---|---|---|---|
+      | ≥20 chars, no stability required | 84% | **2.88 s** | 0.74 (p10 **0.25**) | p50 40%, **none at all in 35%** |
+      | ≥40 chars, 2 stable partials | 10% | 0.99 s | **0.95** | p50 100% |
+
+      The two regimes are the whole answer. Loose enough to fire often and
+      the text is not what was said: the worst cases are Parakeet decoding
+      *German audio as English* — `"Cool call it kicker males."` for *Ich
+      kipp ja immer nicht*, `"Yeah, it's a modest type."` for *Das verdunstet
+      aber eigentlich auch eine Menge*. Translating those would put nonsense
+      on screen 2.9 s early and then take it back.
+
+      Strict enough to be faithful and it fires on 5 utterances in 51 at
+      ~1 s each: **~0.12 s expected, about 1.7% of first-word lag** — the
+      same order as the 92 ms that killed the speculation idea above.
+- [x] **The blocker is partial *fidelity*, not available time.** Requiring
+      just two consecutive partials where one merely *extends* the other
+      drops firing from 84% to 14%; requiring three, it never fires at all.
+      Parakeet is not extending its guess as audio arrives, it is constantly
+      **revising** it. The 2.88 s of headroom is real and stays on the table
+      — anything that makes mid-utterance partials trustworthy reopens this,
+      and the rig is committed to re-measure it in one run.
 
 ### 3. The measurement rig cannot resolve what it is tuning — fixed at p50
 - [x] **Translation stage separated from model-server noise.**
