@@ -480,6 +480,48 @@ separate load risk.
       dialect to begin with (zero unambiguous markers in 2277 tokens). Every
       *other* ambiguous entry remains Hessian / Rhine-Hessian.
 
+### 11. Translate less, rather than faster — no latency win, product call open
+Came out of a deliberate lateral pass over the product rather than the
+pipeline. Every other lever divides the same work up differently; this is the
+only one that makes there be less of it, and for someone learning German it
+is arguably the better behaviour anyway — translating a sentence you
+understood removes the reason to practise.
+
+- [x] **Built and off by default.** `known_words.txt` (absent = feature off)
+      holds the listener's vocabulary; an utterance is skipped only if it is
+      German, at most `KNOWN_SKIP_MAX_WORDS` (8) long, and *entirely* covered.
+      Conservative on purpose — a needless translation costs a little time, a
+      wrongly skipped one costs the listener the sentence. The card still
+      appears with the heard text, and the ✨ tap fetches the translation if
+      the guess was wrong, which is what makes skipping safe to do at all.
+- [x] **The headline number was measured on the wrong unit.** 42% of segments
+      are ≤3 words and 43% are covered by a 300-word vocabulary — but those
+      are *Whisper's* segments. The pipeline's utterances are VAD chunks up to
+      5 s with fragments merged, so live the gate fires on **10%**, not 43%.
+- [x] **And at 10% it buys no latency.** Deterministic A/B against the stub,
+      comparing the 47 utterances translated in both arms:
+
+      | | first-word lag p50 | p90 |
+      |---|---|---|
+      | baseline | 7730 ms | 11915 ms |
+      | skip-known | 8104 ms | 12084 ms |
+
+      Paired per-utterance the median delta is **+15 ms** and 23 of 47
+      improved — a coin flip. The skipped work was 10% of utterances and 10%
+      of Ollama time, so this is not "the cheap ones were removed"; removing
+      a tenth of the load simply does not move the queue.
+      ⚠️ The stub draws latency from a distribution that ignores prompt
+      length, while real Ollama is faster on short prompts (translate p50 fell
+      3000 → 1744 ms when the chunk cap dropped). So the rig is **generous**
+      to this idea and it still did not pay.
+- [ ] **The product question is untouched by that and is Chester's.** Whether
+      a learner wants "Ja." translated is not a latency question, and the
+      feature should not be sold as one. Left off pending that call; a real
+      deployment would key on a frequency list or his own vocabulary history
+      rather than the 300 commonest words of one conversation.
+
+---
+
 ## Closed
 
 Kept in full rather than deleted: each one records a failure mode that

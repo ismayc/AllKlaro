@@ -106,8 +106,12 @@ def test_stats_report_what_the_pipeline_asked_for():
 # ------------------------------------------------- latency distribution
 
 def draws(n, seed=0, p50=8000, p90=14000):
+    """n distinct requests. Latency is keyed on the request, so the key has to
+    vary — passing none would model the same sentence asked n times, which
+    correctly returns the same answer every time."""
     lat = fake_ollama.Latency(seed)
-    return [lat.lognormal(p50, p90) * 1000 for _ in range(n)]
+    return [lat.lognormal(p50, p90, f"m\x00utterance {i}") * 1000
+            for i in range(n)]
 
 
 def test_the_quantiles_are_the_ones_asked_for():
@@ -164,3 +168,34 @@ def test_the_prewarm_ping_does_not_consume_a_draw():
     c2.post("/api/chat", json={**body, "options": {"num_predict": 1}})
     c2.post("/api/chat", json=body)
     assert c2.app.state.calls[-1]["delay"] == pytest.approx(first)
+
+
+def test_latency_is_keyed_on_the_request_not_its_position():
+    """The property that makes an A/B over *load* possible.
+
+    Sequential draws look reproducible and are not: an arm that skips five
+    translations shifts every later request onto a different draw, and the
+    two arms then differ for a reason that is not the pipeline. Measured that
+    way once, at 652 ms.
+    """
+    lat = fake_ollama.Latency(1)
+    a = lat.lognormal(8000, 14000, "gemma3:12b\x00Wie geht es dir?")
+    # Any amount of other traffic in between must not move it.
+    for i in range(20):
+        lat.lognormal(8000, 14000, f"gemma3:12b\x00filler {i}")
+    b = lat.lognormal(8000, 14000, "gemma3:12b\x00Wie geht es dir?")
+    assert a == b
+    assert a != lat.lognormal(8000, 14000, "gemma3:12b\x00Etwas anderes")
+
+
+def test_the_key_ignores_the_rolling_history():
+    """The prompt carries recent conversation, so keying on the whole body
+    would make the same sentence cost differently depending on what preceded
+    it — reintroducing the very coupling this removes."""
+    base = {"model": "gemma3:12b"}
+    k1 = fake_ollama.request_key({**base, "messages": [
+        {"content": "earlier turn"}, {"content": "Das Wasser verdunstet."}]})
+    k2 = fake_ollama.request_key({**base, "messages": [
+        {"content": "a completely different earlier turn"},
+        {"content": "Das Wasser verdunstet."}]})
+    assert k1 == k2

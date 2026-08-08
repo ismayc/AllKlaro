@@ -36,11 +36,14 @@ two measured quantiles, so slow requests happen at a realistic rate and a
 timeout ceiling actually bites.
 
 **Repeatability survives, because it never came from the latency being
-constant — it comes from the draws being reproducible.** The sequence is
-seeded and consumed in request order, so two arms of an A/B run see the
-identical latency sequence and any difference between them is the pipeline.
-Change `--seed` to resample the world; keep it to compare two pipelines
-inside the same one.
+constant — it comes from the draws being reproducible.** Each request's cost
+is derived from the seed and the request itself (model + the sentence being
+translated), so a given utterance costs the same in every arm regardless of
+what else ran. That matters more than it sounds: an arm that *skips* work
+would otherwise shift every later request onto a different draw, and the arms
+would then differ for a reason that is not the pipeline. Measured that way
+once, at 652 ms of pure artefact. Change `--seed` to resample the world; keep
+it to compare two pipelines inside the same one.
 """
 import argparse
 import asyncio
@@ -69,24 +72,42 @@ def lognormal_params(p50: float, p90: float) -> tuple[float, float]:
 
 
 class Latency:
-    """A reproducible stream of per-request latencies, in seconds.
+    """Reproducible per-request latencies, in seconds, keyed by CONTENT.
 
-    Draws are taken in request order from one seeded generator, so the Nth
-    translation of a replay always costs the same — which is what lets two
-    arms be compared at all. A fresh `Latency` per run, never a global.
+    Sequential draws are the obvious design and they are wrong for any arm
+    that changes *which* requests happen. Measured the hard way: an arm that
+    skipped 5 translations shifted every later request onto a different draw,
+    so the two arms disagreed by 652 ms for a reason that had nothing to do
+    with the pipeline — the exact class of error this stub exists to remove.
+
+    Keying on the request instead means a given sentence costs the same in
+    every arm no matter what else ran, so arms that add, remove or reorder
+    work stay comparable. That is strictly stronger than sequence-keying, and
+    it is what makes an A/B over *load* possible at all.
     """
 
     def __init__(self, seed: int = 0):
-        self.rng = random.Random(seed)
+        self.seed = seed
 
-    def fixed(self, ms: float) -> float:
+    def fixed(self, ms: float, key: str = "") -> float:
         return ms / 1000
 
-    def lognormal(self, p50: float, p90: float) -> float:
+    def lognormal(self, p50: float, p90: float, key: str = "") -> float:
         mu, sigma = lognormal_params(p50, p90)
         if sigma == 0:
             return p50 / 1000
-        return math.exp(self.rng.gauss(mu, sigma)) / 1000
+        rng = random.Random(f"{self.seed}\x00{key}")
+        return math.exp(rng.gauss(mu, sigma)) / 1000
+
+
+def request_key(body: dict) -> str:
+    """What makes this request *this* request: the model and the text asked
+    about. Deliberately not the whole body — the prompt carries a rolling
+    conversation history, so including it would make the same sentence cost
+    differently depending on what preceded it."""
+    msgs = body.get("messages") or []
+    last = msgs[-1].get("content", "") if msgs else ""
+    return f"{body.get('model')}\x00{last}"
 
 # Filler of a plausible length. Card width and delta count both matter to how
 # the UI feels, and a one-word reply would make the pipeline look faster than
@@ -116,7 +137,7 @@ def latency_for(request: Request, body: dict) -> float:
     if getattr(cfg, "dist", "fixed") != "lognormal":
         return lat.fixed(p50)
     p90 = cfg.draft_p90 if draft else cfg.main_p90
-    return lat.lognormal(p50, p90)
+    return lat.lognormal(p50, p90, request_key(body))
 
 
 @app.get("/api/tags")

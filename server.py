@@ -255,6 +255,23 @@ OLLAMA_URL = os.environ.get("ALLKLARO_OLLAMA_URL", "http://127.0.0.1:11434")
 DEFAULT_MODEL = os.environ.get("ALLKLARO_MODEL", "gemma3:12b")
 GLOSSARY_PATH = Path(__file__).parent / "glossary.txt"
 DIALECTS_PATH = Path(__file__).parent / "dialects.txt"
+# Words the listener already knows. Every other lever tried on lag divides the
+# same work up differently; this is the only one that makes there be less of
+# it — and for someone learning the language it is the better product anyway,
+# since translating a sentence you understood removes the reason to practise.
+#
+# Measured over the real 54-minute recording: 42% of segments are three words
+# or fewer ("Ja.", "Oh!", "Bei mir sind 18.") and 43% are fully covered by the
+# 300 commonest words in the conversation. Roughly half the load on the
+# bottleneck is spent on sentences the listener did not need.
+#
+# Off unless the file exists. One lowercase word per line, `#` comments.
+KNOWN_WORDS_PATH = Path(os.environ.get(
+    "ALLKLARO_KNOWN_WORDS", Path(__file__).parent / "known_words.txt"))
+# Never skip a long utterance, however familiar its words: a sentence can be
+# built entirely of known words and still say something the listener would not
+# assemble in time. The cap is on the *sentence*, not the vocabulary.
+KNOWN_SKIP_MAX_WORDS = int(os.environ.get("ALLKLARO_KNOWN_MAX_WORDS", "8"))
 CORRECTIONS_PATH = Path(__file__).parent / "corrections.jsonl"
 CORRECTION_EXAMPLES = 3            # retrieved corrections shown to the model
 # Compiled by build_gender_lexicon.py from dict.cc / FreeDict exports. They
@@ -397,6 +414,44 @@ def load_dialects() -> dict[str, dict[str, tuple[str, bool, frozenset | None]]]:
                     standard.strip(), ambiguous, flavors)
         _dialects_cache.update(mtime=mtime, map=entries)
     return _dialects_cache["map"]
+
+
+# ------------------------------------------------------------- known words
+
+_known_cache = {"mtime": None, "words": frozenset()}
+
+
+def load_known_words() -> frozenset:
+    """The listener's own vocabulary, mtime-cached like the other lexicons."""
+    try:
+        mtime = KNOWN_WORDS_PATH.stat().st_mtime
+    except OSError:
+        _known_cache.update(mtime=None, words=frozenset())
+        return frozenset()
+    if mtime != _known_cache["mtime"]:
+        words = {ln.strip().lower()
+                 for ln in KNOWN_WORDS_PATH.read_text(encoding="utf-8").splitlines()
+                 if ln.strip() and not ln.startswith("#")}
+        _known_cache.update(mtime=mtime, words=frozenset(words))
+    return _known_cache["words"]
+
+
+def is_already_understood(text: str, source: str) -> bool:
+    """True when this utterance is not worth spending the bottleneck on.
+
+    Deliberately conservative, because the two errors are not symmetric: a
+    needless translation costs a little time, while a skipped one the listener
+    actually needed costs them the sentence. So it must be short, *entirely*
+    covered by the known list, and in the language being learned — an English
+    utterance is not something a German learner is practising.
+    """
+    known = load_known_words()
+    if not known or source != "de":
+        return False
+    words = re.findall(r"[^\W\d_]+", text.lower())
+    if not words or len(words) > KNOWN_SKIP_MAX_WORDS:
+        return False
+    return all(w in known for w in words)
 
 
 def dialect_markers(text: str, source: str,
@@ -2746,6 +2801,19 @@ async def ws_endpoint(ws: WebSocket):
                                meta: dict | None = None):
         nonlocal refines_shed, refines_gated, refines_timeout
         meta = meta if meta is not None else {}
+        if is_already_understood(text, source):
+            # Not a failure and not a shed: the listener reads German, and
+            # this sentence was inside what they read. The card still appears
+            # with the heard text — only the translation is withheld, and the
+            # ✨ tap fetches it if the guess was wrong. That escape hatch is
+            # what makes skipping safe enough to do by default.
+            meta["skipped_known"] = True
+            meta["translate_ms"] = 0
+            await safe_send(ws, {"type": "translation_done", "id": my_uid,
+                                 "refining": False, "known": True,
+                                 "transcribe_ms": int((t1 - t0) * 1000),
+                                 "translate_ms": 0})
+            return
         # Two-tier translation: stream the fast draft model first so text
         # appears immediately, then re-translate with the main model
         # behind the scenes and swap in its (better) answer. Either way,
