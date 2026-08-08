@@ -72,6 +72,28 @@ select, input[type=range] {
   text-transform: uppercase; opacity: .7;
 }
 #gistText { white-space: pre-wrap; }
+/* The re-read stretch. Same shape as the gist so the header reads as one
+   surface, but the translation is set at reading size rather than the gist's
+   glanceable 13px — this is the text you asked for and are about to read
+   properly, not a summary you skim. */
+#recap {
+  position: relative; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 34px 10px 12px; margin-top: 6px;
+  max-height: 34vh; overflow-y: auto;
+}
+#recap.hidden { display: none; }
+#recap::before {
+  content: "Just said"; font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; opacity: .7; color: var(--muted);
+}
+.recap-heard {
+  font-size: 13px; line-height: 1.45; color: var(--muted);
+  white-space: pre-wrap; margin: 4px 0 6px;
+}
+#recapText {
+  font-size: 17px; line-height: 1.5; white-space: pre-wrap;
+}
 .gist-toggle {
   position: absolute; top: 4px; right: 6px;
   background: none; border: 0; color: var(--muted);

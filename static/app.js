@@ -17,6 +17,11 @@ const gistChk = document.getElementById("gistChk");
 const gistPanel = document.getElementById("gist");
 const gistText = document.getElementById("gistText");
 const gistToggle = document.getElementById("gistToggle");
+const recapBtn = document.getElementById("recapBtn");
+const recapPanel = document.getElementById("recap");
+const recapHeard = document.getElementById("recapHeard");
+const recapText = document.getElementById("recapText");
+const recapClose = document.getElementById("recapClose");
 const pipeline = document.getElementById("pipeline");
 const pauseSlider = document.getElementById("pause");
 const pauseVal = document.getElementById("pauseVal");
@@ -468,6 +473,10 @@ function newCard(msg) {
     id: msg.id, card, rows, source: msg.source, targets: msg.targets,
     text: msg.text, speaker: msg.speaker,
     time: new Date().toLocaleTimeString(),
+    // When the card ARRIVED, which is what the recap window is measured in.
+    // Under lag this is not when the words were spoken, and that is the point:
+    // the listener asks "what did they just say?" about what they just read.
+    t: Date.now(),
   });
 }
 
@@ -834,6 +843,15 @@ function handleMessage(msg) {
     }
     renderFinalRow(c, msg.target);
     row.el.classList.add("revised");
+  } else if (msg.type === "recap") {
+    if (msg.error) {
+      hideRecap();
+      showError(msg.error === "busy"
+        ? "Still re-reading the last stretch — one at a time."
+        : "Could not re-read the last few seconds.");
+    } else {
+      showRecap(msg.heard, msg.text);
+    }
   } else if (msg.type === "gist") {
     showGist(msg.text);
   } else if (msg.type === "stats") {
@@ -844,6 +862,66 @@ function handleMessage(msg) {
     showError(msg.message);
   }
 }
+
+// --------------------------------------------- "what did they just say?"
+
+// Item 12 measured 41% of cards still broken after the automatic merge: that
+// merge only reaches across a 2 s gap, and a German clause routinely spans
+// more. So every card on screen can be a fragment while the stretch they
+// belong to is a perfectly good sentence. This rejoins the last few and asks
+// for one translation of the whole passage.
+const RECAP_WINDOW_MS = 15000;
+const RECAP_MAX_CARDS = 12;
+
+// The stretch to re-read: most recent first by arrival, in speaking order, all
+// sharing the newest card's direction. A window mixing German and English
+// cards would be asking for one translation of two languages.
+function recapWindow() {
+  const all = [...cards.values()].filter((c) => c.text)
+                                 .sort((a, b) => a.t - b.t);
+  if (!all.length) return null;
+  const newest = all[all.length - 1];
+  const cutoff = Date.now() - RECAP_WINDOW_MS;
+  const win = all.filter((c) => c.t >= cutoff && c.source === newest.source)
+                 .slice(-RECAP_MAX_CARDS);
+  // After a long silence nothing is inside the window, but the question was
+  // still asked — answer about the last thing said rather than refusing.
+  return win.length ? win : [newest];
+}
+
+function requestRecap() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) {
+    return showError("Not connected — cannot re-read the last few seconds.");
+  }
+  const win = recapWindow();
+  if (!win) return showError("Nothing has been said yet.");
+  showRecap(win.map((c) => c.text).join(" "), "…");
+  ws.send(JSON.stringify({
+    type: "recap",
+    text: win.map((c) => c.text).join(" "),
+    source: win[0].source,
+    target: win[win.length - 1].targets[0],
+    // Context stops where the passage starts, so the model is not handed the
+    // same words twice — once as history and once as the thing to translate.
+    before_uid: win[0].id,
+  }));
+}
+
+function showRecap(heard, text) {
+  recapPanel.classList.remove("hidden");
+  // textContent throughout: both halves are model output or transcript.
+  recapHeard.textContent = heard || "";
+  recapText.textContent = text || "";
+}
+
+function hideRecap() {
+  recapPanel.classList.add("hidden");
+  recapHeard.textContent = "";
+  recapText.textContent = "";
+}
+
+recapBtn.onclick = requestRecap;
+recapClose.onclick = hideRecap;
 
 // --------------------------------------------------------------- running gist
 
@@ -921,6 +999,7 @@ clearBtn.onclick = () => {
   cards.clear();
   lastSummary = ""; // a stale summary must not leak into the next export
   clearGist();      // ...and the pinned gist described the cleared conversation
+  hideRecap();      // ...as did the re-read stretch
   clearPartial();
   feed.replaceChildren(hint);
 };

@@ -21,6 +21,10 @@
       <button id="micBtn" class="mic-btn" title="Start / stop listening">
         <span class="mic-icon">🎙️</span><span id="micLabel">Start</span>
       </button>
+      <!-- Lives in the topbar, not in the settings drawer: this is the button
+           you want the moment you missed something, and a two-tap path to it
+           is a button you do not press. -->
+      <button id="recapBtn" class="tool-btn" title="What did they just say? Re-translate the last 15 seconds as one passage">⏪</button>
       <button id="controlsBtn" class="tool-btn" title="Show / hide settings"
               aria-expanded="true">⚙︎</button>
       <div class="status">
@@ -111,6 +115,15 @@
               title="Collapse / expand the running summary">▾</button>
       <div id="gistText"></div>
     </div>
+    <!-- The last stretch, re-read as one passage. Separate from the gist: the
+         gist is the whole conversation compressed, this is a few seconds of it
+         at full length, and they are wanted at different moments. Dismissible
+         because it is only ever answering a question already asked. -->
+    <div id="recap" class="hidden">
+      <button id="recapClose" class="gist-toggle" title="Dismiss">✕</button>
+      <div id="recapHeard" class="recap-heard"></div>
+      <div id="recapText"></div>
+    </div>
   </header>
 
   <main id="feed">
@@ -175,6 +188,14 @@
         by hand gives it no deadline at all, which is when the bigger
         model is worth the wait. Marked <em>improved</em> when it lands,
         even if the answer came back the same.</p>
+      <p>Tap ⏪ for <em>what did they just say?</em> — the last 15 seconds are
+        rejoined and translated as one passage. German puts the verb at the
+        end of a clause, so a thought cut into two cards can leave each half
+        untranslatable on its own: <em>“…they put gravel in the garden”</em>
+        and <em>“spread out so the water drains better”</em> become
+        <em>“they spread gravel in the garden area so the water drains
+        better”</em>. It reads the cards already on screen, so it costs
+        nothing and changes nothing.</p>
       <p>A dashed <strong>new voice</strong> line appears between cards when
         the voice changes. It says only that — with one microphone for a
         whole room, who is speaking is not something this can know, and it

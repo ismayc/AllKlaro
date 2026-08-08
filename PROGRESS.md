@@ -590,6 +590,53 @@ time. Sized against the real hour first, and it does not survive.
       the intervention and half the detector, so the tool refuses that
       combination rather than reporting a win it manufactured.
 
+### 13. "What did they just say?" — the ✨ tap widened to a window
+Item 12 declined to change where the pipeline cuts, and in doing so measured
+the thing that made this worth building: **41% of cards are still fragments**
+after the item 8 merge, because that merge only reaches across a 2 s gap and a
+German clause routinely spans more. Item 8 already established what a fragment
+costs — each half translated with no sight of the other. This does the same
+repair on demand, over a stretch the automatic merge cannot reach.
+
+- [x] **Built.** ⏪ in the topbar joins the cards from the last 15 s and asks
+      for one translation of the whole passage. `recap_window` in `server.py`,
+      `recapWindow` / `requestRecap` in `static/app.js`.
+- [x] **The saving is real and it is not about latency.** Verified in Chrome
+      against gemma3:12b, on a split of exactly the shape item 12 counted:
+
+      | | |
+      |---|---|
+      | card 1 alone | "And underneath that, they **put** gravel in that area of the garden…" |
+      | card 2 alone | "**spread out** so that the water drains better." |
+      | ⏪ together | "And underneath that, they **spread** gravel in the garden area so the water drains better." |
+
+      Card 1 invented a verb because `ausgestreut` had not been said yet;
+      card 2 is an orphaned participle with no subject. Neither is fixable by
+      a better model — the words were not there. Joining is the only repair.
+- [x] **Windowed by when cards ARRIVED, not when the words were spoken.** The
+      listener asks because of what they just read, and under lag those are
+      different instants. Arrival is the one that matches the question.
+- [x] **It changes nothing.** Not written to `history`, replaces no card,
+      steers no later translation — the passage is already in the context as
+      cards, and a second copy would be a translation passed off as speech.
+      Pinned by a test, since nothing on screen would reveal the difference.
+- [x] **Ungated like the ✨ tap, for the same reason** — somebody is waiting
+      on purpose, and the moment the pipeline is behind is exactly the moment
+      something got missed. One at a time, though: consecutive taps cover
+      almost the same seconds, so a queue of them is one passage racing
+      itself. Timeout, `busy`, and `failed` all answer, because a button that
+      silently does nothing is indistinguishable from a broken one.
+- [x] **The window lives in one place.** `RECAP_WINDOW_MS` in `app.js` only —
+      the server never sees a card, just the joined passage, which it bounds
+      because a client is not to be trusted about length. A static test ties
+      the button's "15 seconds" to the constant, so the tooltip cannot start
+      lying about the feature's scope.
+- [ ] **Untried on the phone.** Verified at a 400 px viewport in Chrome with
+      no overflow, but not yet on real iPhone Safari. The dismiss ✕ is 23×22,
+      matching the gist toggle it sits beside and under the 44 px Apple asks
+      for — left consistent rather than diverged, but it is a thumb target on
+      the surface you actually read.
+
 ---
 
 ## Closed

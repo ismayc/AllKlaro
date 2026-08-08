@@ -496,6 +496,42 @@ def test_real_improve_tap_returns_the_main_models_translation(tmp_path):
     assert "evaporat" in reply["text"].lower(), reply["text"]
 
 
+def test_real_recap_carries_meaning_across_a_card_boundary(tmp_path):
+    """The claim the recap window rests on, against real models.
+
+    These two fragments are consecutive cards from the real recording, split
+    by the 5 s cap mid-clause — the shape item 12 measured on 41% of cards.
+    Alone, the second is "wanted to keep the warmth to extend the season" with
+    no idea who wanted it; the subject and the verb of the reporting clause
+    are stranded in the first. Joined, the model can see it is the landlord
+    who said it, and that is the whole point of the feature.
+
+    So the assertion is not "a translation came back" but "it contains
+    something only the join could have supplied".
+    """
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    passage = ("Der Vermieter hat zu uns gesagt, wenn wir "
+               "die Wärme halten wollten, um die Saison zu verlängern.")
+    with TestClient(server.app) as client:
+        with client.websocket_connect("/ws") as ws:
+            ws.send_text(json.dumps({"type": "config", "mode": "de-en",
+                                     "model": server.DEFAULT_MODEL}))
+            ws.send_text(json.dumps({"type": "recap", "source": "de",
+                                     "target": "en", "text": passage}))
+            msgs = collect_until(ws, stop_types=("recap", "error"))
+    reply = msgs[-1]
+    assert reply["type"] == "recap", reply
+    assert "error" not in reply, reply
+    out = reply["text"].lower()
+    # Only the first fragment names who spoke; only the second says what
+    # about. Both have to survive into one sentence.
+    assert any(w in out for w in ("landlord", "lessor", "letting agent")), out
+    assert "season" in out, out
+    # The heard half goes back too, so the panel can show what was re-read.
+    assert reply["heard"] == passage
+
+
 def test_real_voice_change_separates_two_speakers(tmp_path):
     """Two macOS voices, which is the only ground truth available without
     someone labelling the real recording by hand.

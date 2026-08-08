@@ -16,6 +16,21 @@ def test_every_js_element_lookup_exists_in_html():
     assert not missing, f"app.js references ids missing from index.html: {missing}"
 
 
+def test_the_recap_button_promises_the_window_it_actually_uses():
+    """The tooltip is the only place the listener learns how far back the
+    re-reading goes, and they decide whether it covers what they missed on
+    that basis. A tooltip that says 15 while the code takes 10 is not a
+    cosmetic mismatch, it is the feature lying about its own scope.
+    """
+    ms = re.search(r"const RECAP_WINDOW_MS = (\d+);", JS)
+    assert ms, "RECAP_WINDOW_MS is gone — did the recap window move?"
+    seconds = int(ms.group(1)) // 1000
+    promise = re.search(r'id="recapBtn"[^>]*title="([^"]+)"', HTML)
+    assert promise, "the recap button lost its tooltip"
+    assert f"{seconds} second" in promise.group(1), \
+        f"button promises {promise.group(1)!r}, code uses {seconds}s"
+
+
 def test_every_message_the_client_sends_is_handled_by_the_server():
     """The websocket contract, checked in the direction a browser would.
 

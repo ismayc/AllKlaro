@@ -171,6 +171,20 @@ IMPROVE_MAX_IN_FLIGHT = 2          # taps served at once; the rest are told to w
 # Generous rather than absent: nobody is racing this, but a wedged Ollama must
 # not leave the button spinning for the rest of the conversation.
 IMPROVE_TIMEOUT_SEC = float(os.environ.get("ALLKLARO_IMPROVE_TIMEOUT_SEC", "90"))
+# "What did they just say?" — the same tap widened from one card to a window.
+# Item 12 is the reason it exists: after the item 8 merge, 41% of cards are
+# still fragments, because merging only reaches across a 2 s gap and a thought
+# routinely spans more. A fragment cannot be translated correctly alone, which
+# item 8 already established; this rejoins a whole stretch on demand and
+# translates it as one passage.
+#
+# Which cards make up the window is decided in `recapWindow` in app.js, since
+# only the client knows when each card reached the screen — deliberately not
+# mirrored here, because a second copy of "15 seconds" is a number that drifts.
+# The server sees the joined passage and bounds it, having no way to count
+# cards in it and no reason to trust a client about length.
+RECAP_MAX_CHARS = 2000             # a bounded prompt even for a fast talker
+RECAP_TIMEOUT_SEC = float(os.environ.get("ALLKLARO_RECAP_TIMEOUT_SEC", "90"))
 # A visible break when the voice changes, and deliberately nothing more — no
 # names, no identities, no diarization. `SPEAKERS` below is a channel tag, so
 # with one microphone carrying a room every card reads "you"; this at least
@@ -2610,6 +2624,7 @@ async def ws_endpoint(ws: WebSocket):
     last_gist = loop.time()
     corrected_uids: set[int] = set()  # user edits that refinement must not undo
     improving: set[int] = set()       # cards being re-translated on demand
+    recapping = False                 # one "what did they just say?" at a time
     last_voice: dict[int, dict] = {}  # per channel: the last describable voice
     pause_frames = END_SILENCE_FRAMES
     uid = 0
@@ -3006,6 +3021,59 @@ async def ws_endpoint(ws: WebSocket):
             # would let a second tap start while this one is still on Ollama.
             improving.discard(card_uid)
 
+    async def recap_window(text: str, source: str, target: str,
+                           before_uid: int | None):
+        """Re-translate a stretch of recent cards as one passage.
+
+        The ✨ tap fixes a card the model got wrong. This fixes a card that was
+        never translatable on its own: item 12 measured 41% of cards still
+        broken after the item 8 merge, because merging reaches across a 2 s gap
+        and a German clause routinely spans more. Joining the stretch is the
+        same repair item 8 makes automatically, just wider and on request.
+
+        Not gated on the backlog, for the reason the ✨ tap is not: somebody is
+        waiting on purpose. One at a time, though — the window overlaps itself
+        on a second tap, so a queue of them would be the same passage racing.
+        """
+        nonlocal recapping
+        if (target not in LANG_NAMES or source not in LANG_NAMES
+                or source == target):
+            return
+        if recapping:
+            await safe_send(ws, {"type": "recap", "error": "busy"})
+            return
+        recapping = True
+        try:
+            # Context from before the window only. The window is the newest
+            # thing that happened, so anything at or after its first card is
+            # the passage itself — feeding it back as context would ask the
+            # model to translate the text twice and agree with itself.
+            context = ([h for h in history
+                        if h.get("uid", 0) < before_uid]
+                       if before_uid is not None else list(history))
+            try:
+                out = await asyncio.wait_for(
+                    translate_once(text, source, target, model, context,
+                                   flavor=flavor_for(target), address=address,
+                                   heard_flavor=flavor_for(source)),
+                    timeout=RECAP_TIMEOUT_SEC)
+            except (asyncio.TimeoutError, TimeoutError):
+                out = None
+            except Exception:
+                log.exception("recap failed")
+                out = None
+            if not out:
+                await safe_send(ws, {"type": "recap", "error": "failed"})
+                return
+            # Deliberately NOT written into `history`, and it replaces no card.
+            # This is a second reading of text the conversation already has;
+            # letting it steer what follows would double-count the same words.
+            await safe_send(ws, {"type": "recap", "text": out,
+                                 "heard": text, "source": source,
+                                 "target": target})
+        finally:
+            recapping = False
+
     async def refresh_gist():
         """Fold the utterances since the last refresh into the running gist.
 
@@ -3227,6 +3295,20 @@ async def ws_endpoint(ws: WebSocket):
                                          original.strip()[:2000],
                                          cfg.get("source") or "de",
                                          cfg.get("target") or ""))
+                elif isinstance(cfg, dict) and cfg.get("type") == "recap":
+                    # "What did they just say?" — the client joins the cards
+                    # it showed in the last RECAP_WINDOW_SEC and sends the
+                    # heard text back, as every other on-demand path does, so
+                    # this works past the server's context window too.
+                    passage = cfg.get("text")
+                    before = cfg.get("before_uid")
+                    if isinstance(passage, str) and passage.strip():
+                        asyncio.create_task(
+                            recap_window(passage.strip()[:RECAP_MAX_CHARS],
+                                         cfg.get("source") or "de",
+                                         cfg.get("target") or "",
+                                         before if isinstance(before, int)
+                                         else None))
                 elif isinstance(cfg, dict) and cfg.get("type") == "correction":
                     # An edited translation also fixes the live context, so
                     # follow-up utterances build on the corrected phrasing.
