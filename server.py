@@ -24,6 +24,7 @@ from pathlib import Path
 
 import httpx
 import numpy as np
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -2524,6 +2525,12 @@ async def ws_endpoint(ws: WebSocket):
     partials_skipped = 0             # partials dropped because the pipe was busy
     specs_shed = 0                   # speculations skipped because of backlog
     refines_shed = 0                 # refine passes skipped because of backlog
+    # ...split, because one number could not answer the question it was there
+    # to answer: a gate skip and a timeout are opposite failures — the first
+    # spent nothing, the second spent the whole ceiling — and summing them hid
+    # which one was happening.
+    refines_gated = 0                # never attempted: backlog or too stale
+    refines_timeout = 0              # attempted, then killed at the ceiling
     last_stats = 0.0
     last_done = None                 # summary of the last finished utterance
 
@@ -2685,7 +2692,7 @@ async def ws_endpoint(ws: WebSocket):
 
     async def run_translations(my_uid, text, source, targets, t0, t1,
                                meta: dict | None = None):
-        nonlocal refines_shed
+        nonlocal refines_shed, refines_gated, refines_timeout
         meta = meta if meta is not None else {}
         # Two-tier translation: stream the fast draft model first so text
         # appears immediately, then re-translate with the main model
@@ -2714,6 +2721,17 @@ async def ws_endpoint(ws: WebSocket):
             # not latency, and must not be charged to the lag a listener feels.
             meta["t_card"] = t2
             texts = {}
+            # What actually happened to the refine, recorded rather than
+            # inferred. Two traps made the earlier measurements wrong and both
+            # were accounting, not pipeline: `refines_shed` counts the gate and
+            # the timeout in one number, so it cannot tell "never tried" from
+            # "tried and gave up"; and `refine_ms` is stamped on every
+            # utterance whether the pass ran or not, so a gate-skipped refine
+            # reads as a fast successful one. Naming the outcome removes the
+            # guesswork — and with it the need to exclude "~0 ms" rows by hand.
+            outcomes: list[str] = []
+            refine_wait = 0.0
+            refine_changed = agreement_changed = False
             for t, streamed in zip(targets, translations):
                 candidate = streamed
                 stale = (loop.time() - meta.get("t_emit", t0)) > REFINE_MAX_AGE_SEC
@@ -2732,7 +2750,11 @@ async def ws_endpoint(ws: WebSocket):
                     # Behind a backlog, or on an utterance already this old,
                     # better wording is worth far less than catching up.
                     refines_shed += 1
+                    refines_gated += 1
+                    outcomes.append("gated")
                 elif draft:
+                    t_refine = loop.time()
+                    timed_out = False
                     try:
                         refined = await asyncio.wait_for(
                             translate_once(text, source, t, model, context,
@@ -2743,19 +2765,35 @@ async def ws_endpoint(ws: WebSocket):
                     except (asyncio.TimeoutError, TimeoutError):
                         # Keep the draft. A refinement nobody waited for is
                         # not worth blocking the utterances behind it.
-                        refined = None
+                        refined, timed_out = None, True
                         refines_shed += 1
+                        refines_timeout += 1
+                    refine_wait += loop.time() - t_refine
                     if refined:
                         candidate = refined
+                        # "Landed" means the refine returned in time, not that
+                        # it changed anything: the main model agreeing with the
+                        # draft is a real and common outcome, and counting it
+                        # as a failure would overstate the pass's cost.
+                        outcomes.append("landed")
+                        refine_changed = refine_changed or refined != streamed
+                    else:
+                        # A model error is not a timeout, and reading one as
+                        # the other is how a broken Ollama looks like a slow
+                        # one. Kept separate for exactly that reason.
+                        outcomes.append("timeout" if timed_out else "error")
+                else:
+                    outcomes.append("off")
                 if t == "de" and de_flavor:
                     # The declension guard assumes standard German; dialect
                     # forms ("dit Haus", "keene") would trip it and get
                     # "corrected" back to Hochdeutsch.
                     final = candidate
                 else:
-                    final, _ = await enforce_agreement(text, source, t, model,
-                                                       context, candidate,
-                                                       address)
+                    final, fixed = await enforce_agreement(text, source, t,
+                                                           model, context,
+                                                           candidate, address)
+                    agreement_changed = agreement_changed or fixed
                 if final != streamed:
                     texts[t] = final
             # The final text becomes the conversation context — unless
@@ -2771,7 +2809,18 @@ async def ws_endpoint(ws: WebSocket):
                                      "id": my_uid, "texts": texts})
             # The refine pass runs after the card is already on screen, but it
             # still occupies Ollama while the next utterance waits its turn.
+            # `refine_ms` is everything after the card — refine *and* the
+            # declension guard — and is kept that way so numbers measured
+            # before this instrumentation stay comparable. `refine_wait_ms` is
+            # the refine alone, which is what the timeout applies to.
             meta["refine_ms"] = int((loop.time() - t2) * 1000)
+            meta["refine_wait_ms"] = int(refine_wait * 1000)
+            meta["refine"] = "+".join(outcomes)
+            # Which pass changed the text. Without this the two are
+            # indistinguishable downstream, and an agreement retry reads as a
+            # landed refine — the one join `capture_refines.py` must get right.
+            meta["refine_changed"] = refine_changed
+            meta["agreement_changed"] = agreement_changed
 
     async def refresh_gist():
         """Fold the utterances since the last refresh into the running gist.
@@ -3042,9 +3091,12 @@ async def ws_endpoint(ws: WebSocket):
                             "whisper_queue": whisper_pending,
                             "partials_skipped": partials_skipped,
                             "specs_shed": specs_shed,
-                            "refines_shed": refines_shed}
+                            "refines_shed": refines_shed,
+                            "refines_gated": refines_gated,
+                            "refines_timeout": refines_timeout}
                     partials_skipped = 0
                     specs_shed = refines_shed = 0
+                    refines_gated = refines_timeout = 0
                     await safe_send(ws, {"type": "segment_start", "id": uid,
                                          "speaker": SPEAKERS[tag]})
                     asyncio.create_task(

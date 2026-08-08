@@ -291,6 +291,119 @@ def test_lag_excludes_the_background_refine(client, stub_transcribe,
 
 
 
+def test_trace_names_a_landed_refine(client, stub_transcribe, trace_file,
+                                     monkeypatch):
+    """"Landed" has to be recorded, not inferred from elapsed time.
+
+    The inference that was used before — "refine_ms under the timeout means it
+    delivered" — counts gate-skipped refines as successes, because those sit
+    near 0 ms too. That is where the bogus 39% delivery figure came from.
+    """
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+
+    async def refine(*a, **k):
+        return "Refined translation."
+
+    monkeypatch.setattr(srv, "translate_once", refine)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "config", "model": "main-model",
+                      "draft_model": "fast-draft"})
+        speak(ws)
+        collect_until(ws, stop_types=("translation_revised", "error"))
+    rec = [r for r in trace_records(trace_file) if r.get("uid")][0]
+    assert rec["refine"] == "landed"
+    assert rec["refine_changed"] is True
+    assert rec["agreement_changed"] is False
+
+
+def test_a_refine_that_agrees_with_the_draft_is_not_a_change(client,
+                                                             stub_transcribe,
+                                                             trace_file,
+                                                             monkeypatch):
+    """"It landed" and "it changed something" are different facts.
+
+    The main model agreeing with the draft is a real and common outcome, and
+    recording it as a change is how the pass gets credited with work it did
+    not do — the same overstatement, from the other direction, as counting a
+    gate-skipped refine as delivered.
+    """
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+
+    async def same(ws, uid, text, source, target, *a, **k):
+        return "Identical text."
+
+    async def refine(*a, **k):
+        return "Identical text."
+
+    monkeypatch.setattr(srv, "stream_translation", same)
+    monkeypatch.setattr(srv, "translate_once", refine)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "config", "model": "main-model",
+                      "draft_model": "fast-draft"})
+        speak(ws)
+        collect_until(ws, stop_types=("translation_revised", "error"))
+    rec = [r for r in trace_records(trace_file) if r.get("uid")][0]
+    assert rec["refine"] == "landed", "the refine did run"
+    assert rec["refine_changed"] is False, \
+        "a refine that returned the draft verbatim was recorded as a change"
+
+
+def test_trace_tells_a_gate_skip_from_a_timeout(client, stub_transcribe,
+                                                trace_file, monkeypatch):
+    """The two are opposite failures — one spent nothing, the other spent the
+    whole ceiling — and `refines_shed` counted them in a single number, so it
+    could not say which was happening."""
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    monkeypatch.setattr(srv, "REFINE_MAX_AGE_SEC", -1.0)   # everything is stale
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "config", "model": "main-model",
+                      "draft_model": "fast-draft"})
+        speak(ws)
+        collect_until(ws, stop_types=("translation_revised", "error"))
+    rec = [r for r in trace_records(trace_file) if r.get("uid")][0]
+    assert rec["refine"] == "gated"
+    assert rec["refine_wait_ms"] == 0, "a gated refine waited on nothing"
+
+    monkeypatch.setattr(srv, "REFINE_MAX_AGE_SEC", 1e9)    # nothing is stale
+    monkeypatch.setattr(srv, "REFINE_TIMEOUT_SEC", 0.05)
+
+    async def never(*a, **k):
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(srv, "translate_once", never)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "config", "model": "main-model",
+                      "draft_model": "fast-draft"})
+        speak(ws)
+        collect_until(ws, stop_types=("translation_revised", "error"))
+    rec = [r for r in trace_records(trace_file) if r.get("uid")][-1]
+    assert rec["refine"] == "timeout"
+    assert rec["refine_wait_ms"] >= 40, "a timeout spent the whole ceiling"
+
+
+def test_a_declension_fix_is_not_reported_as_a_refine(client, stub_transcribe,
+                                                      trace_file, monkeypatch):
+    """Both passes deliver through the same `translation_revised`, so the
+    trace is the only place they can be told apart."""
+    monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 1e9)
+    monkeypatch.setattr(srv, "REFINE_MAX_AGE_SEC", -1.0)   # refine never runs
+
+    async def guard(text, source, target, model, context, candidate, address=None):
+        return "Corrected translation.", True
+
+    monkeypatch.setattr(srv, "enforce_agreement", guard)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "config", "model": "main-model",
+                      "draft_model": "fast-draft"})
+        speak(ws)
+        collect_until(ws, stop_types=("translation_revised", "error"))
+    rec = [r for r in trace_records(trace_file) if r.get("uid")][0]
+    assert rec["agreement_changed"] is True
+    assert rec["refine_changed"] is False, \
+        "the guard's fix is being credited to the refine pass"
+    assert rec["refine"] == "gated"
+
+
 def test_trace_records_what_was_shed(client, stub_transcribe, trace_file,
                                      monkeypatch, backlog):
     """Shedding must be visible, or it looks identical to the app being slow."""
