@@ -637,6 +637,54 @@ repair on demand, over a stretch the automatic merge cannot reach.
       for — left consistent rather than diverged, but it is a thumb target on
       the surface you actually read.
 
+### 14. A comprehension feedback loop — no input exists, and none is coming
+The last of the lateral ideas: learn what the listener actually understands
+from what he does, and adapt — feeding, among other things, the known-words
+gate of item 11 that is still sitting off pending a product call. It dies
+earlier than item 12 did. Item 12 at least had a premise worth measuring;
+this one has no input at all.
+
+- [x] **Nothing is recorded.** Word lookups, ✨ taps, ⏪ recaps: every one is
+      served and then discarded. `corrections.jsonl` is the only learner
+      signal that persists, and `known_words.txt` does not exist, so item 11's
+      gate has never been on outside a benchmark.
+- [x] **And the interaction it would learn from does not happen.** Eight days
+      of real use — `/tmp/allklaro-server.log`, 2026-07-31 to 2026-08-08, the
+      `:8710` server, phone over Tailscale:
+
+      | signal | events in 8 days |
+      |---|---|
+      | word lookups | **4** |
+      | hand corrections | **0** |
+      | ✨ improve taps | **0** |
+
+      All four lookups are one burst — `anniversary` three times and `Happy`
+      submitted as *German*, which cannot have returned anything. So the true
+      count of "I did not know that German word" is plausibly zero.
+- [x] **Not a broken button.** `/api/correction` validates and appends, is
+      covered by `tests/test_corrections.py`, and `corrections.jsonl` has been
+      0 bytes since 19 July. The long-press fix the phone needs
+      (`-webkit-touch-callout: none`) is in `style.css`. The affordances work;
+      they are simply not used, which is what a person listening to another
+      person does — attention is on the conversation, not on the app.
+- [x] **Even given a signal, the shape of speech is against it.** Over the
+      real hour: 5,697 content tokens, **1,376 distinct forms, 61% of them
+      appearing exactly once**. A loop pays off when what you learned comes
+      back, and within a conversation most words never do. The head is the
+      opposite problem — the top 100 forms are 61% of all tokens, and those
+      are the words a learner already has. Whatever is left in between is
+      where item 11 measured its 10% firing rate and no latency win.
+- [x] **Declined.** Not built, and nothing added to record for later: a
+      collector with no consumer is how `corrections.jsonl` got to be an empty
+      file that three features consult.
+- [ ] **What the idea was reaching for, without needing the loop.** The
+      learner value here is vocabulary review, and that needs no model of what
+      Chester understands — only the transcript, which already exists. 89% of
+      the hour's distinct forms have a Wiktionary entry, and a frequency list
+      drops the trivial head. That is the roadmap's first item (Anki/vocab
+      export), it is unblocked, and it costs one small pure-Python dependency
+      (`wordfreq`, not currently installed). Chester's call.
+
 ---
 
 ## Closed
