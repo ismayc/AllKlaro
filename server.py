@@ -279,6 +279,49 @@ def continues_previous(text: str) -> bool:
     head = text.lstrip(".,!? ")
     return bool(head) and head[0].isalpha() and head[0].islower()
 
+
+def flowed_on(split_reason: str | None) -> bool:
+    """True when the previous utterance was cut mid-flow, not at a real pause.
+
+    A `soft_max` split is the cap firing on continuous speech: the VAD emits up
+    to the last micro-pause because the speaker never stopped long enough to
+    end the utterance (VadSession). Whoever was talking is still talking, so
+    the next chunk is the same person carrying on. That makes it the one
+    same-speaker signal available here without diarization, which is a closed
+    decision — and a same-speaker signal is exactly what merging needs, since
+    the risk of joining two utterances is joining two people.
+
+    This is what `looks_finished` and `continues_previous` both structurally
+    miss. Both read the text, and Whisper punctuates and capitalises a mid-flow
+    cut exactly as it would a finished sentence: "…die Klimaanlage lief." then
+    "Und darunter ist so, da haben sie Kies…". Nothing in either string says
+    the speaker never stopped. The split reason says it, and says it for free —
+    it is already on `meta` for the stats dump.
+
+    Measured over the real 54-minute recording, 703 utterances, against the
+    batch service's 216 segments of ~39 words:
+
+                                        cards   /min   mean words
+          no merging                      703   12.9         10.7
+          punctuation only                503    9.3         15.0
+          + casing (was shipped)          438    8.1         17.2
+          + this rule                     228    4.2         33.0
+          batch service (target)          216    4.0         39.0
+
+    Merging on elapsed time alone gets closer still (211 cards, 39 median
+    words) and is the wrong trade: sampled cards splice a question onto its
+    answer ("How did you do it? No. No, I don't do red eyes anymore.") and
+    German onto English, because the batch service segments by turn and a
+    clock cannot tell one. Under this rule 7 of 8 sampled multi-utterance
+    cards are single-speaker passages.
+
+    The cost is retranslation, not latency: a merge replaces the card and
+    re-translates the grown text, so first paint is unchanged but merge
+    operations over the hour go 265 -> 475. That is ~79% more translate work
+    on the stage that is already this machine's bottleneck.
+    """
+    return split_reason == "soft_max"
+
 WHISPER_REPO = "mlx-community/whisper-large-v3-turbo"
 # Overridable so a benchmark can point the translation stage at a
 # fixed-latency stub (tools/fake_ollama.py). Measured on the real recording,
@@ -2782,7 +2825,8 @@ async def ws_endpoint(ws: WebSocket):
                     and gap < MERGE_GAP_SEC
                     and len(prev["text"]) < MERGE_MAX_CHARS
                     and (not looks_finished(prev["text"])
-                         or continues_previous(text))):
+                         or continues_previous(text)
+                         or flowed_on(prev.get("split")))):
                 text = prev["text"] + " " + text
                 replaces = prev["uid"]
                 if history and history[-1].get("uid") == replaces:
@@ -2790,7 +2834,8 @@ async def ws_endpoint(ws: WebSocket):
 
             last_final[source] = text[-200:]
             prev = {"uid": my_uid, "text": text, "source": source,
-                    "speaker": speaker, "t_end": t0}
+                    "speaker": speaker, "t_end": t0,
+                    "split": meta.get("split")}
             recent_finals.append({"norm": normalize_text(text),
                                   "speaker": speaker, "t": t0})
             remember_for_gist(gist_pending, my_uid, source, text, replaces)

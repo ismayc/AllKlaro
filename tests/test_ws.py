@@ -3,7 +3,7 @@ import json
 
 import server
 from conftest import (SILENCE_CHUNK, SPEECH_CHUNK, collect_until, speak,
-                      trace_records)
+                      speak_flowing, trace_records)
 
 
 def test_full_flow_auto_german(client, stub_transcribe):
@@ -279,6 +279,69 @@ def test_continues_previous_reads_the_casing():
     assert not server.continues_previous("Der Pool ist ja so ein L.")
     assert not server.continues_previous("")
     assert not server.continues_previous("2 Grad ab, würde ich sagen")
+
+
+def test_flowed_on_reads_the_split_reason():
+    """`soft_max` is the cap firing on speech that never stopped, so the next
+    chunk is the same person carrying on. `pause` and `hard_max` are not: a
+    pause is a real gap anyone could speak into, and a hard cut means the
+    speaker ran past MAX_UTTERANCE_SEC without any micro-pause at all."""
+    assert server.flowed_on("soft_max")
+    assert not server.flowed_on("pause")
+    assert not server.flowed_on("hard_max")
+    assert not server.flowed_on(None)       # first utterance of a session
+
+
+def test_speech_cut_by_the_cap_merges_with_what_follows(
+        client, stub_transcribe):
+    """The case both text rules structurally miss.
+
+    Whisper ends the cap-cut fragment with a full stop and starts the next one
+    with a capital, so `looks_finished` says finished and `continues_previous`
+    says new sentence. Both are reading the text, and the text cannot know the
+    speaker never paused. The split reason knows.
+
+    This is the passage from the real recording that the hour-long comparison
+    flagged: the rain-gutter description arrives as two cards, and the second
+    one ("Und darunter...") has no idea what "darunter" is under.
+    """
+    stub_transcribe.result = {
+        "text": "Regenrinnen gibt es hier nicht, dann tropft das da runter.",
+        "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak_flowing(ws)                  # cut by the cap, still talking
+        msgs1 = collect_until(ws)
+        stub_transcribe.result = {
+            "text": "Und darunter haben sie Kies ausgestreut.", "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+
+    final1 = next(m for m in msgs1 if m["type"] == "final")
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert final2["replaces"] == final1["id"]
+    assert final2["text"].endswith("Und darunter haben sie Kies ausgestreut.")
+    assert final2["text"].startswith("Regenrinnen gibt es hier nicht")
+
+
+def test_a_real_pause_between_two_finished_sentences_still_splits(
+        client, stub_transcribe):
+    """The guard that keeps the new rule from becoming a clock.
+
+    Merging on elapsed time alone reaches the batch service's segment count but
+    splices a question onto its answer, because it cannot tell a turn change
+    from a breath. Requiring `soft_max` is what keeps that from happening: two
+    finished sentences separated by a real pause stay two cards.
+    """
+    stub_transcribe.result = {"text": "Das war klar.", "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)                          # ends on silence -> `pause` split
+        collect_until(ws)
+        stub_transcribe.result = {"text": "Wir sehen uns morgen.",
+                                  "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert "replaces" not in final2
 
 
 def test_the_uncased_transcript_is_a_known_cost_not_a_surprise():

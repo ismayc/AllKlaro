@@ -715,11 +715,13 @@ not the translation model.
       against a system that does not chunk the answer is plainly yes: 41% of
       cards are fragments against ~0% for turn-level segments. The lever was
       never where to cut; it is how much to rejoin.
-- [ ] **Still 500 against 216.** The casing merge closes about a sixth of the
-      distance. Going further means a wider `MERGE_GAP_SEC` or a higher cap,
-      and both buy coherence with latency — the trade item 1 spent a whole
-      investigation minimising. Not attempted; it is a product call about what
-      a live translator is for.
+- [x] **Still 500 against 216 → closed by item 16.** This box assumed the
+      lever was a wider `MERGE_GAP_SEC` or a higher cap, and both buy
+      coherence with latency. Measured, that assumption was wrong twice over:
+      widening the gap to 6 s barely moves the count (438 → 394 over the
+      hour), and merging replaces the card in place, so the price was never
+      latency — it is retranslation. The lever that works is the split
+      reason; see item 16.
 - [x] ⚠️ **A wedged Ollama looks exactly like a quality regression.** The run
       that prompted this was **draft-only**: `gemma3:12b` could not load, so no
       card was ever refined and every ✨/⏪/gist call timed out silently. The
@@ -728,6 +730,47 @@ not the translation model.
       Hochwasser."* Cause was `OLLAMA_CONTEXT_LENGTH=131072` — a 128k KV cache
       per model, so draft and main evict each other. Set the context length in
       **Ollama.app's own settings**; the env var alone is overridden by the app.
+
+### 16. The VAD already knows who is still talking — merge on the split reason
+The stated goal is to match the batch service's reading experience — ~216
+turn-sized segments of ~39 words over the hour — live. Both text rules
+together got to 438 cards, and the obvious knobs go no further: over the full
+hour, `gap 2→6 s` and `max 300→800` chars move 438 → 394. The text is the
+wrong witness — Whisper punctuates a mid-flow cut exactly like a finished
+sentence, so `looks_finished` and `continues_previous` both read "…die
+Klimaanlage lief." / "Und darunter…" as two complete thoughts.
+
+- [x] **Shipped: `flowed_on()` — merge when the previous chunk was a
+      `soft_max` split.** That split is the cap firing on speech that never
+      paused: the VAD emits up to the last micro-pause *because the speaker
+      was still going*, so the next chunk is the same person continuing. The
+      signal was already on `meta` for the stats dump; the rule is one line.
+      Over the hour: **438 → 228 cards, 8.1 → 4.2/min, mean 17.2 → 33.0
+      words** against the batch service's 216 / 4.0 / ~39. Live on the 240 s
+      slice: 30 → **21 cards** (baseline was 35), same 534 source words, all
+      translated, 20/21 refined, partials lost 0, lag 5.1–6.8 s.
+- [x] **Merging on the clock alone was measured and rejected.** `turn`-style
+      merging (gap + size, no evidence) hits the target number exactly — 211
+      cards, median 39 words at `gap=1.5s/max=250` — and is the wrong trade:
+      sampled cards splice a question onto its answer ("How did you do it?
+      No. No, I don't do red eyes anymore."), and German onto English. The
+      batch service segments by *turn* because it has diarization; a clock
+      cannot tell a turn change from a breath, and a 39-word card containing
+      two speakers is worse than two 17-word cards. Under `flowed_on` 7 of 8
+      sampled multi-utterance cards are single-speaker passages.
+- [x] **The cost is retranslation, not latency.** A merge replaces the card
+      and re-translates the grown text (`replaces` in app.js), so first paint
+      is unchanged. Merge ops over the hour go 265 → 475, ~79% more translate
+      work. Measured live with both models co-resident: no queue growth, no
+      refine starvation, lag within the normal 5–9 s band — but that is one
+      run on a healthy Ollama, and item 15's warning applies unchanged: a
+      wedged Ollama will make this rule *look* like it broke translation.
+- [ ] **The last 228 → 216 is the diarization gap.** What remains is mostly
+      real turn structure a same-speaker heuristic cannot see (one sampled
+      card still mixes speakers across a genuine handover). Closing it means
+      revisiting the no-diarization decision — a pretrained speaker encoder
+      plugging into the voice-marks machinery — which is Chester's call, not
+      a tuning knob.
 
 ---
 

@@ -261,6 +261,25 @@ def speak(ws, speech_chunks=10, silence_chunks=8):
         ws.send_bytes(SILENCE_CHUNK)
 
 
+def speak_flowing(ws, before=20, dip=2, after=28):
+    """Simulate continuous speech that the cap cuts, not a finished utterance.
+
+    Each chunk is 2048 samples = 4 VAD frames = 128 ms. The `dip` is a
+    micro-pause long enough to set `split_at` (MICRO_PAUSE_FRAMES) but too
+    short to end the utterance, and `after` carries the total past
+    SOFT_MAX_SEC so the cap fires on it — which is a `soft_max` split. There
+    is deliberately no closing silence: the speaker is still going.
+    """
+    for _ in range(3):
+        ws.send_bytes(SILENCE_CHUNK)
+    for _ in range(before):
+        ws.send_bytes(SPEECH_CHUNK)
+    for _ in range(dip):
+        ws.send_bytes(SILENCE_CHUNK)
+    for _ in range(after):
+        ws.send_bytes(SPEECH_CHUNK)
+
+
 def collect_until(ws, stop_types=("translation_done", "discard", "error"), limit=200):
     msgs = []
     for _ in range(limit):
