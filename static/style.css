@@ -181,11 +181,15 @@ main {
 }
 #partialBar.hidden { display: none; }
 /* Pipeline overlay — a diagnostic readout, deliberately unobtrusive:
-   pinned out of the reading column and click-through, so it never blocks a
-   tap on a card underneath it. */
+   pinned out of the reading column. It used to be click-through so a tap on
+   a card underneath always landed; now the tap dismisses the box instead.
+   That trades a protection for an interaction that barely happens (card taps
+   are rare in practice) for relief from the thing that actually happens: the
+   box sitting on top of the conversation. One tap clears the view, and the
+   Pipeline checkbox in settings brings it back. */
 #pipeline {
   position: fixed; right: 8px; bottom: 120px; z-index: 5;
-  pointer-events: none; display: grid; gap: 2px;
+  cursor: pointer; display: grid; gap: 2px;
   padding: 8px 10px; border-radius: 8px;
   /* Nearly opaque plus a blur: at 82% the conversation text underneath read
      straight through the digits and both became hard to follow. */

@@ -163,6 +163,14 @@ statsChk.onchange = () => {
   sendConfig();   // the server only pushes stats while the overlay is open
   saveSettings();
 };
+// The overlay floats over the feed and sometimes sits on the very card being
+// read. A tap on the box dismisses it in place — no trip to settings — and
+// goes through statsChk so the checkbox stays true to what is on screen, the
+// server stops pushing stats, and the choice persists like any other setting.
+pipeline.onclick = () => {
+  statsChk.checked = false;
+  statsChk.onchange();
+};
 
 // ------------------------------------------------------- pipeline overlay
 //

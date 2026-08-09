@@ -353,14 +353,27 @@ def test_pipeline_overlay_is_wired_and_off_by_default():
         assert f'id="{field}"' in HTML, f"overlay lost {field}"
 
 
-def test_pipeline_overlay_never_blocks_the_conversation():
-    """It floats over the feed, so it must be click-through and opaque enough
-    to read against card text underneath."""
+def test_pipeline_overlay_dismisses_on_tap_and_stays_readable():
+    """It floats over the feed and sometimes sits on the very card being read,
+    so a tap on it must hide it in place — and must go through statsChk, or
+    the settings checkbox would still say "on", the server would keep pushing
+    stats nobody sees, and the next reload would resurrect the box the user
+    just dismissed. It also must stay opaque enough to read against card text
+    underneath. (It was click-through once; that protected card taps, which
+    barely happen, at the price of the overlap that prompted this.)
+    """
     css = (STATIC / "style.css").read_text()
     block = re.search(r"#pipeline \{[^}]*\}", css, re.S).group()
-    assert "pointer-events: none" in block
+    assert "pointer-events: none" not in block   # tappable now, on purpose
     alpha = float(re.search(r"rgba\(16, 20, 26, \.(\d+)\)", block).group(1)) / 100
     assert alpha >= 0.9, "overlay too transparent — page text bleeds through"
+    handler = re.search(r"pipeline\.onclick = \(\) => \{[^}]*\}", JS, re.S)
+    assert handler, "the overlay lost its tap-to-dismiss handler"
+    assert "statsChk.checked = false" in handler.group()
+    assert "statsChk.onchange()" in handler.group()
+    # The user needs to learn this is possible from the box itself.
+    assert re.search(r'id="pipeline"[^>]*title="[^"]*hide', HTML, re.I), \
+        "the overlay lost the tooltip that says it can be tapped away"
 
 
 def test_anywhere_mode_serves_loopback_only():
