@@ -48,10 +48,16 @@ Two things to keep in mind before trusting a number out of here:
 - That is also why `--merge lowercase` cannot be scored with it: the casing
   rule is both the intervention and half the detector, so the variant would
   be measured against itself. Pass `--metric ends` for that comparison and
-  the tool insists on it. Under `ends` the variant does not improve endings
-  (25.3% -> 29.2%, p=0.24) — merging moves a card's end to its continuation's
-  end. It fixes starts, which `ends` cannot see and `broken` cannot fairly
-  score, so that one stays a judgement call rather than a number.
+  the tool insists on it. Under `ends` it does not improve endings (25.3% ->
+  29.2%, p=0.24) — merging moves a card's end to its continuation's end. What
+  it fixes is starts, which `ends` cannot see and `broken` cannot fairly
+  score, so the case for it was never a single number.
+
+The case that carried it was a whole hour against a batch transcription
+service, which segments by turn: 216 segments of ~39 words where this
+pipeline made 554. Three of five hand-aligned passages lost their meaning
+purely to a cut. `--merge lowercase` is now the rule server.py ships;
+`--merge punctuation` is the old one, kept so the two stay comparable.
 """
 import argparse
 import json
@@ -128,18 +134,14 @@ BROKEN_LABELS = frozenset(("MISSING_VERB", "MISSING_OTHER"))
 
 
 def starts_lowercase(text: str) -> bool:
-    """True when a chunk opens mid-sentence, on casing alone.
+    """Whether a chunk opens mid-sentence, on casing alone.
 
-    German capitalises every noun and every sentence start, so a chunk that
-    opens with a lowercase letter did not start a sentence. Free, no model
-    call, and it agreed with hand labels at precision 0.82.
-
-    It has one blind spot worth knowing: Whisper occasionally emits a chunk
-    with no casing at all, and then a real sentence start looks like a
-    continuation. That was 2.3% of German cards over the hour.
+    Delegates to the server's `continues_previous`, which is the rule that
+    actually ships. A private copy here would be free to drift from the thing
+    being measured, which is the one bug this tool cannot afford.
     """
-    head = text.lstrip(".,!? ")
-    return bool(head) and head[0].isalpha() and head[0].islower()
+    import server as srv
+    return srv.continues_previous(text)
 
 
 def merge_cards(rows, lowercase_continues=False):
@@ -150,10 +152,11 @@ def merge_cards(rows, lowercase_continues=False):
     translation, so the card -- not the VAD utterance -- is what a listener
     reads, and it is the only fair unit to score.
 
-    `lowercase_continues` adds the sized-but-unbuilt variant: merge when THIS
+    `lowercase_continues` matches what server.py now does: merge when THIS
     chunk opens lowercase, whatever punctuation the previous one ended with.
     Punctuation-only merging cannot see those, because the evidence sits on
-    the current chunk and the rule only looks at the previous one.
+    the current chunk and the rule only looks at the previous one. Pass False
+    to replay the older punctuation-only rule for comparison.
     """
     import server as srv
 

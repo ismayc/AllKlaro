@@ -870,8 +870,15 @@ function handleMessage(msg) {
 // more. So every card on screen can be a fragment while the stretch they
 // belong to is a perfectly good sentence. This rejoins the last few and asks
 // for one translation of the whole passage.
-const RECAP_WINDOW_MS = 15000;
-const RECAP_MAX_CARDS = 12;
+// 45 s rather than the 15 s this shipped with (Chester, 2026-08-09): 15 s is
+// about two cards on real conversation, which is barely more than the card
+// already on screen. The question is "what did they just say", and the answer
+// wants the stretch, not the last sentence.
+const RECAP_WINDOW_MS = 45000;
+// High enough that the window is genuinely the time span it promises — the
+// character cap on the server is what actually bounds the prompt. A fast
+// talker in 45 s is the case this must not silently truncate.
+const RECAP_MAX_CARDS = 20;
 
 // The stretch to re-read: most recent first by arrival, in speaking order, all
 // sharing the newest card's direction. A window mixing German and English

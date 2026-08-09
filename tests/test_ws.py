@@ -220,6 +220,100 @@ def test_a_real_full_stop_still_ends_a_sentence():
     assert not server.looks_finished("und dann haben wir")
 
 
+def test_a_full_stop_does_not_end_a_sentence_if_the_next_chunk_continues_it(
+        client, stub_transcribe):
+    """The case punctuation-only merging structurally cannot see.
+
+    Whisper ends the fragment with a full stop — nothing about it says
+    unfinished — and puts the verb in the next chunk. This exact pair is from
+    the real recording, and separately the cards read "they PUT gravel in that
+    area of the garden" (a verb the model invented, because `ausgestreut` had
+    not been said) and "spread out so that the water drains better" (a
+    participle with no subject). German capitalises every noun and every
+    sentence start, so the lowercase opening is the tell.
+    """
+    stub_transcribe.result = {
+        "text": "Und darunter haben sie Kies in dem Bereich des Gartens.",
+        "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        msgs1 = collect_until(ws)
+        stub_transcribe.result = {
+            "text": "ausgestreut, damit das Wasser besser abläuft.",
+            "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+
+    final1 = next(m for m in msgs1 if m["type"] == "final")
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert final2["replaces"] == final1["id"]
+    assert final2["text"] == ("Und darunter haben sie Kies in dem Bereich des "
+                              "Gartens. ausgestreut, damit das Wasser besser "
+                              "abläuft.")
+
+
+def test_two_finished_sentences_are_still_two_cards(client, stub_transcribe):
+    """The guard that keeps the casing rule narrow. If a capitalised opening
+    also merged, every consecutive sentence would glue into one running card
+    and the feed would stop being readable."""
+    stub_transcribe.result = {"text": "Das war klar.", "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        collect_until(ws)
+        stub_transcribe.result = {"text": "Wir sehen uns morgen.",
+                                  "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert "replaces" not in final2
+
+
+def test_continues_previous_reads_the_casing():
+    assert server.continues_previous("ausgestreut, damit das Wasser abläuft.")
+    assert server.continues_previous("gibt es da auch keine Abdeckung für.")
+    assert server.continues_previous("...so eine L-Form")   # punctuation first
+    # A German noun is capitalised mid-sentence, so an opening capital is not
+    # proof of a sentence start — but it is all the evidence there is, and
+    # treating it as "not a continuation" is the conservative direction.
+    assert not server.continues_previous("Wasservolumen sofort aufwärmt.")
+    assert not server.continues_previous("Der Pool ist ja so ein L.")
+    assert not server.continues_previous("")
+    assert not server.continues_previous("2 Grad ab, würde ich sagen")
+
+
+def test_the_uncased_transcript_is_a_known_cost_not_a_surprise():
+    """Whisper occasionally emits a chunk with no casing at all, and then a
+    real sentence start looks like a continuation and merges one card too
+    many. Measured at 2.3% of German cards over the real hour, and pinned here
+    so it is a known price rather than a mystery card."""
+    assert server.continues_previous("morgen für knapp zwei wochen nach hawaii")
+
+
+def test_a_lowercase_opening_after_a_long_gap_is_still_a_new_card(
+        client, stub_transcribe, monkeypatch):
+    """Casing says "this continues something"; the gap says whether the thing
+    it continues was a moment ago. Without the gap check a lowercase chunk
+    would merge into whatever happened to precede it, minutes earlier.
+
+    The gap is wall clock (`loop.time()`) minus the utterance's own duration,
+    so sending more silence does not widen it, and under a test harness that
+    feeds faster than realtime it is *negative*. Both facts are worth knowing
+    before writing any other timing test against this path — a threshold of
+    0.0 here would not close the window at all.
+    """
+    monkeypatch.setattr(server, "MERGE_GAP_SEC", -1e9)
+    stub_transcribe.result = {"text": "Das war klar.", "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        collect_until(ws)
+        stub_transcribe.result = {"text": "ausgestreut, damit es abläuft.",
+                                  "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert "replaces" not in final2
+
+
 def test_complete_sentence_is_not_merged(client, stub_transcribe):
     with client.websocket_connect("/ws") as ws:
         speak(ws)                      # "Wie geht es dir?" ends a sentence

@@ -573,22 +573,23 @@ time. Sized against the real hour first, and it does not survive.
       0.31. `qwen2.5:14b-instruct` plus a casing rule reproduces the hand
       labels at 86% agreement (precision 0.84, recall 0.93) and matched
       qwen2.5:32b within noise at a quarter of the wall clock.
-- [ ] **Sized but not built: merge on casing, not on punctuation.** German
+- [x] **Shipped: merge on casing, not only on punctuation.** German
       capitalises every noun and every sentence start, so a chunk opening
       lowercase is a continuation — free, no model call, precision 0.82
       against hand labels. `looks_finished()` cannot see those, because the
-      evidence sits on the *current* chunk and the rule only inspects the
-      previous one. Over the hour it adds **44 German merges** and rejoins
-      exactly the verb-final splits this item was aimed at: *"...da haben sie
-      Kies in dem Bereich des Gartens."* + *"ausgestreut und..."*, and
-      *"Sommerhaus."* + *"sich zugelegt."*
-      Not a clean win, which is why it is still a box: endings do not improve
-      (25.3% → 29.2%, p=0.24 — merging moves a card's end to its
-      continuation's end), and some cards become run-ons. Display latency is
-      unaffected, since merges already go out as `replaces`. Chester's call.
+      evidence sits on the *current* chunk while the rule inspects the
+      previous one. `continues_previous()` in `server.py`.
+      Over the hour: **554 → 500 cards** (German 391 → 346, mean 1.34 → 1.51
+      utterances per card). It rejoins exactly the verb-final splits this item
+      was aimed at — *"...in dem Bereich des Gartens."* + *"ausgestreut, damit
+      das Wasser besser abläuft."*, which separately produced a verb the model
+      invented and a participle with no subject.
+      ⚠️ Cards get longer: p50 84 chars, p90 234, max 474. Sixteen exceed
+      `MERGE_MAX_CHARS` because the cap is checked *before* appending, so a
+      299-char card can still grow — pre-existing, more visible now.
       ⚠️ It cannot be scored with the default metric: the casing rule is both
-      the intervention and half the detector, so the tool refuses that
-      combination rather than reporting a win it manufactured.
+      the intervention and half the detector, so `tools/boundary_quality.py`
+      refuses that combination rather than reporting a win it manufactured.
 
 ### 13. "What did they just say?" — the ✨ tap widened to a window
 Item 12 declined to change where the pipeline cuts, and in doing so measured
@@ -598,7 +599,7 @@ German clause routinely spans more. Item 8 already established what a fragment
 costs — each half translated with no sight of the other. This does the same
 repair on demand, over a stretch the automatic merge cannot reach.
 
-- [x] **Built.** ⏪ in the topbar joins the cards from the last 15 s and asks
+- [x] **Built.** ⏪ in the topbar joins the cards from the last 45 s and asks
       for one translation of the whole passage. `recap_window` in `server.py`,
       `recapWindow` / `requestRecap` in `static/app.js`.
 - [x] **The saving is real and it is not about latency.** Verified in Chrome
@@ -613,6 +614,9 @@ repair on demand, over a stretch the automatic merge cannot reach.
       Card 1 invented a verb because `ausgestreut` had not been said yet;
       card 2 is an orphaned participle with no subject. Neither is fixable by
       a better model — the words were not there. Joining is the only repair.
+- [x] **45 s, widened from 15 s** (Chester, 2026-08-09) — 15 s is about
+      two cards on real conversation, barely more than the card already on
+      screen; the question wants the stretch.
 - [x] **Windowed by when cards ARRIVED, not when the words were spoken.** The
       listener asks because of what they just read, and under lag those are
       different instants. Arrival is the one that matches the question.
@@ -684,6 +688,46 @@ this one has no input at all.
       drops the trivial head. That is the roadmap's first item (Anki/vocab
       export), it is unblocked, and it costs one small pure-Python dependency
       (`wordfreq`, not currently installed). Chester's call.
+
+### 15. Measured against a batch service — and item 12 answered the wrong question
+Chester compared a live run against a TransyncAI transcript of the **same
+recording** and called it dramatically worse. He was right, and the reason is
+not the translation model.
+
+- [x] **The gap is chunking.** Same 54 minutes: TransyncAI produced **216
+      segments averaging 39 words**; this pipeline produced **554**. Three of
+      five hand-aligned passages lost their meaning purely to a cut —
+      *"das war ja auch zwischenzeitlich hier mächtig"* without *windig*
+      ("pretty intense" instead of "pretty windy"), and *"gibt es da auch
+      keine Abdeckung für."* without the pool it refers to.
+- [x] **One case is transcription, not translation.** *"Er hat kein Solar da
+      drauf"* was heard as *"Die hat keinen Soldaten"* → "She doesn't have any
+      soldiers." No translation model can repair a sentence it never heard.
+- [x] **AllKlaro wins on dialect**, worth recording because it is the one
+      place recent work beat a commercial service: *"und dann hat Uwe
+      gekickt"* is rendered by TransyncAI as "Uwe **kicked it off**". The live
+      run said "Uwe **looked**", which is correct — Berlinerisch *jekiekt* =
+      *geguckt*, confirmed two lines later by *"Meistens **guckt** der Arvid
+      nach"*. That is the mis-hearing lexicon earning its place.
+- [x] **Item 12 answered the wrong question.** It asked whether the 5 s cap's
+      boundaries are worse than a real pause — they are not, and that stands.
+      The useful question was whether chunking costs quality *at all*, and
+      against a system that does not chunk the answer is plainly yes: 41% of
+      cards are fragments against ~0% for turn-level segments. The lever was
+      never where to cut; it is how much to rejoin.
+- [ ] **Still 500 against 216.** The casing merge closes about a sixth of the
+      distance. Going further means a wider `MERGE_GAP_SEC` or a higher cap,
+      and both buy coherence with latency — the trade item 1 spent a whole
+      investigation minimising. Not attempted; it is a product call about what
+      a live translator is for.
+- [x] ⚠️ **A wedged Ollama looks exactly like a quality regression.** The run
+      that prompted this was **draft-only**: `gemma3:12b` could not load, so no
+      card was ever refined and every ✨/⏪/gist call timed out silently. The
+      draft rendered "It's because of the flood." as *"Es ist aufgrund des
+      Überschwemmungs."* where the main model gives *"Das liegt am
+      Hochwasser."* Cause was `OLLAMA_CONTEXT_LENGTH=131072` — a 128k KV cache
+      per model, so draft and main evict each other. Set the context length in
+      **Ollama.app's own settings**; the env var alone is overridden by the app.
 
 ---
 

@@ -257,6 +257,28 @@ def looks_finished(text: str) -> bool:
     """
     return bool(SENTENCE_END_RE.search(text)) and not ELLIPSIS_END_RE.search(text)
 
+
+def continues_previous(text: str) -> bool:
+    """True when this utterance opens mid-sentence, on casing alone.
+
+    German capitalises every noun and every sentence start, so a chunk opening
+    with a lowercase letter did not begin a sentence. English capitalises
+    sentence starts too, so the signal holds there, just less strongly.
+
+    This is the half of the evidence `looks_finished` structurally cannot see.
+    That rule inspects the PREVIOUS utterance, and Whisper regularly ends a
+    fragment with a full stop — "…in dem Bereich des Gartens." — while the
+    verb arrives in the next chunk: "ausgestreut, damit das Wasser abläuft."
+    Nothing about the first chunk says it was unfinished. The second one says
+    it, and says it for free.
+
+    Measured against 51 hand-labelled utterances: precision 0.82. Its blind
+    spot is a chunk Whisper emits with no casing at all, which was 2.3% of
+    German cards over the real hour and merges one card too many when it hits.
+    """
+    head = text.lstrip(".,!? ")
+    return bool(head) and head[0].isalpha() and head[0].islower()
+
 WHISPER_REPO = "mlx-community/whisper-large-v3-turbo"
 # Overridable so a benchmark can point the translation stage at a
 # fixed-latency stub (tools/fake_ollama.py). Measured on the real recording,
@@ -2739,15 +2761,28 @@ async def ws_endpoint(ws: WebSocket):
             source, targets = resolve_targets(mode_for_utterance, detected)
 
             # Merge with the previous utterance when it did not finish — no
-            # terminal punctuation, or a trailing-off ellipsis — and this one
-            # resumed right after. Rejoins German verb-final clauses split by
-            # a short pause, where the fragment alone cannot be translated.
+            # terminal punctuation, a trailing-off ellipsis, or THIS one
+            # opening mid-sentence — and this one resumed right after. Rejoins
+            # German verb-final clauses split by a short pause, where the
+            # fragment alone cannot be translated.
+            #
+            # The casing half was added after comparing a whole hour against a
+            # batch transcription service, which segments by turn: it produced
+            # 216 segments of ~39 words where this pipeline produced 554. Three
+            # of five hand-aligned passages lost their meaning purely to a cut
+            # — "…hier mächtig." without *windig*, "gibt es da auch keine
+            # Abdeckung für." without the pool it refers to. Item 12 measured
+            # the cap's boundaries as no worse than a real pause and left the
+            # cutting alone, which was the right answer to the wrong question:
+            # the cost is the chunking itself, and merging is the way to pay
+            # less of it without spending latency.
             replaces = None
             gap = (t0 - len(audio) / SAMPLE_RATE - prev["t_end"]) if prev else 99
             if (prev and prev["speaker"] == speaker and prev["source"] == source
                     and gap < MERGE_GAP_SEC
                     and len(prev["text"]) < MERGE_MAX_CHARS
-                    and not looks_finished(prev["text"])):
+                    and (not looks_finished(prev["text"])
+                         or continues_previous(text))):
                 text = prev["text"] + " " + text
                 replaces = prev["uid"]
                 if history and history[-1].get("uid") == replaces:
