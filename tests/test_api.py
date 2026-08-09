@@ -41,6 +41,38 @@ async def test_translation_streams_and_returns_text(fake_ollama):
     assert not any(m["type"] == "translation_done" for m in ws.sent)
 
 
+async def test_every_ollama_request_pins_its_context_length(fake_ollama):
+    """No request may inherit the server's default context length.
+
+    Ollama.app injects OLLAMA_CONTEXT_LENGTH from its settings UI, and at
+    131072 the per-model KV cache is big enough that draft and main evict
+    each other — every card draft-only, every ✨/⏪ silently timed out, and
+    translate p50 collapsing under an hour of sustained speech. A request
+    that pins num_ctx gets a runner sized to num_ctx regardless, so this
+    asserts the pin on *every* body that reaches Ollama, prewarm included:
+    prewarm is the call that sizes the runner's allocation in the first
+    place. One shared value, or two call sites that disagree would thrash
+    the runner mid-session.
+    """
+    await server.stream_translation(
+        FakeWS(), 1, "Wie geht es dir?", "de", "en", "gemma3:12b")
+    await server.translate_once("Wie geht es dir?", "de", "en", "gemma3:12b")
+    await server.fold_gist("", ["[DE] Guten Morgen."], "gemma3:12b")
+    server._prewarmed.discard("gemma3:12b")
+    await server.prewarm_model("gemma3:12b")
+    bodies = fake_ollama["all"]
+    assert len(bodies) >= 4, "a call path stopped reaching Ollama"
+    for body in bodies:
+        assert body["options"]["num_ctx"] == server.OLLAMA_NUM_CTX, \
+            f"unpinned request: {str(body)[:120]}"
+
+
+def test_summarize_pins_context_length_too(client, fake_ollama):
+    client.post("/api/summarize", json={
+        "items": [{"source": "de", "text": "Guten Morgen."}]})
+    assert fake_ollama["chat"]["options"]["num_ctx"] == server.OLLAMA_NUM_CTX
+
+
 async def test_translation_missing_model_reports_error(fake_ollama):
     ws = FakeWS()
     result = await server.stream_translation(ws, 1, "Hallo", "de", "en", "missing:1b")

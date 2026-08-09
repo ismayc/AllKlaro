@@ -329,6 +329,22 @@ WHISPER_REPO = "mlx-community/whisper-large-v3-turbo"
 # identical code — is wider than any pipeline change worth making, so timing
 # work needs a translation stage that costs the same every time.
 OLLAMA_URL = os.environ.get("ALLKLARO_OLLAMA_URL", "http://127.0.0.1:11434")
+# Pinned on every request, because the server's default is not ours to trust:
+# Ollama.app injects OLLAMA_CONTEXT_LENGTH into `ollama serve` from its own
+# settings UI, and at its 131072 the KV cache per model is large enough that
+# draft and main evict each other — which presents as every card draft-only
+# and every ✨/⏪/gist call timing out silently (PROGRESS.md item 15), or as
+# translate p50 collapsing 1.1 s → 7.5 s over ~12 min of continuous speech
+# (item 16). A request that says num_ctx gets a runner sized to num_ctx, so
+# this holds whatever the app's setting is.
+#
+# 16384 is sized by the largest prompt in the app, the whole-session summary:
+# a full hour of this conversation is ~8k words ≈ 11-12k tokens, so an hour
+# fits with room for the reply. Everything else here — translate with 6 turns
+# of history, refine, gist step, recap — is under ~1k tokens. Same value
+# everywhere on purpose: one value means one runner allocation, never a
+# mid-session reload because two call sites disagreed about the size.
+OLLAMA_NUM_CTX = int(os.environ.get("ALLKLARO_NUM_CTX", "16384"))
 # ALLKLARO_MODEL also lets the integration suite benchmark any model:
 #   RUN_INTEGRATION=1 ALLKLARO_MODEL=<name> uv run pytest tests/test_integration.py
 DEFAULT_MODEL = os.environ.get("ALLKLARO_MODEL", "gemma3:12b")
@@ -1929,7 +1945,7 @@ async def fold_gist(previous: str, lines: list[str], model: str) -> str | None:
         "model": model,
         "messages": gist_messages(previous, lines),
         "stream": False,
-        "options": {"temperature": 0.2},
+        "options": {"temperature": 0.2, "num_ctx": OLLAMA_NUM_CTX},
         "keep_alive": "60m",
     }
     if any(k in model.lower() for k in ("qwen3", "deepseek-r1", "gpt-oss")):
@@ -1961,7 +1977,7 @@ async def summarize(payload: dict):
         "messages": [{"role": "system", "content": SUMMARY_PROMPT},
                      {"role": "user", "content": convo}],
         "stream": False,
-        "options": {"temperature": 0.2},
+        "options": {"temperature": 0.2, "num_ctx": OLLAMA_NUM_CTX},
         "keep_alive": "60m",
     }
     if any(k in model.lower() for k in ("qwen3", "deepseek-r1", "gpt-oss")):
@@ -2230,7 +2246,7 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
         "messages": translation_messages(text, source, target, history,
                                          flavor, address, heard_flavor),
         "stream": True,
-        "options": {"temperature": 0.0},
+        "options": {"temperature": 0.0, "num_ctx": OLLAMA_NUM_CTX},
         "keep_alive": "60m",
     }
     # Disable chain-of-thought on reasoning models so tokens are the translation.
@@ -2289,7 +2305,8 @@ async def prewarm_model(model: str) -> None:
             await client.post("/api/chat", json={
                 "model": model, "stream": False, "keep_alive": "60m",
                 "messages": [{"role": "user", "content": "ok"}],
-                "options": {"num_predict": 1, "temperature": 0.0}},
+                "options": {"num_predict": 1, "temperature": 0.0,
+                            "num_ctx": OLLAMA_NUM_CTX}},
                 timeout=120)
         log.info("Prewarmed translation model %s", model)
     except Exception as exc:
@@ -2324,7 +2341,7 @@ async def translate_once(text: str, source: str, target: str, model: str,
         "model": model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": 0.0},
+        "options": {"temperature": 0.0, "num_ctx": OLLAMA_NUM_CTX},
         "keep_alive": "60m",
     }
     if any(k in model.lower() for k in ("qwen3", "deepseek-r1", "gpt-oss")):
