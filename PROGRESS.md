@@ -753,11 +753,15 @@ Klimaanlage lief." / "Und darunter…" as two complete thoughts.
       merging (gap + size, no evidence) hits the target number exactly — 211
       cards, median 39 words at `gap=1.5s/max=250` — and is the wrong trade:
       sampled cards splice a question onto its answer ("How did you do it?
-      No. No, I don't do red eyes anymore."), and German onto English. The
-      batch service segments by *turn* because it has diarization; a clock
-      cannot tell a turn change from a breath, and a 39-word card containing
-      two speakers is worse than two 17-word cards. Under `flowed_on` 7 of 8
-      sampled multi-utterance cards are single-speaker passages.
+      No. No, I don't do red eyes anymore."), and German onto English. A
+      clock cannot tell a turn change from a breath, and a 39-word card
+      containing two speakers is worse than two 17-word cards. Under
+      `flowed_on` 7 of 8 sampled multi-utterance cards are single-speaker
+      passages. (This section originally claimed the batch service segments
+      by turn "because it has diarization" — invented, and wrong: Chester
+      confirmed 2026-08-09 it gets the same bare audio stream. Its coherence
+      comes from batch processing — whole-recording context with no latency
+      constraint — not from speaker knowledge.)
 - [x] **The cost is retranslation, not latency.** A merge replaces the card
       and re-translates the grown text (`replaces` in app.js), so first paint
       is unchanged. Merge ops over the hour go 265 → 475, ~79% more translate
@@ -784,12 +788,17 @@ Klimaanlage lief." / "Und darunter…" as two complete thoughts.
       partials lost 0. The standing suspect is still the 128k
       `OLLAMA_CONTEXT_LENGTH` (item 15): fix it in Ollama.app's settings
       before reading any sustained-load number as a pipeline regression.
-- [ ] **The last 228 → 216 is the diarization gap.** What remains is mostly
-      real turn structure a same-speaker heuristic cannot see (one sampled
-      card still mixes speakers across a genuine handover). Closing it means
-      revisiting the no-diarization decision — a pretrained speaker encoder
-      plugging into the voice-marks machinery — which is Chester's call, not
-      a tuning knob.
+- [ ] **The last 228 → 216 is a batch-vs-streaming gap, not a diarization
+      gap.** (Corrected 2026-08-09 — the first version of this box blamed
+      diarization; Transync has none, it processes the same bare audio in
+      batch with whole-recording context.) What remains is boundary quality
+      under a latency budget: Transync cuts at semantic boundaries it can
+      see because it is never mid-stream. The residual splice defect (~1 in
+      8 long cards joins a question to its answer) therefore has two
+      candidate fixes — smarter text/pause boundary rules (no new
+      dependency, closest to what Transync actually does) or a pretrained
+      speaker encoder as a same-speaker gate. Neither is measured yet;
+      which to try first is Chester's call.
 
 ### 17. The context length is now pinned in two places, and an hour holds
 Item 16's sustained-load collapse had a standing suspect: Ollama.app injects
