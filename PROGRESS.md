@@ -791,6 +791,46 @@ Klimaanlage lief." / "Und darunter…" as two complete thoughts.
       plugging into the voice-marks machinery — which is Chester's call, not
       a tuning knob.
 
+### 17. The context length is now pinned in two places, and an hour holds
+Item 16's sustained-load collapse had a standing suspect: Ollama.app injects
+`OLLAMA_CONTEXT_LENGTH=131072` into `ollama serve`, and at 128k the per-model
+KV cache is big enough that draft and main evict each other. Both ends are
+now fixed.
+
+- [x] **server.py pins `num_ctx: 16384` on every Ollama request** (all five
+      call sites, prewarm included — prewarm is what sizes the runner's
+      allocation in the first place). A request that says num_ctx gets a
+      runner sized to num_ctx *whatever the app's setting is*, so an app
+      update or settings reset cannot re-bloat the KV. Sized by the largest
+      prompt in the app: the whole-session summary, ~11-12k tokens for an
+      hour of this conversation. One shared value on purpose — call sites
+      that disagreed would thrash the runner mid-session. Overridable via
+      `ALLKLARO_NUM_CTX`. Verified live: gemma3's runner went `-c 131072` →
+      `-c 16384` on the first pinned request.
+- [x] **Ollama.app's own setting is now 16384 too** (was 131072, changed
+      2026-08-09 via its settings store, verified in the relaunched serve
+      process env). Defense for clients that do not pin.
+- [x] **31 minutes of continuous real conversation under the pin, no
+      collapse.** Translate p50 by 10-minute window: 1.10 s → 1.69 s →
+      2.20 s, refines landing 82% → 70% → 69%, partials lost 0 throughout,
+      192 cards. Under 131072 the same pipeline collapsed to p50 7.5 s with
+      tiny cards taking 9-17 s by minute 12, twice in one morning. The slow
+      creep is real but a different regime from the collapse; minutes 30-60
+      remain unmeasured (below), so "an hour holds" rests on the creep's
+      trajectory plus the collapse being gone, not on a full-hour trace.
+- [x] ⚠️ **The 62-minute acceptance run was killed at minute 31 by its own
+      test harness**: committing a test edit while the run was live —
+      `uvicorn --reload` watches `.py` files, the server restarted, and the
+      session's WebSocket died. Nothing pipeline-related failed. The rule
+      for any future long live run: no `.py` edits, no commits touching
+      `.py`, until the run completes. (Non-`.py` files are safe; the
+      watcher's default scope is Python sources only.)
+- [ ] Chester accepted the 31-minute evidence plus the twice-reproduced
+      morning collapse as sufficient (2026-08-09) and skipped the rerun. If
+      a future long session degrades anyway, the first check is unchanged:
+      `ollama ps` for the CONTEXT column, then per-window translate p50 from
+      `/tmp/allklaro-trace.jsonl`.
+
 ---
 
 ## Closed
