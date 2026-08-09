@@ -219,7 +219,18 @@ VOICE_MARKS_ON = os.environ.get("ALLKLARO_VOICE_MARKS", "") == "1"
 VOICE_CHANGE_DIST = float(os.environ.get("ALLKLARO_VOICE_CHANGE_DIST", "0.35"))
 HISTORY_TURNS = 6                  # recent exchanges fed to the translator
 MERGE_GAP_SEC = 2.0                # resumed-within window for fragment merging
-MERGE_MAX_CHARS = 300              # never grow merged utterances beyond this
+# 500, up from 300 (2026-08-09): the reference batch transcript's paragraphs
+# run to a median of 51 words, and at 300 chars the cap was the binding
+# refusal 39 times over the real hour. 500 admits a ~75-word card — the
+# reference's p90 — while still bounding the retranslation prompt.
+MERGE_MAX_CHARS = 500              # never grow merged utterances beyond this
+# A chunk this short is an interjection — "Ja.", "Mm-hmm.", "No, no." — and
+# gets absorbed into the live card instead of becoming one (see the merge
+# site). Sized at 3 words: 26% of all cards over the real hour were ≤3 words,
+# and Whisper's language detection on them is a coin toss, so each one both
+# WAS a card and broke the chain for the speaker's real continuation — the
+# double damage behind most of the count gap vs the batch reference.
+ABSORB_MAX_WORDS = 3
 ECHO_WINDOW_SEC = 6.0              # cross-channel duplicate suppression window
 ECHO_MIN_CHARS = 16                # never dedupe short phrases ("Genau!") —
                                    # people legitimately repeat those
@@ -2854,8 +2865,8 @@ async def ws_endpoint(ws: WebSocket):
             # fragment alone cannot be translated.
             #
             # The casing half was added after comparing a whole hour against a
-            # batch transcription service, which segments by turn: it produced
-            # 216 segments of ~39 words where this pipeline produced 554. Three
+            # batch transcription service: it produced 216 paragraph-sized
+            # segments of ~39 words where this pipeline produced 554. Three
             # of five hand-aligned passages lost their meaning purely to a cut
             # — "…hier mächtig." without *windig*, "gibt es da auch keine
             # Abdeckung für." without the pool it refers to. Item 12 measured
@@ -2863,19 +2874,42 @@ async def ws_endpoint(ws: WebSocket):
             # cutting alone, which was the right answer to the wrong question:
             # the cost is the chunking itself, and merging is the way to pay
             # less of it without spending latency.
+            #
+            # An interjection is absorbed rather than merged: it skips the
+            # language gate (detection on a 3-word chunk is a coin toss, and
+            # each mis-call both minted a card and broke the chain — 77 of
+            # the 210 language-flip refusals over the hour were tiny), skips
+            # the evidence test, and skips the question rule — "ne? Ja. Ja."
+            # reads fine inline, which is how the batch reference renders it.
+            # The chain's own split reason survives an absorption: a "Ja."
+            # landing mid-flow says nothing about whether the main speaker
+            # stopped.
             replaces = None
             gap = (t0 - len(audio) / SAMPLE_RATE - prev["t_end"]) if prev else 99
-            if (prev and prev["speaker"] == speaker and prev["source"] == source
-                    and gap < MERGE_GAP_SEC
-                    and len(prev["text"]) < MERGE_MAX_CHARS
-                    and (not looks_finished(prev["text"])
-                         or continues_previous(text)
-                         or flowed_on(prev.get("split")))
-                    # A question hands the turn over — the next chunk is
-                    # someone's answer, not a continuation — unless casing
-                    # says otherwise. See yields_turn for the measurement.
-                    and (continues_previous(text)
-                         or not yields_turn(prev["text"]))):
+            absorbed = (prev is not None and prev["speaker"] == speaker
+                        and gap < MERGE_GAP_SEC
+                        and len(prev["text"]) < MERGE_MAX_CHARS
+                        and len(text.split()) <= ABSORB_MAX_WORDS)
+            if absorbed and prev["source"] != source:
+                # The card keeps its direction: "Yeah." inside a German
+                # paragraph is part of the German card, whatever the
+                # detector called it.
+                source, targets = resolve_targets(mode_for_utterance,
+                                                  prev["source"])
+            chain_split = prev["split"] if absorbed else meta.get("split")
+            if (absorbed
+                    or (prev and prev["speaker"] == speaker
+                        and prev["source"] == source
+                        and gap < MERGE_GAP_SEC
+                        and len(prev["text"]) < MERGE_MAX_CHARS
+                        and (not looks_finished(prev["text"])
+                             or continues_previous(text)
+                             or flowed_on(prev.get("split")))
+                        # A question hands the turn over — the next chunk is
+                        # someone's answer, not a continuation — unless casing
+                        # says otherwise. See yields_turn for the measurement.
+                        and (continues_previous(text)
+                             or not yields_turn(prev["text"])))):
                 text = prev["text"] + " " + text
                 replaces = prev["uid"]
                 if history and history[-1].get("uid") == replaces:
@@ -2884,7 +2918,7 @@ async def ws_endpoint(ws: WebSocket):
             last_final[source] = text[-200:]
             prev = {"uid": my_uid, "text": text, "source": source,
                     "speaker": speaker, "t_end": t0,
-                    "split": meta.get("split")}
+                    "split": chain_split}
             recent_finals.append({"norm": normalize_text(text),
                                   "speaker": speaker, "t": t0})
             remember_for_gist(gist_pending, my_uid, source, text, replaces)

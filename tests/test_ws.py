@@ -387,6 +387,67 @@ def test_a_lowercase_continuation_still_overrules_the_question(
     assert final2["replaces"] == final1["id"]
 
 
+def test_an_interjection_is_absorbed_across_a_language_flip(
+        client, stub_transcribe):
+    """"Yeah." after a German sentence: Whisper's detector calls the tiny
+    chunk English, and before absorption existed that minted an EN card AND
+    broke the German chain — the double damage behind most of the count gap
+    vs the batch reference (77 of 210 language-flip refusals over the hour
+    were ≤3 words). Absorbed, the card keeps its German direction."""
+    stub_transcribe.result = {
+        "text": "Das Wasser verdunstet eigentlich auch eine ganze Menge.",
+        "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        msgs1 = collect_until(ws)
+        stub_transcribe.result = {"text": "Yeah.", "language": "en"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    final1 = next(m for m in msgs1 if m["type"] == "final")
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert final2["replaces"] == final1["id"]
+    assert final2["text"].endswith("Yeah.")
+    assert final2["source"] == "de"        # the card keeps its direction
+
+
+def test_an_interjection_is_absorbed_even_after_a_question(
+        client, stub_transcribe):
+    """The question rule stops a substantive answer from merging into the
+    asker's card; a 3-word "Ja." is not a substantive answer. The batch
+    reference renders exactly this inline ("…ne? Ja. Ja.") and it reads
+    fine — refusing it would reopen a third of the count gap."""
+    stub_transcribe.result = {"text": "Und wie warm ist der Pool?",
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak_flowing(ws)
+        msgs1 = collect_until(ws)
+        stub_transcribe.result = {"text": "Ja.", "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    final1 = next(m for m in msgs1 if m["type"] == "final")
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert final2["replaces"] == final1["id"]
+
+
+def test_four_words_is_not_an_interjection(client, stub_transcribe):
+    """The boundary that keeps absorption from becoming turn-packing: a
+    four-word utterance in another language is somebody actually speaking,
+    and it must still start its own card (and break the chain)."""
+    stub_transcribe.result = {
+        "text": "Das Wasser verdunstet eigentlich auch eine ganze Menge.",
+        "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        collect_until(ws)
+        stub_transcribe.result = {"text": "That is really interesting.",
+                                  "language": "en"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert "replaces" not in final2
+    assert final2["source"] == "en"
+
+
 def test_the_uncased_transcript_is_a_known_cost_not_a_surprise():
     """Whisper occasionally emits a chunk with no casing at all, and then a
     real sentence start looks like a continuation and merges one card too
@@ -460,7 +521,10 @@ def test_history_context_flows_into_later_requests(client, stub_transcribe,
     with client.websocket_connect("/ws") as ws:
         speak(ws)
         collect_until(ws)
-        stub_transcribe.result = {"text": "Und morgen?", "language": "de"}
+        # Five words: short enough to be natural, long enough not to be
+        # absorbed as an interjection (ABSORB_MAX_WORDS = 3).
+        stub_transcribe.result = {"text": "Und was ist morgen geplant?",
+                                  "language": "de"}
         speak(ws)
         collect_until(ws)
     messages = fake_ollama["chat"]["messages"]
@@ -468,7 +532,8 @@ def test_history_context_flows_into_later_requests(client, stub_transcribe,
     assistants = [m["content"] for m in messages if m["role"] == "assistant"]
     assert "Wie geht es dir?" in users       # first utterance, as a chat turn
     assert "How are you?" in assistants      # ... with its translation
-    assert messages[-1] == {"role": "user", "content": "Und morgen?"}
+    assert messages[-1] == {"role": "user",
+                        "content": "Und was ist morgen geplant?"}
 
 
 def test_speculation_avoids_double_transcription(client, stub_transcribe,
@@ -689,7 +754,10 @@ def test_correction_message_patches_history(client, stub_transcribe,
         uid = next(m["id"] for m in msgs if m["type"] == "final")
         ws.send_text(json.dumps({"type": "correction", "id": uid,
                                  "target": "en", "corrected": "How's it going?"}))
-        stub_transcribe.result = {"text": "Und morgen?", "language": "de"}
+        # Five words: short enough to be natural, long enough not to be
+        # absorbed as an interjection (ABSORB_MAX_WORDS = 3).
+        stub_transcribe.result = {"text": "Und was ist morgen geplant?",
+                                  "language": "de"}
         speak(ws)
         collect_until(ws)
     assistants = [m["content"] for m in fake_ollama["chat"]["messages"]
@@ -740,7 +808,10 @@ def test_refined_text_becomes_context_for_next_utterance(client,
         draft_config(ws)
         speak(ws)
         collect_until(ws, stop_types=("translation_revised", "error"))
-        stub_transcribe.result = {"text": "Und morgen?", "language": "de"}
+        # Five words: short enough to be natural, long enough not to be
+        # absorbed as an interjection (ABSORB_MAX_WORDS = 3).
+        stub_transcribe.result = {"text": "Und was ist morgen geplant?",
+                                  "language": "de"}
         speak(ws)
         collect_until(ws)
     assistants = [m["content"] for m in fake_ollama["chat"]["messages"]
