@@ -765,6 +765,25 @@ Klimaanlage lief." / "Und darunter…" as two complete thoughts.
       refine starvation, lag within the normal 5–9 s band — but that is one
       run on a healthy Ollama, and item 15's warning applies unchanged: a
       wedged Ollama will make this rule *look* like it broke translation.
+- [x] **Held up on three unseen segments** (12:00, 28:00, 44:00 of the real
+      hour): 21 / 22 / 23 cards per 240 s, mean 22.5–24.5 words, every card
+      translated, partials lost 0 throughout, and the long cards read as
+      single-speaker passages — including *"Von Gottbergs hießen die, wo man
+      da als… als Küchenbammser gearbeitet hat"* as one card, the exact
+      stranded pair that motivated the ellipsis rule. One sampled card still
+      splices a question onto its answer across a real turn, the known
+      diarization residual.
+- [x] ⚠️ **Sustained dense speech degrades Ollama globally, and the gates
+      absorb it in the right order.** Across three back-to-back segments
+      (~12 min of continuous conversation), translate p50 went 1.1 s → 1.5 s
+      → 7.5 s and refines landed 43 → 35 → 14 (gated 8 → 19 → 33). The tell
+      that this is not the merge's cost: 8-, 22- and 57-char cards took
+      9–17 s in the third run — a global slowdown, while card size itself
+      costs only ~2.8× (chars tercile p50 1.3 s → 3.5 s). Degradation order
+      was refines shed → lag spikes to ~20 s → finals still 100% translated,
+      partials lost 0. The standing suspect is still the 128k
+      `OLLAMA_CONTEXT_LENGTH` (item 15): fix it in Ollama.app's settings
+      before reading any sustained-load number as a pipeline regression.
 - [ ] **The last 228 → 216 is the diarization gap.** What remains is mostly
       real turn structure a same-speaker heuristic cannot see (one sampled
       card still mixes speakers across a genuine handover). Closing it means
