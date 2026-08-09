@@ -797,8 +797,22 @@ Klimaanlage lief." / "Und darunter…" as two complete thoughts.
       8 long cards joins a question to its answer) therefore has two
       candidate fixes — smarter text/pause boundary rules (no new
       dependency, closest to what Transync actually does) or a pretrained
-      speaker encoder as a same-speaker gate. Neither is measured yet;
-      which to try first is Chester's call.
+      speaker encoder as a same-speaker gate. Chester chose the text rules
+      first (2026-08-09) → shipped below; the encoder spike remains
+      unmeasured and available (`tools/voice_eval.py --boundaries` is the
+      harness).
+- [x] **Shipped: a question closes the merge window** (`yields_turn`).
+      Mining the hour for the splice signature found it exactly: the
+      shipped rule made 12 merges across a `?` boundary without casing
+      evidence, all 12 via `flowed_on`, and all 12 are question→answer
+      handovers — conversational volleys change speakers faster than the
+      ~190 ms micro-pause, so the handover hides inside one continuous
+      speech run, which is precisely where `soft_max` is blind. Refusing
+      them: 352 → 364 cards over the hour (+3.4%), 12 real two-speaker
+      splices gone, precision 12/12 on this recording. A lowercase
+      continuation still overrules ("oder?" mid-sentence), and the
+      answer-side casing gate means a genuinely continuing question-asker
+      who Whisper happens to lowercase still merges.
 
 ### 17. The context length is now pinned in two places, and an hour holds
 Item 16's sustained-load collapse had a standing suspect: Ollama.app injects

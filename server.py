@@ -246,6 +246,9 @@ SENTENCE_END_RE = re.compile(r"[.!?…]['\")\]]?\s*$")
 # utterances end in no punctuation at all, so this is the *majority* of the
 # merge opportunity, not an edge case.
 ELLIPSIS_END_RE = re.compile(r"(\.\.\.|…)['\")\]]?\s*$")
+# ...and a question is the opposite of both: it is finished AND it hands the
+# turn to someone else, so it closes the merge window (see yields_turn).
+QUESTION_END_RE = re.compile(r"\?['\")\]]?\s*$")
 
 
 def looks_finished(text: str) -> bool:
@@ -278,6 +281,30 @@ def continues_previous(text: str) -> bool:
     """
     head = text.lstrip(".,!? ")
     return bool(head) and head[0].isalpha() and head[0].islower()
+
+
+def yields_turn(text: str) -> bool:
+    """True when an utterance ends by handing the conversation to someone
+    else — in this recording, that means it ends with a question.
+
+    This is the one systematic blind spot of `flowed_on`. A `soft_max` split
+    normally guarantees the same speaker is continuing, but conversational
+    volleys hand over faster than the ~190 ms micro-pause the VAD needs to
+    see a boundary — so a question and its answer, two people, arrive inside
+    one continuous speech run. Measured over the real hour: the shipped rule
+    made 12 merges across a `?` boundary without casing evidence, ALL of
+    them via `flowed_on`, and reading all 12 finds question→answer
+    handovers every time ("Wie lange seid ihr unterwegs?" ‖ "Wir sind eine
+    Woche nur weg."). Refusing them costs 352 → 364 cards (+3.4%) and
+    removes 12 real two-speaker splices — the defect a batch transcription
+    service avoids by cutting at semantic boundaries it can see with the
+    whole recording in hand.
+
+    A lowercase continuation still overrules this: Whisper sometimes puts a
+    mid-sentence question mark ("oder?") in front of a clause that carries
+    on, and casing is direct evidence the sentence did not end.
+    """
+    return bool(QUESTION_END_RE.search(text))
 
 
 def flowed_on(split_reason: str | None) -> bool:
@@ -2843,7 +2870,12 @@ async def ws_endpoint(ws: WebSocket):
                     and len(prev["text"]) < MERGE_MAX_CHARS
                     and (not looks_finished(prev["text"])
                          or continues_previous(text)
-                         or flowed_on(prev.get("split")))):
+                         or flowed_on(prev.get("split")))
+                    # A question hands the turn over — the next chunk is
+                    # someone's answer, not a continuation — unless casing
+                    # says otherwise. See yields_turn for the measurement.
+                    and (continues_previous(text)
+                         or not yields_turn(prev["text"]))):
                 text = prev["text"] + " " + text
                 replaces = prev["uid"]
                 if history and history[-1].get("uid") == replaces:

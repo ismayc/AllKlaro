@@ -344,6 +344,49 @@ def test_a_real_pause_between_two_finished_sentences_still_splits(
     assert "replaces" not in final2
 
 
+def test_a_question_closes_the_merge_window_even_mid_flow(
+        client, stub_transcribe):
+    """The one systematic blind spot of the soft_max rule, measured over the
+    real hour: all 12 no-casing-evidence merges across a `?` boundary were
+    question→answer handovers — two speakers volleying faster than the
+    micro-pause the VAD needs, so the handover happens inside one continuous
+    speech run. This is the "Und ihr wart nicht da? Du hast so eingekauft…"
+    splice from the 44:00 segment, as two cards."""
+    stub_transcribe.result = {"text": "Und ihr wart nicht da?",
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak_flowing(ws)                  # cap-cut: flowed_on says merge
+        msgs1 = collect_until(ws)
+        stub_transcribe.result = {
+            "text": "Du hast so eingekauft als wären wir immer noch da.",
+            "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    assert next(m for m in msgs1 if m["type"] == "final")
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert "replaces" not in final2
+
+
+def test_a_lowercase_continuation_still_overrules_the_question(
+        client, stub_transcribe):
+    """Whisper sometimes writes a mid-sentence question mark ("oder?") ahead
+    of a clause that carries on. Casing is direct evidence the sentence did
+    not end, and it must keep beating the question rule."""
+    stub_transcribe.result = {"text": "Das ist doch praktisch, oder?",
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak_flowing(ws)
+        msgs1 = collect_until(ws)
+        stub_transcribe.result = {
+            "text": "jedenfalls für den Sommer hier draußen.",
+            "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    final1 = next(m for m in msgs1 if m["type"] == "final")
+    final2 = next(m for m in msgs2 if m["type"] == "final")
+    assert final2["replaces"] == final1["id"]
+
+
 def test_the_uncased_transcript_is_a_known_cost_not_a_surprise():
     """Whisper occasionally emits a chunk with no casing at all, and then a
     real sentence start looks like a continuation and merges one card too
