@@ -2897,6 +2897,14 @@ async def ws_endpoint(ws: WebSocket):
                 source, targets = resolve_targets(mode_for_utterance,
                                                   prev["source"])
             chain_split = prev["split"] if absorbed else meta.get("split")
+            # On a merge, the incoming chunk (`merge_tail`) and the replaced
+            # card's finished translation (`merge_base`) let the translation
+            # stage do O(new chunk) work instead of O(whole card): the first
+            # /takt run after absorption shipped retranslated every growing
+            # card in full, one chain climbing 20 s → 39 s per translate,
+            # Whisper starving behind the saturated GPU (queue_ms 5 s → 32 s)
+            # and last-lag hitting 59 s on a slice that normally runs 5-9 s.
+            merge_tail = merge_base = None
             if (absorbed
                     or (prev and prev["speaker"] == speaker
                         and prev["source"] == source
@@ -2910,10 +2918,11 @@ async def ws_endpoint(ws: WebSocket):
                         # says otherwise. See yields_turn for the measurement.
                         and (continues_previous(text)
                              or not yields_turn(prev["text"])))):
+                merge_tail = text
                 text = prev["text"] + " " + text
                 replaces = prev["uid"]
                 if history and history[-1].get("uid") == replaces:
-                    history.pop()
+                    merge_base = history.pop()
 
             last_final[source] = text[-200:]
             prev = {"uid": my_uid, "text": text, "source": source,
@@ -2949,7 +2958,9 @@ async def ws_endpoint(ws: WebSocket):
             await safe_send(ws, final_msg)
             meta["outcome"] = "final"
             meta["chars"] = len(text)
-            await run_translations(my_uid, text, source, targets, t0, t1, meta)
+            await run_translations(my_uid, text, source, targets, t0, t1, meta,
+                                   merge_base=merge_base,
+                                   merge_tail=merge_tail)
         except Exception as exc:
             log.exception("transcription failed")
             await safe_send(ws, {"type": "error", "id": my_uid,
@@ -2976,7 +2987,9 @@ async def ws_endpoint(ws: WebSocket):
             trace(meta)
 
     async def run_translations(my_uid, text, source, targets, t0, t1,
-                               meta: dict | None = None):
+                               meta: dict | None = None,
+                               merge_base: dict | None = None,
+                               merge_tail: str | None = None):
         nonlocal refines_shed, refines_gated, refines_timeout
         meta = meta if meta is not None else {}
         if is_already_understood(text, source):
@@ -2999,11 +3012,36 @@ async def ws_endpoint(ws: WebSocket):
         # and is corrected once when it trips.
         draft = draft_model if draft_model and draft_model != model else None
         context = list(history)
-        translations = await asyncio.gather(
-            *(stream_translation(ws, my_uid, text, source, t,
-                                 draft or model, context, flavor_for(t),
-                                 address, flavor_for(source))
-              for t in targets))
+        # A merged card whose predecessor already finished translating only
+        # pays for the NEW chunk: the old translation is replayed as an
+        # instant delta and the tail streams after it. Without this, every
+        # link in a merge chain retranslated the whole grown card — O(k²)
+        # over a k-link chain — which saturated the GPU, starved Whisper,
+        # and drove last-lag to 59 s on a slice that normally runs 5-9 s.
+        # The stitched translation is exactly what two unmerged cards would
+        # have shown; the refine pass (backlog-gated, sheddable) later
+        # retranslates the whole card in one piece when there is capacity.
+        # Single-target only: history stores one translation, and the
+        # multi-target mode is rare enough that correctness beats savings.
+        base = None
+        if (merge_base is not None and merge_tail and len(targets) == 1
+                and merge_base.get("target") == targets[0]
+                and merge_base.get("translation")):
+            base = merge_base["translation"]
+        if base:
+            await safe_send(ws, {"type": "translation_delta", "id": my_uid,
+                                 "target": targets[0], "text": base + " "})
+            tail_tr = await stream_translation(
+                ws, my_uid, merge_tail, source, targets[0], draft or model,
+                context, flavor_for(targets[0]), address, flavor_for(source))
+            translations = [base + " " + tail_tr
+                            if tail_tr is not None else None]
+        else:
+            translations = await asyncio.gather(
+                *(stream_translation(ws, my_uid, text, source, t,
+                                     draft or model, context, flavor_for(t),
+                                     address, flavor_for(source))
+                  for t in targets))
         if all(t is not None for t in translations):
             history.append({"uid": my_uid, "source": source,
                             "target": targets[0], "text": text,

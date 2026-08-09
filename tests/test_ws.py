@@ -448,6 +448,65 @@ def test_four_words_is_not_an_interjection(client, stub_transcribe):
     assert final2["source"] == "en"
 
 
+def test_a_merge_translates_only_the_new_chunk(client, stub_transcribe,
+                                               fake_ollama):
+    """A merge must cost O(new chunk), not O(whole card). The first run
+    after absorption shipped retranslated every growing card in full —
+    one chain's translates climbed 20 s → 39 s, Whisper starved behind the
+    saturated GPU, and last-lag hit 59 s on a slice that normally runs
+    5-9 s. The old card's finished translation is replayed as an instant
+    delta; only the tail goes to the model."""
+    stub_transcribe.result = {"text": "Ich glaube, dass wir das Projekt",
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        collect_until(ws)
+        stub_transcribe.result = {"text": "nächste Woche abschließen werden.",
+                                  "language": "de"}
+        speak(ws)
+        msgs2 = collect_until(ws)
+    # Ollama saw ONLY the tail as the newest user turn...
+    last_user = [m for m in fake_ollama["chat"]["messages"]
+                 if m["role"] == "user"][-1]
+    assert last_user["content"] == "nächste Woche abschließen werden."
+    # ...while the reader still got the whole translation: the replayed
+    # base plus the freshly streamed tail.
+    full = "".join(m["text"] for m in msgs2
+                   if m["type"] == "translation_delta")
+    assert full.startswith("How are you? ")     # base, replayed instantly
+    assert full.endswith("How are you?")        # streamed tail (fake ollama)
+
+
+def test_a_merge_with_no_finished_base_translates_in_full(
+        client, stub_transcribe, fake_ollama, monkeypatch):
+    """The fallback that keeps stitching honest: if the replaced card's
+    translation never completed, there is no base to replay, and the merged
+    card must be translated whole — stale text on screen would otherwise
+    never be replaced."""
+    import server as srv
+    calls = []
+    real = srv.stream_translation
+    async def failing_first(ws, uid, text, *a, **kw):
+        calls.append(text)
+        if len(calls) == 1:
+            return None                      # first card's translation dies
+        return await real(ws, uid, text, *a, **kw)
+    monkeypatch.setattr(srv, "stream_translation", failing_first)
+    stub_transcribe.result = {"text": "Ich glaube, dass wir das Projekt",
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        # The killed translation sends nothing after the final — stop there.
+        collect_until(ws, stop_types=("final",))
+        stub_transcribe.result = {"text": "nächste Woche abschließen werden.",
+                                  "language": "de"}
+        speak(ws)
+        collect_until(ws)
+    # No stored base -> the second call carries the ENTIRE merged text.
+    assert calls[-1] == ("Ich glaube, dass wir das Projekt "
+                         "nächste Woche abschließen werden.")
+
+
 def test_the_uncased_transcript_is_a_known_cost_not_a_surprise():
     """Whisper occasionally emits a chunk with no casing at all, and then a
     real sentence start looks like a continuation and merges one card too
