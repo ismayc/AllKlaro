@@ -57,6 +57,22 @@ def test_the_narrowing_is_live_on_the_real_lexicon():
     assert srv.dialect_markers(text, "de") == ["ick", "keene", "wat", "dit", "gell"]
 
 
+def test_ursulas_wormser_sentence_lights_up():
+    """A real message from a real Wormser (2026-08-09): "Un Oskar baud dann
+    eh schenes klenes Gaade Haisje". The unambiguous forms must be marked
+    under the worms flavor — and "eh"/"un", which are everyday standard
+    German ("eh" = anyway), must only count in company like this, never
+    alone in a plain sentence."""
+    text = "Un Oskar baud dann eh schenes klenes Gaade Haisje"
+    got = srv.dialect_markers(text, "de", flavor="worms")
+    for form in ("baud", "schenes", "klenes", "gaade", "haisje"):
+        assert form in got, f"{form} not marked"
+    # The ambiguity guard: a sentence that is nothing but standard German
+    # keeps its "eh" and "un" unpainted.
+    assert srv.dialect_markers("Das ist eh egal", "de", flavor="worms") == []
+    assert srv.dialect_markers("Ich bin eh gleich da", "de") == []
+
+
 def test_forms_shared_by_two_dialects_are_marked_under_both():
     """Under-tagging is the silent failure here — a Hessian form tagged only
     [hessian] stops being marked the moment someone picks Wormser Platt, even

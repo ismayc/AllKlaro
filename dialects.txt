@@ -84,6 +84,21 @@ hoschd = hast [worms]
 dabber = schnell (quick) [worms]
 Worschd = Wurst (sausage) [worms]
 Dorschd = Durst (thirst) [worms]
+# --- From Ursula's "Un Oskar baud dann eh schenes klenes Gaade Haisje"
+# --- (2026-08-09): ö→e and ei→e monophthongs, r swallowed in Garten, the
+# --- Rhenish diminutive -je, and d/t softening in verb endings.
+schee = schön (nice) [hessian worms]
+schenes = schönes (nice) [worms]
+klee = klein (small) [hessian worms]
+klenes = kleines (small) [worms]
+Gaade = Garten (garden) [worms]
+Haisje = Häuschen (little house) [worms]
+Heisje = Häuschen (little house) [worms]
+baud = baut (builds) [worms]
+# "eh" (= ein) and "un" (= und) are everyday standard-German words too
+# ("eh" = anyway), so they only count alongside an unambiguous marker.
+? eh = ein (a/an) [worms]
+? un = und [hessian worms]
 
 # --- Enclitic contractions: colloquial everywhere, not regional. Left
 # --- untagged on purpose so they keep marking whatever style is selected.
