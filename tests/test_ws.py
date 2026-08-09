@@ -477,6 +477,46 @@ def test_a_merge_translates_only_the_new_chunk(client, stub_transcribe,
     assert full.endswith("How are you?")        # streamed tail (fake ollama)
 
 
+def test_a_merge_waits_for_an_inflight_base_and_still_stitches(
+        client, stub_transcribe, fake_ollama, monkeypatch):
+    """The storm's second act: dense speech emits a chunk every 2-4 s, a
+    draft translate takes 1-2.5 s, so half the merge links arrive before
+    their base is finished. Falling back to a full retranslate there fed
+    itself — each fallback finished later, so the next link missed too, and
+    within a minute nothing stitched (translate p50 8.7 s in the first two
+    minutes of the 62-min replay). A link must WAIT for the in-flight base
+    (the wait overlaps work already running) and then stitch the tail."""
+    import asyncio
+    import server as srv
+    real = srv.stream_translation
+    async def slow_first(ws, uid, text, *a, **kw):
+        if text.startswith("Ich glaube"):
+            await asyncio.sleep(0.4)         # base still in flight at merge
+        return await real(ws, uid, text, *a, **kw)
+    monkeypatch.setattr(srv, "stream_translation", slow_first)
+    stub_transcribe.result = {"text": "Ich glaube, dass wir das Projekt",
+                              "language": "de"}
+    with client.websocket_connect("/ws") as ws:
+        speak(ws)
+        # Do NOT drain: send the continuation while the base translates.
+        stub_transcribe.result = {"text": "nächste Woche abschließen werden.",
+                                  "language": "de"}
+        speak(ws)
+        # Exactly ONE translation_done arrives: the superseded card's run
+        # short-circuits (its card is gone), so only the merged successor
+        # reports completion.
+        msgs = collect_until(ws, stop_types=("translation_done",), limit=400)
+    finals = [m for m in msgs if m["type"] == "final"]
+    assert finals[-1]["replaces"] == finals[0]["id"]
+    # The tail was translated alone — the merged text never went to Ollama
+    # in one piece.
+    sent = [m["content"] for b in fake_ollama["all"]
+            for m in b["messages"] if m["role"] == "user"]
+    assert "nächste Woche abschließen werden." in sent
+    assert ("Ich glaube, dass wir das Projekt "
+            "nächste Woche abschließen werden.") not in sent
+
+
 def test_a_merge_with_no_finished_base_translates_in_full(
         client, stub_transcribe, fake_ollama, monkeypatch):
     """The fallback that keeps stitching honest: if the replaced card's

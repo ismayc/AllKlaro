@@ -231,6 +231,17 @@ MERGE_MAX_CHARS = 500              # never grow merged utterances beyond this
 # WAS a card and broke the chain for the speaker's real continuation — the
 # double damage behind most of the count gap vs the batch reference.
 ABSORB_MAX_WORDS = 3
+# How long a merge waits for its predecessor's in-flight translation before
+# giving up and retranslating the whole card. Dense speech emits a chunk
+# every 2-4 s and a draft translate takes 1-2.5 s, so roughly half of merge
+# links arrive before their base is finished — and falling back to a full
+# retranslate there is what made the O(k²) storm survive the stitch: each
+# fallback finished later, which made the next link miss its base too, and
+# within a minute nothing stitched at all (measured: translate p50 8.7 s in
+# the FIRST two minutes of the 62-min replay). Waiting instead keeps every
+# link O(tail): the wait overlaps work already in flight, so the listener's
+# cost is predecessor-completion + one small translate.
+CHAIN_WAIT_SEC = 10.0
 ECHO_WINDOW_SEC = 6.0              # cross-channel duplicate suppression window
 ECHO_MIN_CHARS = 16                # never dedupe short phrases ("Genau!") —
                                    # people legitimately repeat those
@@ -2726,6 +2737,10 @@ async def ws_endpoint(ws: WebSocket):
     channels: dict[int, dict] = {}   # tag -> {"vad": VadSession, "residual": ...}
     history: deque = deque(maxlen=HISTORY_TURNS)
     last_final: dict[str, str] = {}  # language -> last final text (whisper prompt)
+    superseded: set[int] = set()     # uids replaced by a merge mid-translation:
+                                     # their run skips history and the refine —
+                                     # the card is gone and the merged
+                                     # successor stitched their draft already
     mode = "auto-de-en"
     model = DEFAULT_MODEL
     draft_model = None               # fast first-pass model; None = single-pass
@@ -2904,7 +2919,7 @@ async def ws_endpoint(ws: WebSocket):
             # card in full, one chain climbing 20 s → 39 s per translate,
             # Whisper starving behind the saturated GPU (queue_ms 5 s → 32 s)
             # and last-lag hitting 59 s on a slice that normally runs 5-9 s.
-            merge_tail = merge_base = None
+            merge_tail = merge_base = merge_fut = None
             if (absorbed
                     or (prev and prev["speaker"] == speaker
                         and prev["source"] == source
@@ -2921,13 +2936,21 @@ async def ws_endpoint(ws: WebSocket):
                 merge_tail = text
                 text = prev["text"] + " " + text
                 replaces = prev["uid"]
+                # The predecessor's translation may be finished (in history),
+                # or still in flight (its future) — either way the successor
+                # stitches rather than retranslating, and the replaced card
+                # must not leave its fragment behind as context or spend a
+                # refine on text nobody can see any more.
                 if history and history[-1].get("uid") == replaces:
                     merge_base = history.pop()
+                merge_fut = prev.get("tdone")
+                superseded.add(replaces)
 
             last_final[source] = text[-200:]
+            tdone = loop.create_future()
             prev = {"uid": my_uid, "text": text, "source": source,
                     "speaker": speaker, "t_end": t0,
-                    "split": chain_split}
+                    "split": chain_split, "tdone": tdone}
             recent_finals.append({"norm": normalize_text(text),
                                   "speaker": speaker, "t": t0})
             remember_for_gist(gist_pending, my_uid, source, text, replaces)
@@ -2960,7 +2983,8 @@ async def ws_endpoint(ws: WebSocket):
             meta["chars"] = len(text)
             await run_translations(my_uid, text, source, targets, t0, t1, meta,
                                    merge_base=merge_base,
-                                   merge_tail=merge_tail)
+                                   merge_tail=merge_tail,
+                                   merge_fut=merge_fut, tdone=tdone)
         except Exception as exc:
             log.exception("transcription failed")
             await safe_send(ws, {"type": "error", "id": my_uid,
@@ -2989,9 +3013,27 @@ async def ws_endpoint(ws: WebSocket):
     async def run_translations(my_uid, text, source, targets, t0, t1,
                                meta: dict | None = None,
                                merge_base: dict | None = None,
-                               merge_tail: str | None = None):
+                               merge_tail: str | None = None,
+                               merge_fut=None, tdone=None):
         nonlocal refines_shed, refines_gated, refines_timeout
         meta = meta if meta is not None else {}
+        try:
+            await _run_translations(my_uid, text, source, targets, t0, t1,
+                                    meta, merge_base, merge_tail, merge_fut,
+                                    tdone)
+        finally:
+            # The successor of a merge chain waits on this future; it must
+            # resolve on EVERY exit path or the chain stalls for
+            # CHAIN_WAIT_SEC on any failure here. And a superseded uid whose
+            # run failed must not linger in the set forever.
+            if tdone is not None and not tdone.done():
+                tdone.set_result(None)
+            superseded.discard(my_uid)
+
+    async def _run_translations(my_uid, text, source, targets, t0, t1,
+                                meta, merge_base, merge_tail, merge_fut,
+                                tdone):
+        nonlocal refines_shed, refines_gated, refines_timeout
         if is_already_understood(text, source):
             # Not a failure and not a shed: the listener reads German, and
             # this sentence was inside what they read. The card still appears
@@ -3028,6 +3070,20 @@ async def ws_endpoint(ws: WebSocket):
                 and merge_base.get("target") == targets[0]
                 and merge_base.get("translation")):
             base = merge_base["translation"]
+        elif merge_fut is not None and merge_tail and len(targets) == 1:
+            # The predecessor is still translating. Waiting for it is the
+            # cheap path, not the slow one: the wait overlaps work already
+            # in flight, while giving up means retranslating the whole grown
+            # card — and under dense speech (a chunk every 2-4 s against a
+            # 1-2.5 s draft translate) that fallback fed itself: each full
+            # retranslate finished later, made the NEXT link miss its base
+            # too, and within a minute nothing stitched at all (translate
+            # p50 8.7 s in the first two minutes of the 62-min replay).
+            try:
+                base = await asyncio.wait_for(asyncio.shield(merge_fut),
+                                              timeout=CHAIN_WAIT_SEC)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                base = None
         if base:
             await safe_send(ws, {"type": "translation_delta", "id": my_uid,
                                  "target": targets[0], "text": base + " "})
@@ -3043,6 +3099,20 @@ async def ws_endpoint(ws: WebSocket):
                                      address, flavor_for(source))
                   for t in targets))
         if all(t is not None for t in translations):
+            # Hand the finished translation to any successor already waiting
+            # to stitch onto it — before the refine, deliberately: the
+            # successor replaces this card either way, and what it stitches
+            # onto is what was on screen when it did.
+            if tdone is not None and not tdone.done():
+                tdone.set_result(translations[0])
+            if my_uid in superseded:
+                # A merge replaced this card while it was translating. The
+                # successor has its translation via the future; appending it
+                # to history would plant the fragment as stale context, and
+                # refining text nobody can see is pure GPU spend.
+                superseded.discard(my_uid)
+                meta["translate_ms"] = int((loop.time() - t1) * 1000)
+                return
             history.append({"uid": my_uid, "source": source,
                             "target": targets[0], "text": text,
                             "translation": translations[0]})
