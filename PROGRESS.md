@@ -927,6 +927,37 @@ model that was wrong, and it took three runs to get a true one.
       guarded against error propagation and cross-language bias, tested,
       and A-B-A bracketed before it ships.
 
+### 19. Auto mode decoded every chunk blind — context now threads into Whisper
+The `whisper_prompt()` context lookup was keyed on `lang_hint(mode)`, which
+only forced directions have — so the DEFAULT auto-de-en mode fed Whisper no
+context at all, ever. Item 16 named batch context as the batch reference's
+real edge; this was the same gap inside our own pipeline.
+
+- [x] **Mechanism proven before touching code.** The "Soldaten Beruf" card
+      from the 2026-08-10 eyeball run is Whisper mishearing *"Er hat keinen
+      Solar, er hat keinen Solar (da drauf)"* on an isolated chunk: decodes
+      of that slice are window-position-unstable in isolation ("Solarer
+      Beruf" / "ja" / "also er hat kein solar") and converge on the correct
+      reading at every position once the preceding sentence is in
+      `initial_prompt`.
+- [x] **The fix rides the machinery that already existed**: in auto modes
+      the prompt now falls back to the previous final's tail (`prev`,
+      last 200 chars), whatever language it was in — Whisper detects the
+      chunk's language from the audio, not the prompt, so the decode stays
+      language-free. Finals, speculation, and both redo paths all go
+      through `whisper_prompt()`, so one edit covers them consistently.
+- [x] **Verified on the live pipeline** (two demo4 replays): the soldier is
+      gone — the transcript now reads "er hat keinen Solar. Er hat keinen
+      Solarabruf" (compound still slightly mangled, topic recovered). No
+      prompt-induced repetition loops in any final; outcomes and lag inside
+      the demo4 noise band (p50 5.8 / 6.5 s across the two runs).
+- [ ] **Not yet A-B-A bracketed over the hour.** demo4-scale lag numbers
+      swing more between identical runs than between code arms, so the
+      62-minute replay is the acceptance gate: error propagation (a
+      mis-heard final biasing the next decode) and cross-language pull in
+      dense code-switching stretches are the two risks a 4-minute slice
+      cannot rule out.
+
 ---
 
 ## Closed

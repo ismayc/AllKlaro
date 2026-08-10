@@ -2814,6 +2814,17 @@ async def ws_endpoint(ws: WebSocket):
         hint = lang_hint(mode)
         if hint and last_final.get(hint):
             parts.append(last_final[hint])
+        elif prev is not None and mode_pair(mode):
+            # An auto mode has no pinned language to look a tail up under,
+            # so this gate left the DEFAULT mode decoding every chunk
+            # context-free — which is where "Er hat keinen Solar" became
+            # "Er hat keinen Soldaten Beruf": isolated decodes of that
+            # slice are unstable, and the same slice decodes correctly at
+            # every window position once the preceding sentence is in the
+            # prompt. The previous final is the words spoken right before
+            # this chunk, whatever language they were in; Whisper detects
+            # the chunk's language from the audio, not the prompt.
+            parts.append(prev["text"][-200:])
         return " ".join(parts)[:400] or None
 
     def auto_pair() -> tuple[str, str] | None:

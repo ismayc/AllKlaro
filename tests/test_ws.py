@@ -802,6 +802,27 @@ def test_forced_mode_reuses_whisper_prompt(client, stub_transcribe):
     assert last["prompt"] == "Wie geht es dir?"
 
 
+def test_auto_mode_threads_the_previous_final_into_whisper(client,
+                                                           stub_transcribe):
+    """Forced modes already fed Whisper the last final as context; the auto
+    modes — including the DEFAULT auto-de-en — decoded every chunk blind,
+    because the context lookup was keyed on the pinned language hint that
+    auto modes don't have. That blindness is where "Er hat keinen Solar"
+    became "Er hat keinen Soldaten Beruf": the same audio decodes correctly
+    once the preceding sentence is in the prompt. The language stays free —
+    Whisper detects it from the audio, not the prompt."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en"}))
+        speak(ws)
+        collect_until(ws)
+        speak(ws)
+        collect_until(ws)
+    first, last = stub_transcribe.calls[0], stub_transcribe.calls[-1]
+    assert first["prompt"] is None       # nothing has been said yet
+    assert last["language"] is None      # the decode stays language-free
+    assert last["prompt"] == "Wie geht es dir?"
+
+
 def speak_tagged(ws, tag):
     for _ in range(3):
         ws.send_bytes(bytes([tag]) + bytes(4096))
