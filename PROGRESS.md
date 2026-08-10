@@ -848,11 +848,48 @@ now fixed.
       for any future long live run: no `.py` edits, no commits touching
       `.py`, until the run completes. (Non-`.py` files are safe; the
       watcher's default scope is Python sources only.)
-- [ ] Chester accepted the 31-minute evidence plus the twice-reproduced
-      morning collapse as sufficient (2026-08-09) and skipped the rerun. If
-      a future long session degrades anyway, the first check is unchanged:
+- [x] Chester accepted the 31-minute evidence at the time and skipped the
+      rerun — then the paragraph work (item 18) forced the question again,
+      and item 18's 62-minute replay is now the full-length proof. If a
+      future long session degrades anyway, the first check is unchanged:
       `ollama ps` for the CONTEXT column, then per-window translate p50 from
       `/tmp/allklaro-trace.jsonl`.
+
+### 18. The paragraph merge nearly sank the pipeline twice, and now holds an hour
+Absorption + the 500-char cap (item 16's follow-through) shipped with a cost
+model that was wrong, and it took three runs to get a true one.
+
+- [x] **Storm one: retranslating the whole card on every merge is O(k²).**
+      First /takt after absorption: one chain's translates climbed 20 → 39 s
+      as the card grew, the concurrent long translates saturated the GPU,
+      Whisper starved (queue_ms 5 → 32 s), last-lag 59 s on a slice that
+      runs 5-9 s. Fix: stitch — replay the replaced card's finished
+      translation as an instant delta, stream only the tail.
+- [x] **Storm two: the stitch's fallback fed itself.** Under real pacing a
+      chunk arrives every 2-4 s against a 1-2.5 s draft translate, so half
+      the links arrived before their base finished, fell back to a full
+      retranslate, finished later, and made the next link miss too — within
+      two minutes of the 62-min replay nothing stitched (translate p50
+      8.7 s at minute 0-2). Fix: a link *waits* for its in-flight base
+      (`CHAIN_WAIT_SEC`) — the wait overlaps running work, so every link is
+      O(tail) unconditionally. A superseded card also skips history (its
+      fragment is not context) and its refine (invisible text), and its
+      translation future resolves on every exit path so a chain cannot
+      stall.
+- [x] **The 62-minute acceptance run passed** (2026-08-09, replay of the
+      real hour + 8 min through the full live pipeline, realtime pace):
+      797 finals, 497 merges, **300 net cards** (~4.8/min vs the batch
+      reference's 4.0), translate p50 **3.6 s flat across all six 10-minute
+      windows** (3.0-4.1 s, no trend, recovered after dense stretches), lag
+      p50 8.7 s / p90 16 s — against the 2026-08-06 live baseline's 13-18 s
+      band. Both prior failure signatures absent over the full hour.
+      Replay's "256 utterances never finished" is accounting, not loss:
+      superseded cards no longer emit `translation_done`; their text and
+      translation live on in their successor.
+- [ ] Not yet eyeballed in the browser since the chain-wait change — the
+      stitched translations are covered by tests and the numbers hold, but
+      Chester should watch one visible /takt to confirm the cards *read*
+      right before calling the paragraph work done.
 
 ---
 
