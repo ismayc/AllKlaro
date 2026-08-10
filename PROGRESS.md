@@ -894,11 +894,23 @@ model that was wrong, and it took three runs to get a true one.
       place?") closed its card and the answer arrived as its own. Per-card
       lag median ~9.7 s (vs the old 13-18 s live band). Two caveats, neither
       a merge-layer regression:
-      - *Cold-start stitch seam*: card #1's translation replayed its base
-        untranslated (half German, half English). During model cold-load,
-        calls ran ~23 s, past `CHAIN_WAIT_SEC=10` — the wait expires and the
-        stitch replays whatever the base had. Hypothesis, not yet traced in
-        code; confined to the first ~30 s, but real meetings start cold too.
+      - *Stitch seam on card #1* (fixed same day): the translation replayed
+        its base untranslated (half German, half English). The cold-start /
+        chain-wait hypothesis died in diagnosis — a wait timeout falls back
+        to a full retranslate and cannot seam. The real cause, reproduced
+        byte-for-byte at temperature 0: with the Berlin heard note plus the
+        `"gekickt" = geguckt` gloss in the prompt, **qwen2.5:7b answers with
+        the corrected German sentence instead of a translation** — it does
+        the restoration task, not the translation task. The stitch then
+        faithfully replays that untranslated base into every successor, and
+        the sheddable refine never overwrites it. Fix: a trailing guard line
+        ("the reply is still ONLY the English translation") on **draft-tier
+        calls only** (`guard_language`), because the same line — every
+        wording and position tried — made gemma3 stop uncrossing the "nett
+        verstarne" negation, and gemma never flipped tasks in the first
+        place. Guarded qwen now yields "Handover and so on, then Uwe looked
+        and said": English, *and* the dialect reading restored. Pinned by a
+        unit test and a real-model integration test.
       - One slim "Yeah." → "Ja." card slipped past absorption, most likely
         because a real pause had already finalized its neighbor — 1 slim
         card in 15 against the old shredding.

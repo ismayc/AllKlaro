@@ -2193,7 +2193,8 @@ def translation_messages(text: str, source: str, target: str,
                          history: list[dict] | None = None,
                          flavor: str | None = None,
                          address: str | None = None,
-                         heard_flavor: str | None = None) -> list[dict]:
+                         heard_flavor: str | None = None,
+                         guard_language: bool = False) -> list[dict]:
     """Static system prompt + history as chat turns.
 
     Keeping the system prompt constant and prepending history as normal
@@ -2254,6 +2255,19 @@ def translation_messages(text: str, source: str, target: str,
             f"authoritative: when the same words or expressions come up "
             f"again, reuse the corrected terminology and phrasing exactly."
         )
+    if guard_language and (note or dialect or heard_note):
+        # Draft-tier calls only. The restoration hints make a small model
+        # flip tasks: qwen2.5:7b answered the Berlin note + a "gekickt"
+        # gloss with the *corrected German sentence* instead of a
+        # translation, and the merge stitch replayed that untranslated base
+        # into every successor card. The guard is last because that is the
+        # position that fixed qwen — and it must NOT reach the main model:
+        # appended anywhere, in any wording tried, it made gemma3 stop
+        # uncrossing the "nett verstarne" negation, and gemma never flipped
+        # tasks in the first place.
+        system += (f"\n\nThese hints only decide which meaning to pick. "
+                   f"Your reply is still ONLY the {tgt} translation — never "
+                   f"the corrected or restored {src} wording.")
     msgs = [{"role": "system", "content": system}]
     for ex in examples:
         msgs.append({"role": "user", "content": ex["text"]})
@@ -2285,7 +2299,8 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
                              history: list[dict] | None = None,
                              flavor: str | None = None,
                              address: str | None = None,
-                             heard_flavor: str | None = None) -> str | None:
+                             heard_flavor: str | None = None,
+                             guard_language: bool = False) -> str | None:
     """Streams deltas to the client; returns the full translation, or None on error.
 
     The caller sends the closing `translation_done` message (with metrics).
@@ -2293,7 +2308,8 @@ async def stream_translation(ws: WebSocket, uid: int, text: str, source: str,
     payload = {
         "model": model,
         "messages": translation_messages(text, source, target, history,
-                                         flavor, address, heard_flavor),
+                                         flavor, address, heard_flavor,
+                                         guard_language),
         "stream": True,
         "options": {"temperature": 0.0, "num_ctx": OLLAMA_NUM_CTX},
         "keep_alive": "60m",
@@ -3089,14 +3105,16 @@ async def ws_endpoint(ws: WebSocket):
                                  "target": targets[0], "text": base + " "})
             tail_tr = await stream_translation(
                 ws, my_uid, merge_tail, source, targets[0], draft or model,
-                context, flavor_for(targets[0]), address, flavor_for(source))
+                context, flavor_for(targets[0]), address, flavor_for(source),
+                guard_language=bool(draft))
             translations = [base + " " + tail_tr
                             if tail_tr is not None else None]
         else:
             translations = await asyncio.gather(
                 *(stream_translation(ws, my_uid, text, source, t,
                                      draft or model, context, flavor_for(t),
-                                     address, flavor_for(source))
+                                     address, flavor_for(source),
+                                     guard_language=bool(draft))
                   for t in targets))
         if all(t is not None for t in translations):
             # Hand the finished translation to any successor already waiting

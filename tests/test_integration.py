@@ -576,3 +576,31 @@ async def test_real_model_reads_the_berlin_mis_hearing_as_looking():
     assert any(w in low for w in ("look", "check", "watch")), (
         f"Berlin reading did not recover the meaning: {berlin!r} "
         f"(without the hint: {plain!r})")
+
+
+async def test_real_draft_model_translates_instead_of_restoring_dialect():
+    """The stitch seam from the 2026-08-10 /takt run, pinned on the real model.
+
+    With the Berlin heard note plus the "gekickt" = geguckt gloss in the
+    prompt, qwen2.5:7b — the recommended draft tier — answered with the
+    *corrected German sentence* instead of the English translation. The merge
+    stitch then replayed that untranslated base into every successor card,
+    and the sheddable refine never got to overwrite it. gemma3:12b never
+    flipped tasks, so this must run on the draft model, through the guarded
+    draft path (`guard_language=True`, as `_run_translations` passes it), to
+    mean anything.
+    """
+    if not ollama_up():
+        pytest.skip("Ollama not running")
+    model = "qwen2.5:7b-instruct"
+    tags = httpx.get(f"{server.OLLAMA_URL}/api/tags", timeout=3).json()
+    if model not in {m["name"] for m in tags.get("models", [])}:
+        pytest.skip(f"{model} not pulled")
+    out = await server.stream_translation(
+        FakeWS(), 1, "Übergabe und so und dann hat Uwe gekickt und sagt",
+        "de", "en", model, heard_flavor="berlin", guard_language=True)
+    assert out
+    low = out.lower()
+    assert not re.search(r"\b(und|hat|sagt|übergabe)\b", low), (
+        f"draft echoed (corrected) German instead of translating: {out!r}")
+    assert "said" in low or "says" in low or "handover" in low, out

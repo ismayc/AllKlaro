@@ -222,3 +222,32 @@ def test_the_mis_hearings_are_never_coloured():
     dialect claim on a sentence about football."""
     assert server.dialect_markers("Ich kicke ja immer nicht", "de",
                                   "berlin") == []
+
+
+def test_restoration_hints_get_a_language_guard_on_draft_calls_only():
+    """A small draft model reads the restoration hints as the task itself:
+    qwen2.5:7b answered the Berlin note plus a "gekickt" gloss with the
+    corrected German sentence instead of a translation, and the merge stitch
+    replayed that untranslated base into every successor card (the seam in
+    the 2026-08-10 /takt run). A trailing guard line fixes qwen — but the
+    same line, in every wording and position tried, made gemma3 stop
+    uncrossing the "nett verstarne" negation. So the guard is opt-in and
+    only the draft-tier call sites set it."""
+    text = "Übergabe und so und dann hat Uwe gekickt und sagt"
+    guarded = server.translation_messages(
+        text, "de", "en", heard_flavor="berlin",
+        guard_language=True)[0]["content"]
+    assert "ONLY the English translation" in guarded
+    # It must come AFTER the hints it disarms, not before.
+    assert (guarded.index("which meaning to pick")
+            > guarded.index("regional dialect"))
+
+    # The main model must see the prompt it was tuned against, unchanged.
+    unguarded = server.translation_messages(
+        text, "de", "en", heard_flavor="berlin")[0]["content"]
+    assert "which meaning to pick" not in unguarded
+
+    # And no hints means nothing to disarm, guarded or not.
+    plain = server.translation_messages("Guten Tag.", "de", "en",
+                                        guard_language=True)[0]["content"]
+    assert "which meaning to pick" not in plain
