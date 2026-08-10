@@ -886,10 +886,34 @@ model that was wrong, and it took three runs to get a true one.
       Replay's "256 utterances never finished" is accounting, not loss:
       superseded cards no longer emit `translation_done`; their text and
       translation live on in their successor.
-- [ ] Not yet eyeballed in the browser since the chain-wait change — the
-      stitched translations are covered by tests and the numbers hold, but
-      Chester should watch one visible /takt to confirm the cards *read*
-      right before calling the paragraph work done.
+- [x] **Eyeballed and passed** (2026-08-10, visible /takt on demo4, Chester
+      watching): 15 cards vs the 08-06 baseline's 35 on the same audio, all
+      translated, partials lost 0. The long merged paragraphs read as single
+      flowing translations — no seams, no duplicated fragments. "Ja, ja." /
+      "Yeah." sit inline; the one question ("And how warm is it at your
+      place?") closed its card and the answer arrived as its own. Per-card
+      lag median ~9.7 s (vs the old 13-18 s live band). Two caveats, neither
+      a merge-layer regression:
+      - *Cold-start stitch seam*: card #1's translation replayed its base
+        untranslated (half German, half English). During model cold-load,
+        calls ran ~23 s, past `CHAIN_WAIT_SEC=10` — the wait expires and the
+        stitch replays whatever the base had. Hypothesis, not yet traced in
+        code; confined to the first ~30 s, but real meetings start cold too.
+      - One slim "Yeah." → "Ja." card slipped past absorption, most likely
+        because a real pause had already finalized its neighbor — 1 slim
+        card in 15 against the old shredding.
+
+      The run also pinned down a transcription-layer artifact worth its own
+      item: the "Er hat keinen Soldaten Beruf" card is Whisper mishearing
+      *"Er hat keinen Solar, er hat keinen Solar"* on an isolated chunk. No
+      live caller passes `initial_prompt`; decoding the same slice with the
+      preceding sentence as prompt converges on the correct reading at all
+      three window positions tried, while isolated decodes are unstable
+      ("Solarer Beruf" / "ja" / "also er hat kein solar"). That is item 16's
+      batch-context gap in miniature, and threading the previous final's
+      tail into `initial_prompt` is the evidence-backed fix candidate —
+      guarded against error propagation and cross-language bias, tested,
+      and A-B-A bracketed before it ships.
 
 ---
 
