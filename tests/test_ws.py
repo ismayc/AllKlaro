@@ -823,6 +823,39 @@ def test_auto_mode_threads_the_previous_final_into_whisper(client,
     assert last["prompt"] == "Wie geht es dir?"
 
 
+def test_auto_prompt_context_can_be_switched_off(client, stub_transcribe,
+                                                 monkeypatch):
+    """The baseline arm of the #19 acceptance bracket. The hour-long replay
+    cannot switch arms by editing code (the server reloads on a .py write and
+    the run dies with it), so the auto-mode context is behind a flag."""
+    import server as srv
+    monkeypatch.setattr(srv, "AUTO_PROMPT_CONTEXT", False)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en"}))
+        speak(ws)
+        collect_until(ws)
+        speak(ws)
+        collect_until(ws)
+    assert stub_transcribe.calls[-1]["prompt"] is None
+
+
+def test_forced_mode_keeps_context_when_auto_context_is_off(client,
+                                                            stub_transcribe,
+                                                            monkeypatch):
+    """The flag gates only the auto-mode fallback #19 added. A forced mode fed
+    Whisper the last final long before that, and the baseline arm has to be the
+    pre-#19 behavior, not a context-free pipeline."""
+    import server as srv
+    monkeypatch.setattr(srv, "AUTO_PROMPT_CONTEXT", False)
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "de-en"}))
+        speak(ws)
+        collect_until(ws)
+        speak(ws)
+        collect_until(ws)
+    assert stub_transcribe.calls[-1]["prompt"] == "Wie geht es dir?"
+
+
 def speak_tagged(ws, tag):
     for _ in range(3):
         ws.send_bytes(bytes([tag]) + bytes(4096))

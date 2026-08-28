@@ -127,6 +127,14 @@ REFINE_MAX_QUEUE = 2               # skip the second-pass refine past this depth
 # benefit for it, and note the rig drifts *within* a session (A2 is much worse
 # than A1), so arm order matters and even paired arms are not safe.
 REFINE_TIMEOUT_SEC = float(os.environ.get("ALLKLARO_REFINE_TIMEOUT_SEC", "20"))
+
+# The auto-mode half of the Whisper context prompt (PROGRESS.md #19), behind a
+# switch so the hour-long A-B-A acceptance replay can turn it off without
+# editing code between arms, since the server reloads on a .py write, which
+# kills a run in progress. Default on; ALLKLARO_AUTO_PROMPT_CONTEXT=0 is the baseline
+# arm. Forced modes are unaffected: they had context before #19 and keep it.
+AUTO_PROMPT_CONTEXT = (os.environ.get("ALLKLARO_AUTO_PROMPT_CONTEXT", "1")
+                       not in ("0", "off", "false", "no"))
 REFINE_MAX_AGE_SEC = 20.0
 # ...and the same for the translation backlog. `whisper_pending` says nothing
 # about how many utterances are waiting on Ollama, which is the queue the next
@@ -2814,7 +2822,7 @@ async def ws_endpoint(ws: WebSocket):
         hint = lang_hint(mode)
         if hint and last_final.get(hint):
             parts.append(last_final[hint])
-        elif prev is not None and mode_pair(mode):
+        elif prev is not None and mode_pair(mode) and AUTO_PROMPT_CONTEXT:
             # An auto mode has no pinned language to look a tail up under,
             # so this gate left the DEFAULT mode decoding every chunk
             # context-free — which is where "Er hat keinen Solar" became

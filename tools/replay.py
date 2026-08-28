@@ -162,6 +162,14 @@ async def run(args) -> int:
               f"{wall - tail['_at']:.1f}s of audio still unaccounted for"
               if tail['_at'] < secs else
               f"  last card landed {tail['_at']:.1f}s in")
+    if args.out:
+        # The trace file records timings and never the text, so the two risks
+        # the hour-long #19 bracket exists to rule out (a mis-heard final
+        # biasing the next decode, and cross-language pull in code-switching
+        # stretches) cannot be read from it. Keep the raw event stream.
+        Path(args.out).write_text(
+            "".join(json.dumps(e) + "\n" for e in events))
+        print(f"  events -> {args.out} ({len(events)} messages)")
     print("\nNow: uv run python tools/trace_report.py --last "
           f"{max(started, 1)}")
     return 0 if done == started and started else 1
@@ -185,6 +193,8 @@ def main() -> int:
     p.add_argument("--drain", type=float, default=60.0,
                    help="seconds to wait for in-flight work after the audio ends")
     p.add_argument("--quiet", action="store_true", help="summary only")
+    p.add_argument("--out", help="write every WebSocket message to this JSONL "
+                                 "file (the trace has timings but no text)")
     args = p.parse_args()
     if not args.audio and not shutil.which("say"):
         sys.exit("`say` not found — this synthesizer is macOS-only; "

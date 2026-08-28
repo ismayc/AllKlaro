@@ -951,12 +951,49 @@ real edge; this was the same gap inside our own pipeline.
       Solarabruf" (compound still slightly mangled, topic recovered). No
       prompt-induced repetition loops in any final; outcomes and lag inside
       the demo4 noise band (p50 5.8 / 6.5 s across the two runs).
-- [ ] **Not yet A-B-A bracketed over the hour.** demo4-scale lag numbers
-      swing more between identical runs than between code arms, so the
-      62-minute replay is the acceptance gate: error propagation (a
-      mis-heard final biasing the next decode) and cross-language pull in
-      dense code-switching stretches are the two risks a 4-minute slice
-      cannot rule out.
+- [x] **A-B-A bracketed over the hour and accepted** (2026-08-28). Three
+      realtime replays of the full 54.3-minute recording, arms
+      A(off)-B(on)-A(off) via `ALLKLARO_AUTO_PROMPT_CONTEXT`, server
+      restarted between arms so each starts equally cold. Both risks came
+      back negative and the arms are structurally identical: 710 utterances
+      each, 261/262/261 net cards, 429/428/428 merges, chars p50 119/120/118.
+      - *Error propagation: not observed, and not growing.* Cards opening
+        with 5+ words carried over from the prompt: A1 1, B 1, A2 0; whole-
+        card echoes: 0/1/0; repetition loops 0 in all three. Per-10-minute
+        windows show no drift, which is the shape propagation would take
+        (each decode becomes the next prompt).
+      - *Cross-language pull: not observed.* Language switches 131/123/127
+        with B inside the baseline spread; German cards 180/179/181, English
+        81/83/80.
+      - *Lag: inside noise, as expected.* First-word p50 16.3 / 15.2 / 14.9 s:
+        the two identical arms differ by 1.4 s, and B sits 0.5 s under
+        their mean. Claim no lag benefit for this change; claim no cost.
+      - *The win is transcript quality, and it replicates.* English filler
+        decoded inside German cards (`no`, `yeah`, `oh`, `okay`, `well`):
+        **27 / 8 / 26**. The baseline arms agree to within one token and B
+        is a third of both. "no, no" hallucination runs: 5 / 1 / 6. This is
+        item #4's German-decoded-as-English failure, and context suppresses
+        most of it. The two arms share 85.5% of their words, with 185
+        disagreements of 4+ words.
+      - *A dialect entry becomes reachable.* Both baseline arms decode the
+        Berlinerisch utterance as "Ich kipp ja immer nicht"; B decodes "du,
+        ich kicke ja immer nicht". `kicke` is exactly the mis-hearing the
+        2026-08-07 `dialects.txt` entry keys on, so the Berlin reading can
+        fire with context and is lost without it.
+      - ⚠️ *The card that motivated the item is not the evidence.* No arm
+        reproduced "Soldaten Beruf": A1 gave "Solarer Beruf", A2 gave
+        "Solarabruf" (*Solar* recovered with no context at all), B gave "er
+        hat keinen solar er hat keinen Solara Beruf". That decode is
+        unstable run to run, so it argues for the mechanism far more weakly
+        than the demo4 verification above implies. The replicated filler
+        and dialect results are what carry this item.
+      - ⚠️ *Rig trap that cost the first attempt.* `tools/replay.py` always
+        sends `draft_model`, and `""` means the draft pass is OFF
+        (server.py's config handler), so an hour with no `--draft-model`
+        runs single-pass on gemma3:12b: translate p50 111 s, first-word lag
+        p50 184 s, 227 Ollama read timeouts. That is not the app's
+        behavior; `resolvePair()` picks qwen2.5:7b-instruct here. Every arm
+        above pins `--model gemma3:12b --draft-model qwen2.5:7b-instruct`.
 
 ---
 
