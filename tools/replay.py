@@ -105,6 +105,37 @@ def fetch_models(ws_url: str) -> tuple[list[str], dict, str]:
             payload.get("default", ""))
 
 
+def choose_draft(args) -> str:
+    """The draft model this run should ask the server for.
+
+    An unset --draft-model used to send "", which the server reads as "draft
+    pass off": a silent single-pass arm that measures a configuration the app
+    never runs. Unset now means "whatever the app would pick"; passing an
+    empty string is how you ask for single-pass on purpose.
+    """
+    draft = args.draft_model
+    if draft is None:
+        try:
+            models, sizes, default = fetch_models(args.url)
+            draft = resolve_draft(models, sizes, args.model or default)
+        except Exception as exc:                       # server down, old build
+            print(f"  could not resolve a draft model ({exc}); "
+                  f"running single-pass")
+            draft = ""
+    print(f"models: {args.model or 'server default'} + "
+          f"draft {draft or '(off)'}")
+    return draft
+
+
+def write_events(path: Path, events: list) -> None:
+    """Save the raw event stream: the trace records timings and never the
+    text, so the two risks the hour-long #19 bracket exists to rule out (a
+    mis-heard final biasing the next decode, and cross-language pull in
+    code-switching stretches) cannot be read from it."""
+    path.write_text("".join(json.dumps(e) + "\n" for e in events))
+    print(f"  events -> {path} ({len(events)} messages)")
+
+
 def read_pcm(path: Path) -> bytes:
     with wave.open(str(path)) as w:
         if (w.getnchannels(), w.getframerate(), w.getsampwidth()) != (1, 16000, 2):
@@ -166,18 +197,7 @@ async def run(args) -> int:
     # pass off": a silent single-pass arm that measures a configuration the
     # app never runs. Unset now means "whatever the app would pick"; passing
     # an empty string is how you ask for single-pass on purpose.
-    draft = args.draft_model
-    if draft is None:
-        try:
-            models, sizes, default = fetch_models(args.url)
-            draft = resolve_draft(models, sizes, args.model or default)
-        except Exception as exc:                       # server down, old build
-            print(f"  could not resolve a draft model ({exc}); "
-                  f"running single-pass")
-            draft = ""
-    cfg["draft_model"] = draft
-    print(f"models: {args.model or 'server default'} + "
-          f"draft {draft or '(off)'}")
+    cfg["draft_model"] = choose_draft(args)
 
     events: list = []
     t0 = time.monotonic()
@@ -213,13 +233,7 @@ async def run(args) -> int:
               if tail['_at'] < secs else
               f"  last card landed {tail['_at']:.1f}s in")
     if args.out:
-        # The trace file records timings and never the text, so the two risks
-        # the hour-long #19 bracket exists to rule out (a mis-heard final
-        # biasing the next decode, and cross-language pull in code-switching
-        # stretches) cannot be read from it. Keep the raw event stream.
-        Path(args.out).write_text(
-            "".join(json.dumps(e) + "\n" for e in events))
-        print(f"  events -> {args.out} ({len(events)} messages)")
+        write_events(Path(args.out), events)
     print("\nNow: uv run python tools/trace_report.py --last "
           f"{max(started, 1)}")
     return 0 if done == started and started else 1

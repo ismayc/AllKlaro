@@ -368,3 +368,63 @@ def test_fetch_models_handles_a_tls_url(monkeypatch):
                                                    FakeResponse())[1])
     replay.fetch_models("wss://host.tail0e51a2.ts.net/ws")
     assert seen["url"] == "https://host.tail0e51a2.ts.net/api/models"
+
+
+def test_choose_draft_resolves_when_the_flag_is_unset(monkeypatch, capsys):
+    monkeypatch.setattr(replay, "fetch_models",
+                        lambda url: (["gemma3:12b", "qwen2.5:7b-instruct"],
+                                     {"gemma3:12b": 8.1e9,
+                                      "qwen2.5:7b-instruct": 4.7e9},
+                                     "gemma3:12b"))
+    args = replay.build_parser().parse_args([])
+    assert replay.choose_draft(args) == "qwen2.5:7b-instruct"
+    assert "draft qwen2.5:7b-instruct" in capsys.readouterr().out
+
+
+def test_choose_draft_honors_an_explicit_off(monkeypatch, capsys):
+    """"" is a real request for a single-pass run, so it must not be
+    second-guessed by the resolver."""
+    monkeypatch.setattr(replay, "fetch_models",
+                        lambda url: pytest.fail("must not ask the server"))
+    args = replay.build_parser().parse_args(["--draft-model", ""])
+    assert replay.choose_draft(args) == ""
+    assert "draft (off)" in capsys.readouterr().out
+
+
+def test_choose_draft_honors_an_explicit_model(monkeypatch):
+    monkeypatch.setattr(replay, "fetch_models",
+                        lambda url: pytest.fail("must not ask the server"))
+    args = replay.build_parser().parse_args(["--draft-model", "llama3.2:3b"])
+    assert replay.choose_draft(args) == "llama3.2:3b"
+
+
+def test_choose_draft_falls_back_to_single_pass_when_the_server_is_down(capsys):
+    """A measurement tool that dies because it could not look up a model is
+    worse than one that says so and runs."""
+    args = replay.build_parser().parse_args(["--url", "ws://127.0.0.1:1/ws"])
+    assert replay.choose_draft(args) == ""
+    out = capsys.readouterr().out
+    assert "could not resolve a draft model" in out
+
+
+def test_choose_draft_pairs_against_an_explicit_main_model(monkeypatch, capsys):
+    """--model overrides the server default, and the draft has to be chosen
+    for the model actually being measured."""
+    monkeypatch.setattr(replay, "fetch_models",
+                        lambda url: (["qwen2.5:32b-instruct", "gemma3:12b",
+                                      "qwen2.5:7b-instruct"],
+                                     {"qwen2.5:32b-instruct": 19e9,
+                                      "gemma3:12b": 8.1e9,
+                                      "qwen2.5:7b-instruct": 4.7e9},
+                                     "gemma3:12b"))
+    args = replay.build_parser().parse_args(["--model", "qwen2.5:32b-instruct"])
+    assert replay.choose_draft(args) == "qwen2.5:7b-instruct"
+    assert "qwen2.5:32b-instruct + draft" in capsys.readouterr().out
+
+
+def test_write_events_round_trips_every_message(tmp_path, capsys):
+    events = [{"type": "final", "text": "Ja, genau."}, {"type": "partial"}]
+    out = tmp_path / "events.jsonl"
+    replay.write_events(out, events)
+    assert [json.loads(l) for l in out.read_text().splitlines()] == events
+    assert "2 messages" in capsys.readouterr().out
