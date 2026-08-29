@@ -22,3 +22,7 @@ allklaro-trace.jsonl
 
 # macOS
 .DS_Store
+
+# Coverage runs (uv run --with pytest-cov pytest --cov=server --cov=voiceprint)
+.coverage
+htmlcov/

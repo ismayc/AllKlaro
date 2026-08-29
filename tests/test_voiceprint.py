@@ -328,3 +328,65 @@ def test_the_trace_records_the_distance(client, stub_transcribe, trace_file,
     recs = [r for r in trace_records(trace_file) if r.get("uid")]
     assert recs[-1]["voice_dist"] is not None
     assert recs[0]["voice_dist"] is None, "nothing preceded the first utterance"
+
+
+# --- the guards that keep a short or silent buffer from raising ---------------
+# Every one of these is a real path: the VAD hands over whatever it split, and
+# a 20 ms tail or a stretch of pure silence has to come back as "no signature"
+# rather than an exception inside the audio thread.
+
+def test_frames_of_a_buffer_shorter_than_one_frame_is_empty():
+    assert vp._frames(np.zeros(vp.FRAME - 1, dtype=np.float32)).shape \
+        == (0, vp.FRAME)
+
+
+def test_median_f0_of_no_frames_is_unknown():
+    assert vp._median_f0(np.empty((0, vp.FRAME), dtype=np.float32)) is None
+
+
+def test_median_f0_needs_enough_voiced_frames():
+    """Noise has no fundamental, so no frame clears VOICED_STRENGTH and the
+    estimator must decline rather than return the argmax of nothing."""
+    rng = np.random.default_rng(0)
+    noise = rng.normal(0, 0.1, vp.FRAME * 4).astype(np.float32)
+    assert vp._median_f0(vp._frames(noise)) is None
+
+
+def test_median_f0_declines_when_the_search_window_is_empty(monkeypatch):
+    """F0_LO and F0_HI bracket adult speech; if they were ever set so the
+    lag window collapses, the estimator must return None, not index into an
+    empty array."""
+    monkeypatch.setattr(vp, "F0_LO", 1.0)
+    monkeypatch.setattr(vp, "F0_HI", 1.0)
+    tone = np.sin(2 * np.pi * 150 * np.arange(vp.FRAME * 4) / vp.SAMPLE_RATE)
+    assert vp._median_f0(vp._frames(tone.astype(np.float32))) is None
+
+
+def test_signature_of_a_buffer_too_short_to_frame_is_none():
+    assert vp.voice_signature(np.zeros(vp.FRAME - 1, dtype=np.float32)) is None
+
+
+def test_signature_survives_a_framing_that_yields_nothing(monkeypatch):
+    """Defensive redundancy, pinned deliberately: the length guard above it
+    already implies frames exist, so this branch is only reachable if that
+    guard is ever loosened. It must still be a None, not an IndexError."""
+    monkeypatch.setattr(vp, "_frames",
+                        lambda audio: np.empty((0, vp.FRAME), dtype=np.float32))
+    assert vp.voice_signature(np.zeros(vp.SAMPLE_RATE // 4,
+                                       dtype=np.float32)) is None
+
+
+def test_signature_of_a_perfectly_flat_band_shape_is_none(monkeypatch):
+    """Equal power in every band means the log-band shape is constant, and
+    subtracting its mean leaves a zero vector with no direction to compare.
+    Built with single-bin bands over impulses, since a real voice never lands
+    exactly here but the division by the norm must not produce NaNs if it
+    does."""
+    monkeypatch.setattr(vp, "_EDGES", np.array([0, 1, 2, 3, 4]))
+    audio = np.zeros(vp.SAMPLE_RATE, dtype=np.float32)   # long enough to clear
+    idx = np.arange(vp.HOP, len(audio), vp.FRAME)        # MIN_VOICED_FRAMES
+    idx = idx[:len(idx) // 2 * 2]     # an even count, so the mean is exactly
+    audio[idx] = np.where(np.arange(len(idx)) % 2 == 0, 1.0, -1.0)
+    # zero and the mean subtraction inside the function leaves the impulses
+    # alone; one impulse per frame at the window peak is a flat spectrum.
+    assert vp.voice_signature(audio) is None
