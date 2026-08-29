@@ -994,6 +994,10 @@ real edge; this was the same gap inside our own pipeline.
         p50 184 s, 227 Ollama read timeouts. That is not the app's
         behavior; `resolvePair()` picks qwen2.5:7b-instruct here. Every arm
         above pins `--model gemma3:12b --draft-model qwen2.5:7b-instruct`.
+        Closed in the tool afterwards: an unset `--draft-model` now asks
+        `/api/models` and resolves the pair the app would use, and `""` is
+        how you ask for single-pass on purpose. `resolve_draft()` is pinned
+        against the real `resolvePair()` in tests/test_model_pairing.py.
 
 ---
 

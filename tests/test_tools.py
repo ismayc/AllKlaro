@@ -306,3 +306,65 @@ def test_the_saving_is_never_negative(capsys):
     out = capsys.readouterr().out
     assert "fires on   2/2" in out
     assert "-" not in out.split("saving")[1][:20], "negative saving reported"
+
+
+# --- replay's draft-model resolution -----------------------------------------
+
+def test_unset_draft_model_is_distinguishable_from_an_empty_one():
+    """The whole point of the default being None: "" is a real request for a
+    single-pass run, and unset means "pick what the app would". Sending "" for
+    both is what made an hour-long measurement arm run without a draft."""
+    p = replay.build_parser()
+    assert p.parse_args([]).draft_model is None
+    assert p.parse_args(["--draft-model", ""]).draft_model == ""
+    assert p.parse_args(["--draft-model", "qwen2.5:7b-instruct"]).draft_model \
+        == "qwen2.5:7b-instruct"
+
+
+def test_fetch_models_reads_the_same_endpoint_the_ui_does(monkeypatch):
+    seen = {}
+
+    class FakeResponse:
+        def read(self):
+            return json.dumps({"models": ["gemma3:12b", "qwen2.5:7b-instruct"],
+                               "sizes": {"gemma3:12b": 8.1e9,
+                                         "qwen2.5:7b-instruct": 4.7e9},
+                               "default": "gemma3:12b"}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(url, timeout=None):
+        seen["url"] = url
+        return FakeResponse()
+
+    monkeypatch.setattr(replay.urllib.request, "urlopen", fake_urlopen)
+    models, sizes, default = replay.fetch_models("ws://127.0.0.1:8710/ws")
+    assert seen["url"] == "http://127.0.0.1:8710/api/models"
+    assert default == "gemma3:12b"
+    assert replay.resolve_draft(models, sizes, default) == "qwen2.5:7b-instruct"
+
+
+def test_fetch_models_handles_a_tls_url(monkeypatch):
+    """Phone and Tailscale runs hit wss://, and a measurement started against
+    the wrong scheme would silently fall back to single-pass."""
+    seen = {}
+
+    class FakeResponse:
+        def read(self):
+            return json.dumps({"models": [], "sizes": {}, "default": ""}).encode()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(replay.urllib.request, "urlopen",
+                        lambda url, timeout=None: (seen.update(url=url),
+                                                   FakeResponse())[1])
+    replay.fetch_models("wss://host.tail0e51a2.ts.net/ws")
+    assert seen["url"] == "https://host.tail0e51a2.ts.net/api/models"

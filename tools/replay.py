@@ -11,6 +11,7 @@ chunks, realtime pacing), and reports what came back and when.
     uv run python tools/replay.py --rate 300       # faster still
     uv run python tools/replay.py --pace 1.5       # 1.5x realtime (overload)
     uv run python tools/replay.py --audio talk.m4a # a real recording instead
+    uv run python tools/replay.py --draft-model ""  # single-pass, no draft
 
 The server writes one trace record per utterance while this runs; summarize
 them afterwards with `uv run python tools/trace_report.py`.
@@ -23,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 import wave
 from pathlib import Path
 
@@ -68,6 +70,39 @@ def convert(src: Path, out: Path) -> Path:
     subprocess.run(["afconvert", "-f", "WAVE", "-d", "LEI16@16000", "-c", "1",
                     str(src), str(out)], check=True)
     return out
+
+
+# Models under ~4 GB paraphrase too freely to trust even as drafts. Mirrors
+# MIN_DRAFT_BYTES in static/app.js; tests/test_model_pairing.py runs the real
+# JavaScript against this to catch the two drifting apart.
+MIN_DRAFT_BYTES = 4e9
+
+
+def resolve_draft(models: list[str], sizes: dict, model: str) -> str:
+    """The draft the app itself would pick for `model`, given what's installed.
+
+    A measurement arm that leaves the draft pass off is not measuring the app:
+    an hour of the real recording ran single-pass on gemma3:12b at translate
+    p50 111 s against 3.3 s paired, with 227 Ollama read timeouts. This is the
+    no-saved-settings half of resolvePair() in static/app.js.
+    """
+    size = lambda m: sizes.get(m, 0)                              # noqa: E731
+    smaller = sorted((m for m in models if m != model and size(m) < size(model)),
+                     key=size)
+    for m in smaller:
+        if size(m) >= MIN_DRAFT_BYTES:
+            return m
+    return smaller[-1] if smaller else ""
+
+
+def fetch_models(ws_url: str) -> tuple[list[str], dict, str]:
+    """Ask the server what Ollama has, the same endpoint the UI reads."""
+    base = ws_url.replace("wss://", "https://").replace("ws://", "http://")
+    base = base.rsplit("/ws", 1)[0]
+    with urllib.request.urlopen(base + "/api/models", timeout=10) as r:
+        payload = json.load(r)
+    return (payload.get("models", []), payload.get("sizes", {}),
+            payload.get("default", ""))
 
 
 def read_pcm(path: Path) -> bytes:
@@ -127,7 +162,22 @@ async def run(args) -> int:
            "stats": False}
     if args.model:
         cfg["model"] = args.model
-    cfg["draft_model"] = args.draft_model or ""
+    # An unset --draft-model used to send "", which the server reads as "draft
+    # pass off": a silent single-pass arm that measures a configuration the
+    # app never runs. Unset now means "whatever the app would pick"; passing
+    # an empty string is how you ask for single-pass on purpose.
+    draft = args.draft_model
+    if draft is None:
+        try:
+            models, sizes, default = fetch_models(args.url)
+            draft = resolve_draft(models, sizes, args.model or default)
+        except Exception as exc:                       # server down, old build
+            print(f"  could not resolve a draft model ({exc}); "
+                  f"running single-pass")
+            draft = ""
+    cfg["draft_model"] = draft
+    print(f"models: {args.model or 'server default'} + "
+          f"draft {draft or '(off)'}")
 
     events: list = []
     t0 = time.monotonic()
@@ -175,7 +225,7 @@ async def run(args) -> int:
     return 0 if done == started and started else 1
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--url", default="ws://127.0.0.1:8710/ws")
@@ -188,14 +238,21 @@ def main() -> int:
                    help="feed speed vs realtime; >1 deliberately overloads")
     p.add_argument("--mode", default="auto-de-en")
     p.add_argument("--model", default="", help="translation model (server default)")
-    p.add_argument("--draft-model", default="", help="fast first-pass model")
+    p.add_argument("--draft-model", default=None,
+                   help="fast first-pass model; unset picks the one the app "
+                        "would pair with the main model, \"\" turns the "
+                        "draft pass off")
     p.add_argument("--pause-ms", type=int, default=700)
     p.add_argument("--drain", type=float, default=60.0,
                    help="seconds to wait for in-flight work after the audio ends")
     p.add_argument("--quiet", action="store_true", help="summary only")
     p.add_argument("--out", help="write every WebSocket message to this JSONL "
                                  "file (the trace has timings but no text)")
-    args = p.parse_args()
+    return p
+
+
+def main() -> int:
+    args = build_parser().parse_args()
     if not args.audio and not shutil.which("say"):
         sys.exit("`say` not found — this synthesizer is macOS-only; "
                  "use --audio with a recording instead.")

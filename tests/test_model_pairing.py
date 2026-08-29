@@ -9,6 +9,7 @@ import json
 import re
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -126,3 +127,32 @@ def test_only_tiny_models_still_gets_a_draft():
 def test_single_model_gets_no_draft():
     pair = resolve_pair({}, models=["gemma3:12b"])
     assert pair == {"model": "gemma3:12b", "draft": ""}
+
+
+# --- the measurement harness has to make the same choice ---------------------
+# tools/replay.py cannot run app.js, so it re-implements the default-draft half
+# of resolvePair() in Python. These pin the two together: if the JS rule
+# changes and the Python copy does not, this fails rather than quietly sending
+# a different pair into every future measurement.
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "tools"))
+
+import replay   # noqa: E402
+
+
+@pytest.mark.parametrize("models,default", [
+    (MODELS, DEFAULT),
+    (["llama3.2:3b", "translategemma:4b", "qwen2.5:7b-instruct"],
+     "qwen2.5:7b-instruct"),
+    (["gemma3:12b"], "gemma3:12b"),
+    (["gemma3:12b", "qwen2.5:14b-instruct"], "gemma3:12b"),
+])
+def test_replay_picks_the_same_draft_as_the_app(models, default):
+    js = resolve_pair({}, models=models, default=default)
+    assert replay.resolve_draft(models, SIZES, js["model"]) == js["draft"]
+
+
+def test_replay_draft_resolution_needs_no_server_when_nothing_is_installed():
+    """Ollama unreachable leaves the model list empty, and a replay with no
+    draft is still better than a crash inside the measurement tool."""
+    assert replay.resolve_draft([], {}, "gemma3:12b") == ""
