@@ -8,6 +8,7 @@ Run:  uv run uvicorn server:app --host 127.0.0.1 --port 8710
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -452,8 +453,15 @@ LOOKUP_LIMIT = 6                   # entries returned per looked-up word
 GENDER_NOTE_LIMIT = 8              # max per-sentence dictionary notes
 
 VAD_BACKEND = os.environ.get("VAD_BACKEND", "silero")  # "silero" | "energy"
-SILERO_URL = ("https://github.com/snakers4/silero-vad/raw/master/"
+# Pinned to a release tag, not `master`. `master` is a moving branch, so two
+# installs at different times fetched different weights: this project first
+# downloaded from `master` in July 2026 and got the v6.2.2 model the VAD
+# hysteresis thresholds are effectively tuned on, while a later install would
+# get whatever `master` serves then. The checksum below is that exact file, so
+# the model is reproducible and a wrong download is refused rather than cached.
+SILERO_URL = ("https://github.com/snakers4/silero-vad/raw/v6.2.2/"
               "src/silero_vad/data/silero_vad.onnx")
+SILERO_SHA256 = "1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3"
 SILERO_PATH = Path.home() / ".cache" / "allklaro" / "silero_vad.onnx"
 
 # Whisper hallucinates these on silence/noise; drop them.
@@ -1509,11 +1517,19 @@ def load_silero():
     try:
         import onnxruntime
 
-        if not SILERO_PATH.exists():
+        cached_ok = (SILERO_PATH.exists()
+                     and hashlib.sha256(SILERO_PATH.read_bytes()).hexdigest()
+                     == SILERO_SHA256)
+        if not cached_ok:
             SILERO_PATH.parent.mkdir(parents=True, exist_ok=True)
             log.info("Downloading Silero VAD model ...")
             r = httpx.get(SILERO_URL, follow_redirects=True, timeout=60)
             r.raise_for_status()
+            digest = hashlib.sha256(r.content).hexdigest()
+            if digest != SILERO_SHA256:
+                raise ValueError(
+                    f"Silero VAD checksum mismatch: got {digest[:8]}, "
+                    f"expected {SILERO_SHA256[:8]}")
             SILERO_PATH.write_bytes(r.content)
         session = onnxruntime.InferenceSession(
             str(SILERO_PATH), providers=["CPUExecutionProvider"])

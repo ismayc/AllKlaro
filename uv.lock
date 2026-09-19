@@ -42,7 +42,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.6" },
     { name = "onnxruntime", specifier = ">=1.27.0" },
     { name = "parakeet-mlx", specifier = ">=0.5.2" },
-    { name = "py3langid", specifier = ">=0.3.0" },
+    { name = "py3langid", specifier = ">=0.3.0,<0.4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.51.0" },
     { name = "wordfreq", specifier = ">=3.1.1" },
 ]
