@@ -426,9 +426,12 @@ def test_silero_is_downloaded_once_then_loaded(tmp_path, monkeypatch):
     module = types.ModuleType("onnxruntime")
     module.InferenceSession = lambda path, providers: session
     monkeypatch.setitem(sys.modules, "onnxruntime", module)
+    import hashlib
     monkeypatch.setattr(srv, "VAD_BACKEND", "silero")
     monkeypatch.setattr(srv, "_silero_session", None)
     monkeypatch.setattr(srv, "SILERO_PATH", tmp_path / "sub" / "silero.onnx")
+    monkeypatch.setattr(srv, "SILERO_SHA256",
+                        hashlib.sha256(b"onnx").hexdigest())
     monkeypatch.setattr(srv.httpx, "get",
                         lambda url, **kw: httpx.Response(
                             200, content=b"onnx",
@@ -438,6 +441,58 @@ def test_silero_is_downloaded_once_then_loaded(tmp_path, monkeypatch):
     assert srv._silero_session is session
     assert isinstance(srv.make_scorer(), srv.SileroScorer)
     monkeypatch.setattr(srv, "_silero_session", None)
+
+
+def _fake_onnx(monkeypatch, session=None):
+    """Install a fake onnxruntime whose InferenceSession returns `session`."""
+    import sys
+    import types
+    session = session or FakeSession()
+    module = types.ModuleType("onnxruntime")
+    module.InferenceSession = lambda path, providers: session
+    monkeypatch.setitem(sys.modules, "onnxruntime", module)
+    return session
+
+
+def test_silero_uses_a_checksum_matching_cache_without_downloading(tmp_path,
+                                                                   monkeypatch):
+    """A cached file whose checksum matches is loaded as-is; the network is
+    never touched. This is the common path on every run after the first."""
+    import hashlib
+    session = _fake_onnx(monkeypatch)
+    cached = tmp_path / "silero.onnx"
+    cached.write_bytes(b"the pinned model bytes")
+    monkeypatch.setattr(srv, "VAD_BACKEND", "silero")
+    monkeypatch.setattr(srv, "_silero_session", None)
+    monkeypatch.setattr(srv, "SILERO_PATH", cached)
+    monkeypatch.setattr(srv, "SILERO_SHA256",
+                        hashlib.sha256(cached.read_bytes()).hexdigest())
+
+    def refuse(*a, **k):
+        raise AssertionError("should not download a checksum-matching cache")
+    monkeypatch.setattr(srv.httpx, "get", refuse)
+
+    srv.load_silero()
+    assert srv._silero_session is session
+    monkeypatch.setattr(srv, "_silero_session", None)
+
+
+def test_silero_refuses_a_checksum_mismatched_download(tmp_path, monkeypatch):
+    """A download whose bytes do not match the pin is refused, not cached, and
+    the pipeline falls back to the energy VAD rather than running an unknown
+    model against thresholds tuned for a specific one."""
+    _fake_onnx(monkeypatch)
+    monkeypatch.setattr(srv, "VAD_BACKEND", "silero")
+    monkeypatch.setattr(srv, "_silero_session", None)
+    monkeypatch.setattr(srv, "SILERO_PATH", tmp_path / "silero.onnx")
+    monkeypatch.setattr(srv, "SILERO_SHA256", "0" * 64)
+    monkeypatch.setattr(srv.httpx, "get",
+                        lambda url, **kw: httpx.Response(
+                            200, content=b"wrong weights",
+                            request=httpx.Request("GET", url)))
+    srv.load_silero()
+    assert srv._silero_session is None            # fell back to energy
+    assert not srv.SILERO_PATH.exists()           # the bad file was not cached
 
 
 # --- the agreement retry that does not help ----------------------------------
