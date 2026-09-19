@@ -11,6 +11,7 @@ dependencies = [
     "parakeet-mlx>=0.5.2",
     "py3langid>=0.3.0",
     "uvicorn[standard]>=0.51.0",
+    "wordfreq>=3.1.1",
 ]
 
 [project.optional-dependencies]

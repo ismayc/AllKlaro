@@ -26,6 +26,7 @@ const pipeline = document.getElementById("pipeline");
 const pauseSlider = document.getElementById("pause");
 const pauseVal = document.getElementById("pauseVal");
 const exportBtn = document.getElementById("exportBtn");
+const ankiBtn = document.getElementById("ankiBtn");
 const clearBtn = document.getElementById("clearBtn");
 const summarizeBtn = document.getElementById("summarizeBtn");
 const statusDot = document.getElementById("statusDot");
@@ -1005,6 +1006,30 @@ exportBtn.onclick = async () => {
   a.download = `allklaro-${new Date().toISOString().slice(0, 16).replace(":", "")}.md`;
   a.click();
   URL.revokeObjectURL(a.href);
+};
+
+ankiBtn.onclick = async () => {
+  const items = conversationItems();
+  if (!items.length) return showError("Nothing to export yet.");
+  ankiBtn.disabled = true;
+  ankiBtn.textContent = "Building…";
+  try {
+    const r = await fetch("/api/anki", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    });
+    const { deck, error } = await r.json();
+    if (error) return showError(error);
+    const blob = new Blob([deck], { type: "text/tab-separated-values" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `allklaro-vocab-${new Date().toISOString().slice(0, 16).replace(":", "")}.txt`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } finally {
+    ankiBtn.disabled = false;
+    ankiBtn.textContent = "Anki";
+  }
 };
 
 clearBtn.onclick = () => {

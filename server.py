@@ -24,6 +24,7 @@ from pathlib import Path
 
 import httpx
 import numpy as np
+from wordfreq import zipf_frequency
 
 import voiceprint
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -1910,6 +1911,127 @@ async def lookup(word: str = "", lang: str = "de"):
             entries.extend(le for le in wiktionary_entries(conn, lemma, limit=2)
                            if not le["lemma"])
     return {"entries": entries[:LOOKUP_LIMIT + 2]}
+
+
+# ------------------------------------------------------- vocab / Anki export
+
+# Words at or above this Zipf frequency are too common to earn a flashcard
+# (articles, pronouns, "und"/"aber"). Zipf runs ~1 (rare) to ~7 (the commonest
+# words), so 5.0 keeps ordinary content words and sheds the function-word head
+# that is most of a real conversation's tokens.
+ANKI_MAX_ZIPF = float(os.environ.get("ALLKLARO_ANKI_MAX_ZIPF", "5.0"))
+ANKI_MAX_CARDS = int(os.environ.get("ALLKLARO_ANKI_MAX_CARDS", "100"))
+ARTICLE = {"m": "der", "f": "die", "n": "das"}
+
+
+def _anki_field(text: str) -> str:
+    """One Anki tab-separated field. A tab or newline would break the row, so
+    a tab becomes a space and a line break becomes <br> (decks import with
+    #html:true)."""
+    return (text.replace("\t", " ").replace("\r", "")
+            .replace("\n", "<br>").strip())
+
+
+def _vocab_lemma(token: str, conn, forms: dict) -> str:
+    """The dictionary headword for a heard word: its noun paradigm's lemma, or
+    the base word an inflected Wiktionary entry links to, or the word itself."""
+    analyses = forms.get(token.lower())
+    if analyses:
+        return analyses[0][0]
+    for e in wiktionary_entries(conn, token, limit=2):
+        if e["lemma"]:
+            return e["lemma"]
+    return token
+
+
+def _vocab_entry(conn, lemma: str) -> dict | None:
+    """The first Wiktionary entry for `lemma` that carries a gloss, or None
+    (a flashcard with no back is not worth making)."""
+    for e in wiktionary_entries(conn, lemma, limit=LOOKUP_LIMIT):
+        if e["senses"]:
+            return e
+    return None
+
+
+def _card_faces(entry: dict, lang: str) -> tuple[str, str]:
+    """Front and back of a card from a dictionary entry: the headword (with its
+    article for a German noun) on the front, up to two glosses and the IPA on
+    the back."""
+    front = entry["word"]
+    if lang == "de" and entry["pos"] == "noun" and entry["gender"] in ARTICLE:
+        front = f"{ARTICLE[entry['gender']]} {entry['word']}"
+    back = "; ".join(entry["senses"][:2])
+    if entry["ipa"]:
+        back += f"  {entry['ipa']}"
+    return front, back
+
+
+def collect_vocab(items: list, lang: str) -> list[dict] | None:
+    """Cards for the review-worthy words heard in `lang`, in the order they
+    were first spoken. None when no dictionary is built for the language.
+
+    Each heard word is reduced to its dictionary headword, then dropped if it
+    is too common (Zipf gate), already on the listener's known-words list, or
+    has no dictionary entry. Inflected forms collapse onto one card for their
+    lemma.
+    """
+    conn = wiktionary_conn(lang)
+    if conn is None:
+        return None
+    known = load_known_words()
+    forms = load_noun_forms()
+    seen: dict[str, dict | None] = {}
+    order: list[str] = []
+    for item in items:
+        if not isinstance(item, dict) or item.get("source") != lang:
+            continue
+        sentence = item.get("text", "")
+        if not isinstance(sentence, str):
+            continue
+        for token in re.findall(r"[^\W\d_]+", sentence, re.UNICODE):
+            if len(token) < 2:
+                continue
+            lemma = _vocab_lemma(token, conn, forms)
+            key = lemma.lower()
+            if key in seen:
+                continue
+            if (key in known or token.lower() in known
+                    or zipf_frequency(lemma, lang) >= ANKI_MAX_ZIPF):
+                seen[key] = None
+                continue
+            entry = _vocab_entry(conn, lemma)
+            if entry is None:
+                seen[key] = None
+                continue
+            front, back = _card_faces(entry, lang)
+            seen[key] = {"front": front, "back": back, "example": sentence}
+            order.append(key)
+    return [seen[k] for k in order]
+
+
+@app.post("/api/anki")
+async def anki_export(payload: dict):
+    """A tab-separated Anki import deck of the useful German words from a
+    conversation: the dictionary form on the front, its gloss and the sentence
+    it was heard in on the back."""
+    items = payload.get("items", [])
+    if not isinstance(items, list):
+        items = []
+    lang = payload.get("lang", "de")
+    if lang not in WIKTIONARY_PATHS:
+        return {"error": "Invalid language."}
+    cards = collect_vocab(items, lang)
+    if cards is None:
+        return {"error": f"No {lang} dictionary built yet. Run: "
+                         f"uv run python build_wiktionary_lexicon.py {lang}"}
+    cards = cards[:ANKI_MAX_CARDS]
+    if not cards:
+        return {"error": "No new vocabulary to export."}
+    lines = ["#separator:tab", "#html:true"]
+    for c in cards:
+        back = c["back"] + (f"<br>{c['example']}" if c["example"] else "")
+        lines.append(f"{_anki_field(c['front'])}\t{_anki_field(back)}")
+    return {"deck": "\n".join(lines) + "\n", "count": len(cards)}
 
 
 SUMMARY_PROMPT = (
