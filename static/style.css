@@ -117,7 +117,16 @@ main {
   background: var(--panel); border: 1px solid var(--border);
   border-radius: 12px; padding: 14px 18px; max-width: 980px;
 }
-.card .orig { color: var(--muted); font-size: .72em; line-height: 1.45; }
+/* The heard text is what a learner reads, so it is nearly the size of the
+   translation and in the full text colour. It was .72em and muted until
+   2026-10-04, which made the German hard to find on a card. */
+.card .orig { color: var(--text); font-size: .92em; line-height: 1.45; }
+/* A place held for a chunk Whisper has not transcribed yet. The text is the
+   fast model's preview, so it is dimmed until the transcript replaces it. */
+.card.pending { border-left: 4px solid var(--border); }
+.card.pending .orig { color: var(--muted); font-style: italic; cursor: default; }
+.card.pending.unfinished .orig::after { content: " (not translated)";
+  font-size: .8em; }
 .card .trans { font-size: 1em; line-height: 1.45; margin-top: 6px; min-height: 1.3em; }
 .card .orig, .card .trans { cursor: pointer; border-radius: 6px;
   /* Long-press means "look up this word", so iOS's own text-selection

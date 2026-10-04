@@ -39,7 +39,10 @@ def test_partial_window_is_bounded_on_the_fast_path(client, stub_transcribe,
         collect_until(ws)
     limit = srv.PARTIAL_WINDOW_FRAMES * srv.FRAME_MS / 1000
     assert stub_partial.calls
-    assert max(stub_partial.calls) <= limit + 0.1
+    # The one longer decode is the preview of the cut chunk, which is the
+    # whole chunk by design (tests/test_heard.py).
+    partials = sorted(stub_partial.calls)[:-1]
+    assert partials and max(partials) <= limit + 0.1
 
 
 def _partials_skipped(trace_file, client, monkeypatch, **fixtures):
@@ -80,18 +83,28 @@ def test_the_fallback_path_still_starves_partials(client, stub_transcribe,
     assert _partials_skipped(trace_file, client, monkeypatch) > 0
 
 
-def test_deep_backlog_still_sheds_partials(client, stub_transcribe,
-                                           stub_partial, monkeypatch):
-    """Not for contention any more — a partial describing *now*, under cards
-    a minute stale, is worse than no partial."""
+def test_a_deep_backlog_no_longer_blanks_the_live_line(client, stub_transcribe,
+                                                      stub_partial, monkeypatch,
+                                                      trace_file):
+    """Reversed on 2026-10-04. The fast path used to shed partials behind a
+    deep Whisper queue, on the reasoning that live text under stale cards was
+    worse than none. A real 71-minute conversation took 3908 skips that way
+    and the listener lost sight of the German. Every cut chunk now holds its
+    place on screen (`send_heard`), so the live line always follows the card
+    before it, and a fast partial costs the Whisper thread nothing.
+
+    The slow path still sheds: tests/test_backlog.py.
+    """
     monkeypatch.setattr(srv, "PARTIAL_INTERVAL_SEC", 0.0)
     monkeypatch.setattr(srv, "PARTIAL_MAX_QUEUE", 0)
     monkeypatch.setattr(srv, "whisper_pending", 5)
     with client.websocket_connect("/ws") as ws:
         speak(ws, speech_chunks=40)
         msgs = collect_until(ws)
-    assert not [m for m in msgs if m["type"] == "partial"]
-    assert not stub_partial.calls
+    assert [m for m in msgs if m["type"] == "partial"]
+    assert stub_partial.calls
+    assert sum(r.get("partials_skipped", 0)
+               for r in trace_records(trace_file)) == 0
 
 
 def test_falls_back_to_whisper_without_the_fast_model(client, stub_transcribe,

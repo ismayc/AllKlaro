@@ -559,7 +559,7 @@ until you ask for it):
 | `buffering` | seconds of speech already said, still growing into a chunk. Nothing about it can reach the screen until a pause or a micro-pause cuts it. |
 | `in flight` | utterances being transcribed or translated right now |
 | `whisper q` | jobs queued on the Whisper thread — there is exactly one, and finals and speculations share it (partials have their own, see below) |
-| `partials lost` | live partials skipped because the finals fell so far behind that live text would describe a different moment = blank screen while someone is still talking |
+| `partials lost` | live partials skipped because the Whisper thread was busy = blank live line while someone is still talking. Only possible on the fallback path, when the fast partial model is missing |
 | `last chunk` | length and why it was cut: `pause` (good), `soft_max` (cut at a micro-pause), `hard_max` (30 s limit, mid-word) |
 | `last lag` | how old the chunk's **first** word was when its card appeared |
 
@@ -608,7 +608,7 @@ than dropping anything you said:
 
 | constant | what stops when the Whisper queue is deeper than this |
 |---|---|
-| `PARTIAL_MAX_QUEUE` | live partials (they'd otherwise be admitted in front of waiting finals) |
+| `PARTIAL_MAX_QUEUE` | live partials, on the fallback path only (there they would be admitted in front of waiting finals; the fast partial model has its own worker and is never shed) |
 | `SPEC_MAX_QUEUE` | speculative decodes (they only pay off if they land before the real chunk) |
 | `REFINE_MAX_QUEUE` | the second-pass refine (the card is already readable without it) |
 
@@ -637,6 +637,25 @@ optional work and must not be downgraded. If `parakeet-mlx` or the model is
 missing, partials fall back to the Whisper thread — the old behaviour, with
 the old contention. Point `ALLKLARO_PARTIAL_ASR` at another repo to swap the
 model, or at a bogus one to force the fallback.
+
+**What was heard stays on screen.** A cut chunk waits for the Whisper thread
+before its card can appear, and until October 2026 the only sight of those
+words in the gap was the rolling live line, which had already moved on. Now
+the chunk takes its place in the feed the moment it is cut: the fast model
+decodes the whole chunk as a preview, the page shows it (dimmed, in italics)
+where the card will go, and Whisper's transcript and the translation then
+fill in that same spot. A card that merges with the one before it takes over
+that card's place instead of moving to the end of the feed.
+
+**The words decide the direction when they contradict Whisper.** In an auto
+mode Whisper names the language from the audio and then writes the words, and
+the two can disagree: German spoken with an English accent can be called
+English and still be transcribed as German, which asks the translator for
+German into German. When the transcribed text reads confidently as the pair's
+other language (`DIRECTION_TEXT_CONF`), the text decides. On a real 71-minute
+conversation this relabeled 50 of 399 cards; 45 of the 95 cards Whisper called
+English were German text. `tools/direction_audit.py` counts these in an
+exported transcript or a `replay.py --out` event stream.
 
 **Speculations that continuous speech used to waste.** When a pause reaches
 ~320 ms the chunk is handed to Whisper immediately, on the bet that the pause
@@ -715,5 +734,6 @@ model's guesses, and dialect mis-hearings keep their meaning.
 |---|---|
 | "Cannot reach Ollama" banner | `brew services start ollama` (or `ollama serve`) |
 | Level meter flat | Wrong Input device, or call audio isn't routed into BlackHole (step 3 above) |
+| Everything lags by 10 s or more, on a Mac that is plugged in | Check for Low Power Mode on the power adapter: `pmset -g custom` shows `powermode 1` under "AC Power". It made speech recognition and translation three to four times slower here. `sudo pmset -c powermode 0` turns it off |
 | First translation after a break is slow | The model is reloading; it stays warm for 60 min after each use |
 | Utterances cut too early / too late | Drag the **Pause** slider; deeper VAD tuning at the top of `server.py` |

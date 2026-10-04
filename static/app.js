@@ -430,13 +430,82 @@ function flipCard(id) {
                            text: c.text, source: c.targets[0] }));
 }
 
+// ------------------------------------------------ a place for every utterance
+//
+// Heard text used to be visible twice with a gap between: in the rolling live
+// line while it was spoken, then 10 s or more later inside a card. In the gap
+// it was nowhere, and a merged card was removed and re-added at the end of the
+// feed, so text already read moved. Now a chunk takes its place in the feed
+// the moment it is cut, shows what was heard straight away, and everything
+// that follows (Whisper's transcript, the translation, a merge) lands in that
+// same place.
+const held = new Map();   // utterance id -> placeholder card waiting for it
+let lastSegment = 0;      // id of the newest cut utterance
+
+// Where a new element joins the feed: the end, but above the live line.
+function addToFeed(el) {
+  if (partialCard?.isConnected) feed.insertBefore(el, partialCard);
+  else feed.appendChild(el);
+}
+
+// Which element an incoming card takes over. A card it replaces wins (a
+// merge or a redo: the reader's eyes are already there), then the place held
+// since its chunk was cut. Pure, so the choice can be tested without a DOM.
+function placeFor(msg, cardEls, heldEls) {
+  const replaced = msg.replaces != null ? cardEls.get(msg.replaces) : null;
+  const own = heldEls.get(msg.id) ?? null;
+  return { anchor: replaced ?? own, spare: replaced ? own : null };
+}
+
+function holdPlace(id) {
+  hint?.remove();
+  const el = document.createElement("div");
+  el.className = "card pending";
+  const orig = document.createElement("div");
+  orig.className = "orig";
+  // The live line already shows the end of this chunk; keep those words on
+  // screen until the fuller preview (or the transcript) replaces them.
+  orig.textContent = partialCard?.isConnected ? partialCard.textContent
+    : (partialBar.classList.contains("hidden") ? "" : partialText.textContent);
+  el.append(orig);
+  el.insertAdjacentHTML("beforeend",
+    '<div class="trans"><span class="cursor">▍</span></div>');
+  held.set(id, el);
+  addToFeed(el);
+  feed.scrollTop = feed.scrollHeight;
+}
+
+function showHeard(id, text) {
+  const el = held.get(id);
+  if (el) el.querySelector(".orig").textContent = text;
+}
+
+function releasePlace(id) {
+  held.get(id)?.remove();
+  held.delete(id);
+}
+
+// The socket is gone, so nothing held will ever be filled in. Words already
+// shown stay as a heard-only card; an empty place is removed.
+function settlePlaces() {
+  for (const [id, el] of held) {
+    el.querySelector(".trans")?.remove();
+    if (el.querySelector(".orig").textContent) el.classList.add("unfinished");
+    else el.remove();
+  }
+  held.clear();
+}
+
 function newCard(msg) {
   hint?.remove();
-  if (msg.replaces != null) {
-    // Server merged a cut-off fragment into this utterance; drop the old card.
-    cards.get(msg.replaces)?.card.remove();
-    cards.delete(msg.replaces);
+  const cardEls = new Map();
+  if (msg.replaces != null && cards.has(msg.replaces)) {
+    cardEls.set(msg.replaces, cards.get(msg.replaces).card);
   }
+  const { anchor, spare } = placeFor(msg, cardEls, held);
+  held.delete(msg.id);
+  spare?.remove();
+  cards.delete(msg.replaces);
   // A break, not a name. One mic cannot tell you *who* is talking, and the
   // channel tag ("you"/"them") only knows which input stream the audio came
   // in on — with everyone on one mic that is "you" for the whole room. This
@@ -445,7 +514,7 @@ function newCard(msg) {
     const sep = document.createElement("div");
     sep.className = "voice-break";
     sep.innerHTML = "<span>new voice</span>";
-    feed.appendChild(sep);
+    if (anchor) anchor.before(sep); else addToFeed(sep);
   }
   const card = document.createElement("div");
   card.className = "card " + msg.source;
@@ -476,7 +545,7 @@ function newCard(msg) {
     rows[t] = { el: row, text: "" };
   }
   card.onclick = () => showBig(msg.id); // card background still opens big-text
-  feed.appendChild(card);
+  if (anchor) anchor.replaceWith(card); else addToFeed(card);
   feed.scrollTop = feed.scrollHeight;
   cards.set(msg.id, {
     id: msg.id, card, rows, source: msg.source, targets: msg.targets,
@@ -799,9 +868,20 @@ function clearPartial() {
 
 function handleMessage(msg) {
   if (msg.type === "partial") {
+    // Decoded before its utterance was cut: those words hold a card already.
+    if (msg.after != null && msg.after < lastSegment) return;
     showPartial(msg.text);
-  } else if (msg.type === "final") {
+  } else if (msg.type === "segment_start") {
+    lastSegment = msg.id;
+    holdPlace(msg.id);
+    // After holdPlace, which reads the live line: the chunk it described now
+    // has its own place, and the next partial belongs to the next chunk.
     clearPartial();
+  } else if (msg.type === "heard") {
+    showHeard(msg.id, msg.text);
+  } else if (msg.type === "final") {
+    // The live line is left alone: this card is for an earlier chunk, and the
+    // line is describing speech that has not been cut yet.
     newCard(msg);
   } else if (msg.type === "translation_delta") {
     const c = cards.get(msg.id);
@@ -866,8 +946,9 @@ function handleMessage(msg) {
   } else if (msg.type === "stats") {
     showStats(msg);
   } else if (msg.type === "discard") {
-    clearPartial();
+    releasePlace(msg.id);
   } else if (msg.type === "error") {
+    if (msg.id != null) releasePlace(msg.id);
     showError(msg.message);
   }
 }
@@ -1041,6 +1122,7 @@ clearBtn.onclick = () => {
   clearGist();      // ...and the pinned gist described the cleared conversation
   hideRecap();      // ...as did the re-read stretch
   clearPartial();
+  held.clear();
   feed.replaceChildren(hint);
 };
 
@@ -1119,7 +1201,7 @@ function connectWS() {
     ws.onmessage = (e) => handleMessage(JSON.parse(e.data));
     ws.onopen = () => { reconnectDelay = 500; sendConfig(); resolve(); };
     ws.onerror = reject;
-    ws.onclose = () => { if (running) scheduleReconnect(); };
+    ws.onclose = () => { settlePlaces(); if (running) scheduleReconnect(); };
   });
 }
 
@@ -1204,6 +1286,7 @@ function stop() {
   micBtn.classList.remove("live");
   micLabel.textContent = "Start";
   clearPartial();
+  settlePlaces();
   meterFill.style.width = "0%";
   setStatus("ok", "ready");
 }

@@ -2799,6 +2799,12 @@ LEXICAL_MARGIN = 1
 # It flags about a tenth of the fixture phrases — often enough to be worth
 # glancing at, rare enough that the marking still means something.
 UNSURE_BELOW = 0.75
+# How sure the text detector has to be before it overrules the language
+# Whisper heard in the audio (see handle_utterance). At 0.9 it relabeled 50 of
+# 399 cards in the 2026-10-04 conversation and none of the 261 in the Berlin
+# hour, where Whisper's own call was already right; one-word cards ("Ja.",
+# "So.") score below it and keep Whisper's call.
+DIRECTION_TEXT_CONF = 0.9
 
 _WORD_RE = re.compile(r"[^\W\d_]+")
 _langid_identifier = None
@@ -3044,6 +3050,20 @@ async def ws_endpoint(ws: WebSocket):
                 meta["outcome"] = "discard_echo"
                 await safe_send(ws, {"type": "discard", "id": my_uid})
                 return
+            if pair:
+                # Whisper names the language from the sound and then writes
+                # the words, and the two can disagree: German spoken with an
+                # English accent, or with an English word in it, is called
+                # "en" and still transcribed as German. The card then asks for
+                # German into German and shows one sentence twice. Over a real
+                # 71-minute conversation (2026-10-04) 45 of the 95 cards
+                # labeled English were German text. What gets translated is
+                # the text, so when the text reads confidently as the pair's
+                # other language, the text decides.
+                read, conf = detect_language_scored(text, pair)
+                if read != detected and conf >= DIRECTION_TEXT_CONF:
+                    meta["relabel"] = f"{detected}>{read}"
+                    detected = read
             source, targets = resolve_targets(mode_for_utterance, detected)
 
             # Merge with the previous utterance when it did not finish — no
@@ -3613,10 +3633,16 @@ async def ws_endpoint(ws: WebSocket):
         if busy and not fast:
             partials_skipped += 1
             return
-        if whisper_pending > PARTIAL_MAX_QUEUE:
-            # Not contention any more: this says the finals are so far behind
-            # that live text would be describing a different moment than the
-            # cards underneath it.
+        if whisper_pending > PARTIAL_MAX_QUEUE and not fast:
+            # Slow path only. On the fast path this gate used to blank the
+            # live line whenever the finals fell behind, on the reasoning that
+            # live text would describe a different moment than the cards
+            # underneath it. A real 71-minute conversation (2026-10-04) took
+            # 3908 skips that way, and the listener's report was that the
+            # German "goes into the ether". Each cut chunk now holds its place
+            # on screen from the moment it is cut (see `send_heard`), so the
+            # live line always follows the card before it, and a fast partial
+            # costs the Whisper thread nothing.
             partials_skipped += 1
             return
         if not fast and any(c["vad"].speculating for c in channels.values()):
@@ -3632,6 +3658,10 @@ async def ws_endpoint(ws: WebSocket):
         partial_busy = True
         if not fast:
             busy = True
+        # Which utterance this window belongs to: the one after the last cut.
+        # The decode can land after its utterance was cut, and the client
+        # drops it then, since those words already hold a card of their own.
+        after = uid
         try:
             text = None
             if fast:
@@ -3644,13 +3674,37 @@ async def ws_endpoint(ws: WebSocket):
                                                  whisper_prompt())
                 text = clean_transcript(result)
             if text and not HALLUCINATION_RE.match(text):
-                await safe_send(ws, {"type": "partial", "text": text})
+                await safe_send(ws, {"type": "partial", "text": text,
+                                     "after": after})
         except Exception:
             log.exception("partial transcription failed")
         finally:
             partial_busy = False
             if not fast:
                 busy = False
+
+    async def send_heard(audio: np.ndarray, my_uid: int):
+        """What was just said, on screen before Whisper gets to it.
+
+        A cut chunk waits for the one Whisper thread: a median 6 s over a real
+        71-minute conversation (2026-10-04), 15 s at p90. Until this existed
+        the only sight of those words in that gap was the rolling live line,
+        which had already moved on, so the heard text vanished and came back
+        later inside a card further up. The fast model decodes the whole chunk
+        in tens of milliseconds on its own worker; the client shows that text
+        in the place the card will take and swaps in Whisper's transcript when
+        it lands. It is a preview only: nothing is translated from it, and a
+        `final` or `discard` for the same id overrides it.
+        """
+        try:
+            text = await loop.run_in_executor(partial_executor,
+                                              transcribe_partial, audio)
+            text = clean_partial(text) if text else ""
+            if text and not HALLUCINATION_RE.match(text):
+                await safe_send(ws, {"type": "heard", "id": my_uid,
+                                     "text": text})
+        except Exception:
+            log.exception("preview transcription failed")
 
     try:
         while True:
@@ -3843,6 +3897,8 @@ async def ws_endpoint(ws: WebSocket):
                         last_voice[tag] = sig
                     await safe_send(ws, {"type": "segment_start", "id": uid,
                                          "speaker": SPEAKERS[tag]})
+                    if not _parakeet_unavailable:
+                        asyncio.create_task(send_heard(utterance, uid))
                     asyncio.create_task(
                         handle_utterance(utterance, uid, SPEAKERS[tag],
                                          spec_task, meta, spec_timing))
