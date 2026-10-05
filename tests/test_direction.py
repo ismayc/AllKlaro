@@ -26,6 +26,22 @@ def card(client, stub_transcribe, text, language, mode="auto"):
     return next(m for m in msgs if m["type"] == "final")
 
 
+def second_card(client, stub_transcribe, monkeypatch, first, text, language):
+    """The card for `text` when it follows the card `first` (text, language)
+    in the same session, after a gap too long for it to be absorbed into
+    that card (absorption already keeps the first card's direction)."""
+    monkeypatch.setattr(srv, "MERGE_GAP_SEC", -1e9)
+    stub_transcribe.result = {"text": first[0], "language": first[1]}
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto"}))
+        speak(ws)
+        collect_until(ws)
+        stub_transcribe.result = {"text": text, "language": language}
+        speak(ws)
+        msgs = collect_until(ws)
+    return next(m for m in msgs if m["type"] == "final")
+
+
 @pytest.mark.parametrize("text", [
     "Ja, ich wollte gerade sagen, das ist ziemlich teuer.",
     "Und das war wirklich schön.",
@@ -60,6 +76,49 @@ def test_a_one_word_card_keeps_whispers_call(client, stub_transcribe, text):
     assert srv.detect_language_scored(text, ("de", "en"))[1] \
         < srv.DIRECTION_TEXT_CONF
     assert card(client, stub_transcribe, text, "en")["source"] == "en"
+
+
+@pytest.mark.parametrize("text", ["Ja.", "Und?", "Ja, ja."])
+def test_a_short_card_follows_the_card_before_it_when_the_text_agrees(
+        client, stub_transcribe, monkeypatch, trace_file, text):
+    """ "Ja." heard as English right after a German sentence is German: the
+    text reads German (weakly) and so did the previous card."""
+    final = second_card(client, stub_transcribe, monkeypatch,
+                        ("Und das war wirklich schön.", "de"), text, "en")
+    assert final["source"] == "de"
+    assert trace_records(trace_file)[-1]["relabel"] == "en>de context"
+
+
+def test_a_short_card_after_the_other_language_keeps_whispers_call(
+        client, stub_transcribe, monkeypatch, trace_file):
+    final = second_card(client, stub_transcribe, monkeypatch,
+                        ("I think we already missed the bus.", "en"),
+                        "Ja.", "en")
+    assert final["source"] == "en"
+    assert "relabel" not in trace_records(trace_file)[-1]
+
+
+def test_context_does_not_pull_a_card_away_from_what_its_text_reads_as(
+        client, stub_transcribe, monkeypatch):
+    """English after German stays English: the previous card only counts when
+    the text itself leans the same way."""
+    final = second_card(client, stub_transcribe, monkeypatch,
+                        ("Und das war wirklich schön.", "de"), "Yes.", "en")
+    assert final["source"] == "en"
+
+
+@pytest.mark.parametrize("text", ["Genau.", "Stimmt."])
+def test_a_word_the_detector_does_not_know_is_not_evidence(
+        client, stub_transcribe, monkeypatch, text):
+    """The detector's default guess for an unknown word is English, below
+    DIRECTION_CONTEXT_CONF. After an English card that guess must not turn a
+    German reply, heard correctly as German, into English."""
+    read, conf = srv.detect_language_scored(text, ("de", "en"))
+    assert read == "en" and conf < srv.DIRECTION_CONTEXT_CONF
+    final = second_card(client, stub_transcribe, monkeypatch,
+                        ("I think we already missed the bus.", "en"),
+                        text, "de")
+    assert final["source"] == "de"
 
 
 def test_a_forced_direction_is_never_relabeled(client, stub_transcribe,

@@ -2803,8 +2803,14 @@ UNSURE_BELOW = 0.75
 # Whisper heard in the audio (see handle_utterance). At 0.9 it relabeled 50 of
 # 399 cards in the 2026-10-04 conversation and none of the 261 in the Berlin
 # hour, where Whisper's own call was already right; one-word cards ("Ja.",
-# "So.") score below it and keep Whisper's call.
+# "So.") score below it and keep Whisper's call unless the card before them
+# was in the language the text reads as.
 DIRECTION_TEXT_CONF = 0.9
+# The lower bar when the previous card agrees with the text. 0.7 is what the
+# detector gives a word it knows ("Ja.", "Und?"); a word it does not know
+# ("Genau.", "Stimmt.") gets a default guess of English near 0.66, which must
+# not count as evidence.
+DIRECTION_CONTEXT_CONF = 0.7
 
 _WORD_RE = re.compile(r"[^\W\d_]+")
 _langid_identifier = None
@@ -3063,6 +3069,18 @@ async def ws_endpoint(ws: WebSocket):
                 read, conf = detect_language_scored(text, pair)
                 if read != detected and conf >= DIRECTION_TEXT_CONF:
                     meta["relabel"] = f"{detected}>{read}"
+                    detected = read
+                elif (read != detected and conf >= DIRECTION_CONTEXT_CONF
+                      and prev and prev["source"] == read):
+                    # Too little text to overrule the audio alone ("Ja.",
+                    # "Und?"), but the card before it was in the language the
+                    # text reads as: two weak signals against Whisper's one.
+                    # In the same conversation this caught 28 short cards, all
+                    # German heard as English, and left alone the 3 German
+                    # cards whose text happened to read as English. (A short
+                    # reply right behind the same speaker's card is absorbed
+                    # into it below and never needed this.)
+                    meta["relabel"] = f"{detected}>{read} context"
                     detected = read
             source, targets = resolve_targets(mode_for_utterance, detected)
 

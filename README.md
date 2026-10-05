@@ -654,7 +654,11 @@ English and still be transcribed as German, which asks the translator for
 German into German. When the transcribed text reads confidently as the pair's
 other language (`DIRECTION_TEXT_CONF`), the text decides. On a real 71-minute
 conversation this relabeled 50 of 399 cards; 45 of the 95 cards Whisper called
-English were German text. `tools/direction_audit.py` counts these in an
+English were German text. A one-word card ("Ja.", "Und?") is too little text
+to decide alone, so it needs a second signal: when the text leans toward the
+other language (`DIRECTION_CONTEXT_CONF`) and the card before it was in that
+language, the text decides there too. In a replay of that conversation this
+covered 28 more cards. `tools/direction_audit.py` counts these in an
 exported transcript or a `replay.py --out` event stream.
 
 **Speculations that continuous speech used to waste.** When a pause reaches
