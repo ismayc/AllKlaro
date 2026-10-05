@@ -105,6 +105,15 @@ def no_user_gender_lexicon(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_saved_voices(tmp_path, monkeypatch):
+    """Tests must never read the developer's real voice profiles."""
+    import speakers
+    monkeypatch.setattr(speakers, "VOICES_PATH", tmp_path / "voices.json")
+    monkeypatch.setattr(speakers, "_profiles",
+                        {"mtime": None, "names": [], "matrix": None})
+
+
+@pytest.fixture(autouse=True)
 def trace_file(tmp_path, monkeypatch):
     """Tests must never append to the developer's real pipeline trace."""
     path = tmp_path / "trace.jsonl"

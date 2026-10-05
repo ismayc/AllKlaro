@@ -4,7 +4,9 @@ An optional pretrained speaker model (ECAPA-TDNN, trained on VoxCeleb, loaded
 through speechbrain) turns a stretch of speech into a vector; two stretches by
 the same voice give vectors that point the same way. The app uses it for one
 thing: when a new chunk arrives, does it sound like the person who spoke the
-last one? It never names anyone.
+last one? It names someone only when the user has saved voice profiles
+(`voices.json`, built from a recording by `tools/enroll_voices.py`) and
+turned "Names" on.
 
 It replaces nothing by default. `voiceprint.py` tried the same job with numpy
 alone and could not separate a speaker change from the same speaker carrying
@@ -17,6 +19,7 @@ about chunks of `MIN_SEC` or more.
 Install with `uv sync --extra speakers`. Without it `load()` returns None and
 the app keeps its text-and-pause paragraphs.
 """
+import json
 import logging
 import os
 import threading
@@ -37,6 +40,17 @@ MIN_SEC = 3.0
 # 0.5 the model caught 77% of the speaker changes that arrived on a long chunk
 # and broke 14.5% of the places where the same speaker carried on.
 SAME_COS = 0.5
+# Saved voices: {"name": [192 floats]}, one unit vector per person. Private
+# by nature (it describes real people's voices), so it lives beside the other
+# per-user data and never in the repo.
+VOICES_PATH = Path(os.environ.get(
+    "ALLKLARO_VOICES", Path.home() / ".cache" / "allklaro" / "voices.json"))
+# A chunk gets a name when it is this close to a saved voice and this much
+# closer to it than to the next one. With profiles built from the first half
+# of a 67-minute call, 98% of the second half's long chunks were named at
+# these settings and 98.8% of the names agreed with the reference labels.
+NAME_COS = 0.4
+NAME_MARGIN = 0.05
 
 _model = None
 _unavailable = False
@@ -86,6 +100,49 @@ def embed(audio: np.ndarray) -> np.ndarray | None:
         vec = model.encode_batch(wav)[0, 0].numpy()
     norm = float(np.linalg.norm(vec))
     return vec / norm if norm else None
+
+
+_profiles = {"mtime": None, "names": [], "matrix": None}
+
+
+def load_profiles() -> tuple[list[str], np.ndarray | None]:
+    """The saved voices as (names, one unit vector per row). Re-read when the
+    file changes, so renaming a voice needs no restart."""
+    try:
+        mtime = VOICES_PATH.stat().st_mtime
+    except OSError:
+        _profiles.update(mtime=None, names=[], matrix=None)
+        return [], None
+    if mtime != _profiles["mtime"]:
+        names, rows = [], []
+        try:
+            for name, vec in json.loads(VOICES_PATH.read_text()).items():
+                vec = np.asarray(vec, dtype=np.float32)
+                norm = float(np.linalg.norm(vec))
+                if vec.ndim == 1 and norm:
+                    names.append(str(name))
+                    rows.append(vec / norm)
+            matrix = np.stack(rows) if rows else None
+        except (ValueError, AttributeError, TypeError):
+            log.warning("ignoring unreadable voice profiles in %s", VOICES_PATH)
+            names, matrix = [], None
+        _profiles.update(mtime=mtime, names=names, matrix=matrix)
+    return _profiles["names"], _profiles["matrix"]
+
+
+def identify(vec: np.ndarray | None) -> str | None:
+    """The saved voice this chunk belongs to, or None when there are no
+    profiles, it is not close enough to any, or two are too close to call."""
+    names, matrix = load_profiles()
+    if vec is None or matrix is None or matrix.shape[1] != len(vec):
+        return None
+    sims = matrix @ vec
+    order = np.argsort(sims)
+    best = float(sims[order[-1]])
+    runner_up = float(sims[order[-2]]) if len(order) > 1 else -1.0
+    if best < NAME_COS or best - runner_up < NAME_MARGIN:
+        return None
+    return names[int(order[-1])]
 
 
 def similarity(a: np.ndarray | None, b: np.ndarray | None) -> float | None:

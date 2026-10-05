@@ -170,6 +170,8 @@ main {
 .speaker { font-size: 11px; font-weight: 700; letter-spacing: .05em;
   color: var(--muted); border: 1px solid var(--border); border-radius: 20px;
   padding: 1px 7px; margin-right: 8px; vertical-align: 2px; }
+/* A saved voice's name: read first, so it is not muted like the channel tag. */
+.speaker.who { color: var(--text); border-color: var(--muted); letter-spacing: 0; }
 .latency { color: var(--muted); font-size: 11px; text-align: right; margin-top: 4px; }
 .refining { font-style: italic; animation: blink 1.4s infinite; }
 .card .trans.revised { animation: reviseFlash 1.2s ease-out; }

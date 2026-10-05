@@ -15,6 +15,7 @@ const focusChk = document.getElementById("focusChk");
 const statsChk = document.getElementById("statsChk");
 const gistChk = document.getElementById("gistChk");
 const speakersChk = document.getElementById("speakersChk");
+const namesChk = document.getElementById("namesChk");
 const gistPanel = document.getElementById("gist");
 const gistText = document.getElementById("gistText");
 const gistToggle = document.getElementById("gistToggle");
@@ -84,6 +85,7 @@ function saveSettings() {
     stats: statsChk.checked,
     gist: gistChk.checked,
     speakers: speakersChk.checked,
+    names: namesChk.checked,
     gistCollapsed: gistPanel.classList.contains("collapsed"),
     pause: pauseSlider.value,
     pinnedSource,
@@ -98,6 +100,7 @@ if (saved.stats) { statsChk.checked = true; pipeline.classList.remove("hidden");
 // Defaults on, so an absent key is not "off" the way it is for the others.
 if (saved.gist === false) gistChk.checked = false;
 if (saved.speakers) speakersChk.checked = true;
+if (saved.names) namesChk.checked = speakersChk.checked = true;
 if (saved.gistCollapsed) {
   gistPanel.classList.add("collapsed");
   gistToggle.setAttribute("aria-expanded", "false");
@@ -324,6 +327,7 @@ function sendConfig() {
                              stats: statsChk.checked,
                              gist: gistChk.checked,
                              speakers: speakersChk.checked,
+                             names: namesChk.checked,
                              // The gist lives in the WebSocket session, so a
                              // reconnect would restart the summary from nothing
                              // while the old text sat on screen. The client is
@@ -527,6 +531,13 @@ function newCard(msg) {
   const speakerChip = callMode
     ? `<span class="speaker">${msg.speaker === "them" ? "Them" : "You"}</span>` : "";
   orig.innerHTML = speakerChip;
+  // A saved voice's name (Names on). Set as text: it comes from a file.
+  if (msg.voice) {
+    const who = document.createElement("span");
+    who.className = "speaker who";
+    who.textContent = msg.voice;
+    orig.append(who);
+  }
   orig.append(sourceChip(msg),
               wordSpans(msg.text, msg.source,
                         new Set(msg.dialect || [])));
@@ -553,7 +564,7 @@ function newCard(msg) {
   feed.scrollTop = feed.scrollHeight;
   cards.set(msg.id, {
     id: msg.id, card, rows, source: msg.source, targets: msg.targets,
-    text: msg.text, speaker: msg.speaker,
+    text: msg.text, speaker: msg.speaker, voice: msg.voice,
     time: new Date().toLocaleTimeString(),
     // When the card ARRIVED, which is what the recap window is measured in.
     // Under lag this is not when the words were spoken, and that is the point:
@@ -1058,7 +1069,15 @@ gistToggle.onclick = () => {
   saveSettings();
 };
 
-speakersChk.onchange = () => { sendConfig(); saveSettings(); };
+// Names are read off the same voice comparison, so they need Speakers on.
+speakersChk.onchange = () => {
+  if (!speakersChk.checked) namesChk.checked = false;
+  sendConfig(); saveSettings();
+};
+namesChk.onchange = () => {
+  if (namesChk.checked) speakersChk.checked = true;
+  sendConfig(); saveSettings();
+};
 gistChk.onchange = () => {
   if (!gistChk.checked) clearGist();
   sendConfig();
@@ -1070,7 +1089,7 @@ gistChk.onchange = () => {
 function conversationItems() {
   return [...cards.values()].filter((c) => c.text).map((c) => ({
     time: c.time,
-    speaker: callMode ? (c.speaker === "them" ? "Them" : "You") : "",
+    speaker: c.voice || (callMode ? (c.speaker === "them" ? "Them" : "You") : ""),
     source: c.source,
     target: c.targets[0],
     text: c.text,

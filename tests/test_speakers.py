@@ -175,6 +175,190 @@ def test_turning_it_on_loads_the_model_quietly_when_present(
     assert loaded == [1] and final["type"] == "final"
 
 
+# ------------------------------------------------------------------- names
+
+CLARA = np.array([0.0, 0.0, 1.0])
+
+
+def save_voices(**voices):
+    speakers.VOICES_PATH.write_text(json.dumps(
+        {name: list(map(float, vec)) for name, vec in voices.items()}))
+
+
+@contextmanager
+def named_session(client):
+    with client.websocket_connect("/ws") as ws:
+        ws.send_text(json.dumps({"type": "config", "mode": "auto-de-en",
+                                 "speakers": True, "names": True}))
+        yield ws
+
+
+def test_a_card_carries_the_name_of_its_saved_voice(client, stub_transcribe,
+                                                    voices, trace_file):
+    save_voices(Anna=[1, 0], Bert=[0, 1])
+    voices.queue = [ANNA, BERT]
+    with named_session(client) as ws:
+        first = say(ws, stub_transcribe, "Wir waren gestern im Garten und")
+        second = say(ws, stub_transcribe, "haben dort lange gesessen.")
+    assert first["voice"] == "Anna" and second["voice"] == "Bert"
+    assert "replaces" not in second
+    assert trace_records(trace_file)[-1]["voice"] == "Bert"
+
+
+def test_two_named_chunks_follow_the_names_not_the_similarity(
+        client, stub_transcribe, voices):
+    """Both chunks are Anna by name even though they are less alike than
+    SAME_COS: the card must not break under one name."""
+    save_voices(Anna=[1, 0, 0], Bert=[0, 1, 0])
+    a1 = np.array([0.8, 0.0, 0.6])
+    a2 = np.array([0.8, 0.0, -0.6])
+    assert float(a1 @ a2) < speakers.SAME_COS
+    voices.queue = [a1, a2]
+    with named_session(client) as ws:
+        first = say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        second = say(ws, stub_transcribe, "Danach haben wir Kaffee getrunken.")
+    assert second["replaces"] == first["id"] and second["voice"] == "Anna"
+
+
+def test_a_short_reply_keeps_the_cards_name(client, stub_transcribe, voices):
+    save_voices(Anna=[1, 0], Bert=[0, 1])
+    voices.queue = [ANNA]
+    with named_session(client) as ws:
+        say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        reply = say(ws, stub_transcribe, "Das klingt aber wirklich schön.",
+                    chunks=SHORT)
+    assert reply["voice"] == "Anna"
+
+
+def test_an_unknown_voice_gets_no_name_and_falls_back_to_similarity(
+        client, stub_transcribe, voices):
+    save_voices(Anna=[1, 0, 0], Bert=[0, 1, 0])
+    voices.queue = [np.array([1.0, 0.0, 0.0]), CLARA]
+    with named_session(client) as ws:
+        say(ws, stub_transcribe, "Wir waren gestern im Garten und")
+        second = say(ws, stub_transcribe, "haben dort lange gesessen.")
+    assert "voice" not in second and "replaces" not in second
+
+
+def test_names_stay_off_the_cards_until_asked_for(client, stub_transcribe,
+                                                  voices):
+    save_voices(Anna=[1, 0], Bert=[0, 1])
+    voices.queue = [ANNA]
+    with session(client) as ws:
+        first = say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+    assert "voice" not in first
+
+
+def test_identify_wants_a_clear_winner():
+    save_voices(Anna=[1, 0, 0], Bert=[0, 1, 0])
+    assert speakers.identify(np.array([1.0, 0.0, 0.0])) == "Anna"
+    assert speakers.identify(np.array([0.0, 0.0, 1.0])) is None    # far
+    tie = np.array([1.0, 1.0, 0.0]) / np.sqrt(2)
+    assert speakers.identify(tie) is None                          # too close
+    assert speakers.identify(None) is None
+    assert speakers.identify(np.array([1.0, 0.0])) is None         # wrong size
+
+
+def test_a_single_saved_voice_can_still_be_named():
+    save_voices(Anna=[1, 0])
+    assert speakers.identify(ANNA) == "Anna"
+    assert speakers.identify(BERT) is None
+
+
+def test_no_profiles_means_no_names():
+    assert speakers.load_profiles() == ([], None)
+    assert speakers.identify(ANNA) is None
+
+
+def test_profiles_are_normalized_and_reread_when_the_file_changes():
+    import os
+    save_voices(Anna=[3, 4])
+    names, matrix = speakers.load_profiles()
+    assert names == ["Anna"] and np.allclose(matrix, [[0.6, 0.8]])
+    save_voices(Bert=[0, 2])
+    os.utime(speakers.VOICES_PATH, (1, 1))       # a different mtime for sure
+    assert speakers.load_profiles()[0] == ["Bert"]
+
+
+@pytest.mark.parametrize("content", [
+    "not json", "[1, 2]", '{"Anna": "x"}', '{"Anna": [1, 0], "Bert": [1]}'])
+def test_an_unreadable_profile_file_is_ignored(content, caplog):
+    speakers.VOICES_PATH.write_text(content)
+    assert speakers.load_profiles() == ([], None)
+    assert "unreadable voice profiles" in caplog.text
+
+
+def test_a_zero_or_nested_vector_is_skipped():
+    speakers.VOICES_PATH.write_text('{"Zero": [0, 0], "Nest": [[1, 0]], '
+                                    '"Anna": [1, 0]}')
+    assert speakers.load_profiles()[0] == ["Anna"]
+
+
+# ------------------------------------------------------- tools/enroll_voices
+
+def enroll():
+    import importlib.util
+    from pathlib import Path
+    spec = importlib.util.spec_from_file_location(
+        "enroll_voices",
+        Path(srv.__file__).parent / "tools" / "enroll_voices.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def cloud(center, n, seed):
+    rng = np.random.default_rng(seed)
+    pts = np.asarray(center, dtype=float) + rng.normal(0, 0.05, (n, 3))
+    return pts / np.linalg.norm(pts, axis=1, keepdims=True)
+
+
+def test_grouping_finds_the_voices_biggest_first_and_drops_strays():
+    pytest.importorskip("scipy")
+    tool = enroll()
+    pts = np.vstack([cloud([1, 0, 0], 10, 1), cloud([0, 1, 0], 20, 2),
+                     cloud([0, 0, 1], 3, 3)])
+    groups = tool.group_voices(pts)
+    assert [len(g) for g in groups] == [20, 10]
+    assert set(groups[0]) == set(range(10, 30))
+    assert tool.group_voices(pts[:1]) == []
+
+
+def test_a_profile_is_the_unit_mean():
+    tool = enroll()
+    vec = tool.profile(np.array([[1.0, 0.0], [0.0, 1.0]]))
+    assert np.allclose(vec, [np.sqrt(0.5), np.sqrt(0.5)])
+
+
+def test_rename_keeps_order_and_refuses_unknown_names(tmp_path):
+    tool = enroll()
+    voices = {"Voice 1": [1, 0], "Voice 2": [0, 1]}
+    assert list(tool.rename(voices, ["Voice 2=Bert"])) == ["Voice 1", "Bert"]
+    for bad in ("Voice 9=X", "Voice 1", "Voice 1= "):
+        with pytest.raises(SystemExit):
+            tool.rename(voices, [bad])
+
+
+def test_rename_and_list_from_the_command_line(tmp_path, capsys):
+    tool = enroll()
+    out = tmp_path / "v" / "voices.json"
+    tool.save(out, {"Voice 1": [1, 0]})
+    assert tool.main(["--rename", "Voice 1=Anna", "--out", str(out)]) == 0
+    assert tool.main(["--list", "--out", str(out)]) == 0
+    assert capsys.readouterr().out.strip().endswith("Anna")
+    assert tool.load_saved(tmp_path / "missing.json") == {}
+    assert tool.stamp(125.4) == "2:05"
+
+
+def test_the_page_offers_names_and_shows_them():
+    from pathlib import Path
+    root = Path(srv.__file__).parent / "static"
+    js = (root / "app.js").read_text()
+    assert 'id="namesChk"' in (root / "index.html").read_text()
+    assert "names: namesChk.checked" in js
+    assert "who.textContent = msg.voice" in js      # text, never innerHTML
+
+
 # ------------------------------------------------------------- the wrapper
 
 class FakeModel:

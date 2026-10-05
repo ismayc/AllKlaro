@@ -2947,6 +2947,7 @@ async def ws_endpoint(ws: WebSocket):
     recapping = False                 # one "what did they just say?" at a time
     last_voice: dict[int, dict] = {}  # per channel: the last describable voice
     speakers_on = False              # paragraphs follow the voice (config)
+    names_on = False                 # ...and cards say whose voice (config)
     last_vec: dict = {}              # per channel: the last long chunk's voice
     pause_frames = END_SILENCE_FRAMES
     uid = 0
@@ -3011,15 +3012,21 @@ async def ws_endpoint(ws: WebSocket):
                 "message": "Speaker paragraphs need the optional speaker "
                            "model. Install it with: uv sync --extra speakers"})
 
-    async def voice_match(before, now) -> float | None:
-        """How much this chunk sounds like the last long one (cosine), or
-        None when there is nothing to compare or the model failed."""
+    async def voice_match(before, now, named: bool) -> dict:
+        """What the speaker model says about a long chunk: `cos`, how much it
+        sounds like the last long one, and with names on, whose saved voice it
+        (`name`) and that last one (`was`) are. Empty when the model failed."""
         try:
-            return speakers.similarity(
-                await before if before is not None else None, await now)
+            last = await before if before is not None else None
+            vec = await now
+            heard = {"cos": speakers.similarity(last, vec)}
+            if named:
+                heard["name"] = speakers.identify(vec)
+                heard["was"] = speakers.identify(last)
+            return heard
         except Exception:
             log.exception("speaker model failed on a chunk")
-            return None
+            return {}
 
     async def handle_utterance(audio: np.ndarray, my_uid: int, speaker: str,
                                spec_task=None, meta: dict | None = None,
@@ -3152,10 +3159,18 @@ async def ws_endpoint(ws: WebSocket):
             # hold, since a card has one direction and a bounded prompt.
             replaces = None
             by_voice = bool(meta.get("by_voice"))
-            cos = await voice if voice is not None else None
-            new_voice = cos is not None and cos < speakers.SAME_COS
+            heard = await voice if voice is not None else {}
+            cos, who = heard.get("cos"), heard.get("name")
+            if who and heard.get("was"):
+                # Both chunks have a name: the names decide, so a break never
+                # contradicts the labels on the cards.
+                new_voice = who != heard["was"]
+            else:
+                new_voice = cos is not None and cos < speakers.SAME_COS
             if cos is not None:
                 meta["voice_cos"] = round(cos, 3)
+            if who:
+                meta["voice"] = who
             window = SPEAKER_GAP_SEC if by_voice else MERGE_GAP_SEC
             gap = (t0 - len(audio) / SAMPLE_RATE - prev["t_end"]) if prev else 99
             absorbed = (prev is not None and prev["speaker"] == speaker
@@ -3204,12 +3219,15 @@ async def ws_endpoint(ws: WebSocket):
                     merge_base = history.pop()
                 merge_fut = prev.get("tdone")
                 superseded.add(replaces)
+                # A paragraph is one voice, so a short reply folded into it
+                # (which is never asked about) keeps the card's name.
+                who = who or prev.get("voice")
 
             last_final[source] = text[-200:]
             tdone = loop.create_future()
             prev = {"uid": my_uid, "text": text, "source": source,
                     "speaker": speaker, "t_end": t0,
-                    "split": chain_split, "tdone": tdone}
+                    "split": chain_split, "tdone": tdone, "voice": who}
             recent_finals.append({"norm": normalize_text(text),
                                   "speaker": speaker, "t": t0})
             remember_for_gist(gist_pending, my_uid, source, text, replaces)
@@ -3229,6 +3247,8 @@ async def ws_endpoint(ws: WebSocket):
                          "auto": bool(pair) or "redo_direction" in meta,
                          # A break, not a name — see VOICE_CHANGE_DIST.
                          "voice_change": bool(meta.get("voice_change"))}
+            if who:
+                final_msg["voice"] = who
             if replaces is not None:
                 final_msg["replaces"] = replaces
                 meta["merged"] = True
@@ -3792,6 +3812,8 @@ async def ws_endpoint(ws: WebSocket):
                         speakers_on = bool(cfg["speakers"])
                         if speakers_on and not speakers.ready():
                             asyncio.create_task(warm_speakers())
+                    if "names" in cfg:     # cards carry a saved voice's name
+                        names_on = bool(cfg["names"])
                     if not gist and isinstance(cfg.get("gist_text"), str):
                         # Reconnect: the client is handing back the gist it is
                         # still displaying, so the next fold continues the
@@ -3980,7 +4002,7 @@ async def ws_endpoint(ws: WebSocket):
                             vec = loop.run_in_executor(
                                 speaker_executor, speakers.embed, utterance)
                             voice = asyncio.ensure_future(
-                                voice_match(last_vec.get(tag), vec))
+                                voice_match(last_vec.get(tag), vec, names_on))
                             last_vec[tag] = vec
                     asyncio.create_task(
                         handle_utterance(utterance, uid, SPEAKERS[tag],
