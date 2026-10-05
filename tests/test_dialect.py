@@ -251,3 +251,16 @@ def test_restoration_hints_get_a_language_guard_on_draft_calls_only():
     plain = server.translation_messages("Guten Tag.", "de", "en",
                                         guard_language=True)[0]["content"]
     assert "which meaning to pick" not in plain
+
+
+def test_legger_is_lecker_with_a_softened_k():
+    """Whisper writes the sound: "lecker" said with the k softened came out as
+    "Legger" on a real call (2026-10-04) and was translated as a name. It is
+    not a standard German word, so the entry is unambiguous: it is hinted and
+    marked with no dialect selected."""
+    gloss, ambiguous, flavors = server.load_dialects()["de"]["legger"]
+    assert "lecker" in gloss and not ambiguous
+    assert flavors == frozenset({"hessian", "worms"})
+    heard = "Die kleinen Salate. Legger. Ja, Legger."
+    assert '"legger" = lecker' in server.dialect_notes(heard, "de")
+    assert server.dialect_markers(heard, "de") == ["legger"]

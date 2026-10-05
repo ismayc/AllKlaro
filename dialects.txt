@@ -74,6 +74,11 @@ redde = reden (to talk) [worms]
 alla = also / los geht's (well then / come on) [worms]
 gugge = gucken (to look) [hessian worms]
 guggemol = guck mal (look) [hessian worms]
+# "lecker" said with the k softened to gg, the same shift as gucke -> gugge.
+# Whisper writes what it hears: "Legger. Ja, Legger." came out of a real call
+# (2026-10-04) and was translated as "Legger. Yes, Legger." Not a standard
+# German word, so unambiguous.
+legger = lecker (tasty, delicious) [hessian worms]
 Grumbeere = Kartoffeln (potatoes) [worms]
 Grumbeer = Kartoffel (potato) [worms]
 Woi = Wein (wine) [worms]
