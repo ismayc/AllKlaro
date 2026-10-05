@@ -159,7 +159,7 @@ def main(argv=None) -> int:
 
     if args.name:
         voices = load_saved(out)
-        voices[args.name] = profile(matrix)
+        voices[args.name] = {"vec": profile(matrix), "n": len(kept)}
         save(out, voices)
         print(f"saved {args.name!r} from {len(kept)} chunks; "
               f"saved voices: {', '.join(voices)}")
@@ -173,7 +173,7 @@ def main(argv=None) -> int:
     print(f"{len(kept)} chunks of {speakers.MIN_SEC:g} s or more, "
           f"{len(groups)} voices:")
     for n, g in enumerate(groups, 1):
-        voices[f"Voice {n}"] = profile(matrix[g])
+        voices[f"Voice {n}"] = {"vec": profile(matrix[g]), "n": len(g)}
         listen = ", ".join(stamp(starts[i]) for i in
                            g[np.linspace(0, len(g) - 1, 4).astype(int)])
         print(f"  Voice {n}: {len(g)} chunks; listen at {listen}")

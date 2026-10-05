@@ -171,7 +171,18 @@ main {
   color: var(--muted); border: 1px solid var(--border); border-radius: 20px;
   padding: 1px 7px; margin-right: 8px; vertical-align: 2px; }
 /* A saved voice's name: read first, so it is not muted like the channel tag. */
-.speaker.who { color: var(--text); border-color: var(--muted); letter-spacing: 0; }
+.speaker.who { color: var(--text); border-color: var(--muted); letter-spacing: 0;
+  cursor: pointer; }
+.speaker.who.unknown { color: var(--muted); border-style: dashed; }
+.voice-menu { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin-right: 8px; vertical-align: 2px; }
+.voice-menu button, .voice-menu input { font: inherit; font-size: 13px;
+  color: var(--text); background: transparent; border: 1px solid var(--border);
+  border-radius: 20px; padding: 2px 10px; min-height: 28px; }
+.voice-menu button { cursor: pointer; }
+.voice-menu button:hover { border-color: var(--muted); }
+/* 16px: a smaller input makes iPhone Safari zoom the page on focus. */
+.voice-menu input { width: 8.5em; font-size: 16px; }
 .latency { color: var(--muted); font-size: 11px; text-align: right; margin-top: 4px; }
 .refining { font-style: italic; animation: blink 1.4s infinite; }
 .card .trans.revised { animation: reviseFlash 1.2s ease-out; }

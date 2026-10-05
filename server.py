@@ -237,6 +237,7 @@ MERGE_GAP_SEC = 2.0                # resumed-within window for fragment merging
 # current card. Silence this long still ends the paragraph, whoever speaks
 # next.
 SPEAKER_GAP_SEC = 10.0
+CARD_VECS_KEPT = 200               # cards whose voice can still be named
 # The model runs on the CPU at about 20 ms a chunk, on its own worker so it
 # never waits behind a transcription.
 speaker_executor = ThreadPoolExecutor(max_workers=1)
@@ -2948,6 +2949,9 @@ async def ws_endpoint(ws: WebSocket):
     last_voice: dict[int, dict] = {}  # per channel: the last describable voice
     speakers_on = False              # paragraphs follow the voice (config)
     names_on = False                 # ...and cards say whose voice (config)
+    # The long chunks behind each card still on screen, so "this card is
+    # Anna" has something to learn from. Newest last; old cards fall off.
+    card_vecs: dict[int, list] = {}
     last_vec: dict = {}              # per channel: the last long chunk's voice
     pause_frames = END_SILENCE_FRAMES
     uid = 0
@@ -3019,7 +3023,7 @@ async def ws_endpoint(ws: WebSocket):
         try:
             last = await before if before is not None else None
             vec = await now
-            heard = {"cos": speakers.similarity(last, vec)}
+            heard = {"cos": speakers.similarity(last, vec), "vec": vec}
             if named:
                 heard["name"] = speakers.identify(vec)
                 heard["was"] = speakers.identify(last)
@@ -3171,6 +3175,7 @@ async def ws_endpoint(ws: WebSocket):
                 meta["voice_cos"] = round(cos, 3)
             if who:
                 meta["voice"] = who
+            mine = [heard["vec"]] if heard.get("vec") is not None else []
             window = SPEAKER_GAP_SEC if by_voice else MERGE_GAP_SEC
             gap = (t0 - len(audio) / SAMPLE_RATE - prev["t_end"]) if prev else 99
             absorbed = (prev is not None and prev["speaker"] == speaker
@@ -3222,6 +3227,7 @@ async def ws_endpoint(ws: WebSocket):
                 # A paragraph is one voice, so a short reply folded into it
                 # (which is never asked about) keeps the card's name.
                 who = who or prev.get("voice")
+                mine = card_vecs.pop(replaces, []) + mine
 
             last_final[source] = text[-200:]
             tdone = loop.create_future()
@@ -3249,6 +3255,10 @@ async def ws_endpoint(ws: WebSocket):
                          "voice_change": bool(meta.get("voice_change"))}
             if who:
                 final_msg["voice"] = who
+            if mine:
+                card_vecs[my_uid] = mine
+                while len(card_vecs) > CARD_VECS_KEPT:
+                    del card_vecs[next(iter(card_vecs))]
             if replaces is not None:
                 final_msg["replaces"] = replaces
                 meta["merged"] = True
@@ -3814,6 +3824,10 @@ async def ws_endpoint(ws: WebSocket):
                             asyncio.create_task(warm_speakers())
                     if "names" in cfg:     # cards carry a saved voice's name
                         names_on = bool(cfg["names"])
+                        if names_on:
+                            await safe_send(ws, {
+                                "type": "voices",
+                                "names": speakers.load_profiles()[0]})
                     if not gist and isinstance(cfg.get("gist_text"), str):
                         # Reconnect: the client is handing back the gist it is
                         # still displaying, so the next fold continues the
@@ -3901,6 +3915,27 @@ async def ws_endpoint(ws: WebSocket):
                                          cfg.get("target") or "",
                                          before if isinstance(before, int)
                                          else None))
+                elif isinstance(cfg, dict) and cfg.get("type") == "voice_label":
+                    # "This card is Anna": the user picked a name on a card.
+                    # Its long chunks are averaged into that saved voice, so
+                    # the next time Anna speaks the app knows.
+                    label = cfg.get("name")
+                    label = label.strip()[:40] if isinstance(label, str) else ""
+                    vecs = card_vecs.get(cfg.get("id"))
+                    if not label or not vecs:
+                        await safe_send(ws, {
+                            "type": "error",
+                            "message": "That card has no stretch of speech "
+                                       "long enough to learn a voice from. "
+                                       "Pick a longer one."})
+                    else:
+                        saved = await loop.run_in_executor(
+                            speaker_executor, speakers.teach, label, vecs)
+                        if prev and prev["uid"] == cfg.get("id"):
+                            prev["voice"] = label
+                        await safe_send(ws, {"type": "voice",
+                                             "id": cfg.get("id"),
+                                             "name": label, "names": saved})
                 elif isinstance(cfg, dict) and cfg.get("type") == "correction":
                     # An edited translation also fixes the live context, so
                     # follow-up utterances build on the corrected phrasing.

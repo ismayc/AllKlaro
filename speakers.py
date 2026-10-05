@@ -40,8 +40,9 @@ MIN_SEC = 3.0
 # 0.5 the model caught 77% of the speaker changes that arrived on a long chunk
 # and broke 14.5% of the places where the same speaker carried on.
 SAME_COS = 0.5
-# Saved voices: {"name": [192 floats]}, one unit vector per person. Private
-# by nature (it describes real people's voices), so it lives beside the other
+# Saved voices: {"name": {"vec": [192 floats], "n": chunks behind it}}, one
+# unit vector per person (a bare list of floats is read too). Private by
+# nature (it describes real people's voices), so it lives beside the other
 # per-user data and never in the repo.
 VOICES_PATH = Path(os.environ.get(
     "ALLKLARO_VOICES", Path.home() / ".cache" / "allklaro" / "voices.json"))
@@ -51,6 +52,12 @@ VOICES_PATH = Path(os.environ.get(
 # these settings and 98.8% of the names agreed with the reference labels.
 NAME_COS = 0.4
 NAME_MARGIN = 0.05
+# When the user says whose voice a card is, its chunks are averaged into that
+# person's profile. A profile built from hundreds of chunks would barely move,
+# so its weight is capped: each taught chunk shifts the profile by at least
+# one part in TEACH_CAP + 1.
+TEACH_CAP = 40
+_voices_lock = threading.Lock()
 
 _model = None
 _unavailable = False
@@ -116,18 +123,54 @@ def load_profiles() -> tuple[list[str], np.ndarray | None]:
     if mtime != _profiles["mtime"]:
         names, rows = [], []
         try:
-            for name, vec in json.loads(VOICES_PATH.read_text()).items():
-                vec = np.asarray(vec, dtype=np.float32)
-                norm = float(np.linalg.norm(vec))
-                if vec.ndim == 1 and norm:
-                    names.append(str(name))
-                    rows.append(vec / norm)
+            for name, (vec, _n) in _read_voices().items():
+                names.append(name)
+                rows.append(vec)
             matrix = np.stack(rows) if rows else None
         except (ValueError, AttributeError, TypeError):
             log.warning("ignoring unreadable voice profiles in %s", VOICES_PATH)
             names, matrix = [], None
         _profiles.update(mtime=mtime, names=names, matrix=matrix)
     return _profiles["names"], _profiles["matrix"]
+
+
+def _read_voices() -> dict[str, tuple[np.ndarray, int]]:
+    """The file as {name: (unit vector, chunk count)}; unusable entries are
+    skipped. Raises ValueError/AttributeError/TypeError on a malformed file."""
+    out = {}
+    for name, entry in json.loads(VOICES_PATH.read_text()).items():
+        count = TEACH_CAP
+        if isinstance(entry, dict):
+            count = int(entry.get("n", TEACH_CAP))
+            entry = entry.get("vec")
+        vec = np.asarray(entry, dtype=np.float32)
+        norm = float(np.linalg.norm(vec))
+        if vec.ndim == 1 and norm:
+            out[str(name)] = (vec / norm, count)
+    return out
+
+
+def teach(name: str, vectors: list[np.ndarray]) -> list[str]:
+    """The user said these chunks are `name`: average them into that saved
+    voice, or start it. Returns the saved names afterwards."""
+    with _voices_lock:
+        try:
+            voices = _read_voices()
+        except (OSError, ValueError, AttributeError, TypeError):
+            voices = {}
+        total = np.sum(vectors, axis=0)
+        count = len(vectors)
+        if name in voices and len(voices[name][0]) == len(total):
+            vec, had = voices[name]
+            total = total + vec * min(had, TEACH_CAP)
+            count += had
+        voices[name] = (total / np.linalg.norm(total), count)
+        VOICES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        VOICES_PATH.write_text(json.dumps(
+            {n: {"vec": [float(x) for x in v], "n": c}
+             for n, (v, c) in voices.items()}))
+        _profiles["mtime"] = None            # re-read on the next lookup
+        return list(voices)
 
 
 def identify(vec: np.ndarray | None) -> str | None:

@@ -294,6 +294,136 @@ def test_a_zero_or_nested_vector_is_skipped():
     assert speakers.load_profiles()[0] == ["Anna"]
 
 
+# ------------------------------------------------- the user says who it is
+
+def label(ws, card_id, name):
+    ws.send_text(json.dumps({"type": "voice_label", "id": card_id,
+                             "name": name}))
+    return collect_until(ws, stop_types=("voice", "error"))[-1]
+
+
+def test_turning_names_on_lists_the_saved_voices(client):
+    save_voices(Anna=[1, 0], Bert=[0, 1])
+    with named_session(client) as ws:
+        msg = collect_until(ws, stop_types=("voices",))[-1]
+    assert msg["names"] == ["Anna", "Bert"]
+
+
+def test_naming_a_card_teaches_a_new_voice(client, stub_transcribe, voices):
+    """Nobody is saved yet. The user names the first card; the next long
+    chunk in that voice is recognized without being told."""
+    voices.queue = [CLARA, np.array([0.0, 1.0, 0.0]), CLARA]
+    with named_session(client) as ws:
+        first = say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        assert "voice" not in first
+        reply = label(ws, first["id"], "  Clara ")
+        assert reply == {"type": "voice", "id": first["id"], "name": "Clara",
+                         "names": ["Clara"]}
+        say(ws, stub_transcribe, "Danach haben wir Kaffee getrunken.")
+        third = say(ws, stub_transcribe, "Und dann sind wir heimgefahren.")
+    assert third["voice"] == "Clara"
+    assert speakers.identify(CLARA) == "Clara"
+
+
+def test_naming_the_live_card_names_what_merges_into_it(client,
+                                                        stub_transcribe,
+                                                        voices):
+    voices.queue = [CLARA]
+    with named_session(client) as ws:
+        first = say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        label(ws, first["id"], "Clara")
+        reply = say(ws, stub_transcribe, "Das klingt aber wirklich schön.",
+                    chunks=SHORT)
+    assert reply["replaces"] == first["id"] and reply["voice"] == "Clara"
+
+
+def test_a_merged_card_teaches_all_its_long_chunks(client, stub_transcribe,
+                                                   voices, monkeypatch):
+    taught = []
+    monkeypatch.setattr(speakers, "teach",
+                        lambda name, vecs: taught.append((name, len(vecs)))
+                        or [name])
+    voices.queue = [ANNA, ANNA]
+    with named_session(client) as ws:
+        say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        second = say(ws, stub_transcribe, "Danach haben wir Kaffee getrunken.")
+        label(ws, second["id"], "Anna")
+    assert taught == [("Anna", 2)]
+
+
+@pytest.mark.parametrize("name", ["", "   ", None, 7])
+def test_a_label_without_a_name_is_refused(client, stub_transcribe, voices,
+                                           name):
+    voices.queue = [ANNA]
+    with named_session(client) as ws:
+        first = say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        assert label(ws, first["id"], name)["type"] == "error"
+    assert speakers.load_profiles() == ([], None)
+
+
+def test_a_card_with_only_short_speech_cannot_teach(client, stub_transcribe,
+                                                    voices):
+    with named_session(client) as ws:
+        first = say(ws, stub_transcribe, "Ja, genau so.", chunks=SHORT)
+        reply = label(ws, first["id"], "Anna")
+    assert reply["type"] == "error" and "long enough" in reply["message"]
+
+
+def test_only_recent_cards_keep_their_audio_description(
+        client, stub_transcribe, voices, monkeypatch):
+    monkeypatch.setattr(srv, "CARD_VECS_KEPT", 1)
+    voices.queue = [ANNA, BERT]
+    with named_session(client) as ws:
+        first = say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        second = say(ws, stub_transcribe, "Danach haben wir Kaffee getrunken.")
+        assert label(ws, first["id"], "Anna")["type"] == "error"
+        assert label(ws, second["id"], "Bert")["type"] == "voice"
+
+
+def test_teach_starts_a_voice_and_then_moves_it():
+    assert speakers.teach("Anna", [ANNA]) == ["Anna"]
+    assert speakers.identify(ANNA) == "Anna"
+    speakers.teach("Anna", [BERT])
+    names, matrix = speakers.load_profiles()
+    assert names == ["Anna"] and np.allclose(matrix, [[np.sqrt(.5)] * 2])
+    stored = json.loads(speakers.VOICES_PATH.read_text())["Anna"]
+    assert stored["n"] == 2 and len(stored["vec"]) == 2
+
+
+def test_an_established_voice_still_moves_when_taught():
+    """A profile built from hundreds of chunks counts as TEACH_CAP of them,
+    so a correction is never rounding error."""
+    speakers.VOICES_PATH.write_text(json.dumps(
+        {"Anna": {"vec": [1.0, 0.0], "n": 500}}))
+    speakers.teach("Anna", [BERT])
+    vec = speakers.load_profiles()[1][0]
+    assert vec[1] == pytest.approx(
+        1 / np.hypot(speakers.TEACH_CAP, 1), rel=1e-4)
+    assert json.loads(speakers.VOICES_PATH.read_text())["Anna"]["n"] == 501
+
+
+def test_teach_keeps_other_voices_and_reads_the_old_format():
+    save_voices(Bert=[0, 1])                       # a bare list of floats
+    assert speakers.teach("Anna", [ANNA]) == ["Bert", "Anna"]
+    assert speakers.identify(BERT) == "Bert"
+
+
+def test_teach_replaces_a_profile_of_another_size_and_a_broken_file():
+    save_voices(Anna=[1, 0, 0])
+    speakers.teach("Anna", [BERT])
+    assert np.allclose(speakers.load_profiles()[1], [[0, 1]])
+    speakers.VOICES_PATH.write_text("not json")
+    assert speakers.teach("Bert", [BERT]) == ["Bert"]
+
+
+def test_the_name_on_a_card_is_a_control():
+    from pathlib import Path
+    js = (Path(srv.__file__).parent / "static" / "app.js").read_text()
+    assert 'type: "voice_label"' in js
+    assert "chip.textContent = name" in js           # text, never innerHTML
+    assert "b.textContent = name" in js
+
+
 # ------------------------------------------------------- tools/enroll_voices
 
 def enroll():
@@ -356,7 +486,7 @@ def test_the_page_offers_names_and_shows_them():
     js = (root / "app.js").read_text()
     assert 'id="namesChk"' in (root / "index.html").read_text()
     assert "names: namesChk.checked" in js
-    assert "who.textContent = msg.voice" in js      # text, never innerHTML
+    assert "voiceChip(msg.id, msg.voice)" in js
 
 
 # ------------------------------------------------------------- the wrapper

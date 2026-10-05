@@ -531,13 +531,10 @@ function newCard(msg) {
   const speakerChip = callMode
     ? `<span class="speaker">${msg.speaker === "them" ? "Them" : "You"}</span>` : "";
   orig.innerHTML = speakerChip;
-  // A saved voice's name (Names on). Set as text: it comes from a file.
-  if (msg.voice) {
-    const who = document.createElement("span");
-    who.className = "speaker who";
-    who.textContent = msg.voice;
-    orig.append(who);
-  }
+  // Whose voice this is (Names on): a saved voice's name, or "?" when the
+  // app could not tell. Either way a tap says who it really is, and the app
+  // learns that voice from this card.
+  if (msg.voice || namesChk.checked) orig.append(voiceChip(msg.id, msg.voice));
   orig.append(sourceChip(msg),
               wordSpans(msg.text, msg.source,
                         new Set(msg.dialect || [])));
@@ -956,6 +953,16 @@ function handleMessage(msg) {
     } else {
       showRecap(msg.heard, msg.text);
     }
+  } else if (msg.type === "voices") {
+    voiceNames = msg.names || [];
+  } else if (msg.type === "voice") {
+    voiceNames = msg.names || voiceNames;
+    const entry = cards.get(msg.id);
+    if (entry) {
+      entry.voice = msg.name;
+      const chip = entry.card.querySelector(".speaker.who");
+      if (chip) setVoiceChip(chip, msg.name);
+    }
   } else if (msg.type === "gist") {
     showGist(msg.text);
   } else if (msg.type === "stats") {
@@ -1068,6 +1075,72 @@ gistToggle.onclick = () => {
   gistToggle.setAttribute("aria-expanded", String(!collapsed));
   saveSettings();
 };
+
+// ------------------------------------------------------ who is speaking
+// The name on a card is a button. Tapping it lists the saved voices plus a
+// box for a new name; choosing one tells the server "this card is Anna", and
+// the server averages the card's audio into Anna's saved voice. That is how
+// a wrong name is fixed and how a voice the app has never met gets one.
+let voiceNames = [];
+
+function setVoiceChip(chip, name) {
+  chip.textContent = name || "?";
+  chip.classList.toggle("unknown", !name);
+  chip.title = name ? `${name}. Tap if that is someone else`
+                    : "Not recognized. Tap to say who this is";
+}
+
+function voiceChip(id, name) {
+  const chip = document.createElement("span");
+  chip.className = "speaker who";
+  chip.setAttribute("role", "button");
+  setVoiceChip(chip, name);
+  chip.onclick = (e) => { e.stopPropagation(); openVoiceMenu(id, chip); };
+  return chip;
+}
+
+function closeVoiceMenu() {
+  document.querySelector(".voice-menu")?.remove();
+}
+
+function openVoiceMenu(id, chip) {
+  const wasOpenHere = chip.nextElementSibling?.classList.contains("voice-menu");
+  closeVoiceMenu();
+  if (wasOpenHere) return;
+  const menu = document.createElement("span");
+  menu.className = "voice-menu";
+  menu.onclick = (e) => e.stopPropagation();
+  const choose = (name) => {
+    name = name.trim();
+    if (!name) return;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "voice_label", id, name }));
+    } else {
+      showError("Start a session to save whose voice this is.");
+    }
+    closeVoiceMenu();
+  };
+  for (const name of voiceNames) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = name;
+    b.onclick = () => choose(name);
+    menu.append(b);
+  }
+  const box = document.createElement("input");
+  box.type = "text";
+  box.placeholder = "New name";
+  box.maxLength = 40;
+  box.setAttribute("aria-label", "New name for this voice");
+  box.onkeydown = (e) => { if (e.key === "Enter") choose(box.value); };
+  const add = document.createElement("button");
+  add.type = "button";
+  add.textContent = "Add";
+  add.onclick = () => choose(box.value);
+  menu.append(box, add);
+  chip.after(menu);
+}
+document.addEventListener("click", closeVoiceMenu);
 
 // Names are read off the same voice comparison, so they need Speakers on.
 speakersChk.onchange = () => {
