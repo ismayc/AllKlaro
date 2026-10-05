@@ -18,6 +18,10 @@ dependencies = [
 lt = [
     "language-tool-python>=3.4.0",
 ]
+speakers = [
+    "speechbrain>=1.1.1",
+    "torchaudio>=2.11.0",
+]
 
 [dependency-groups]
 dev = [

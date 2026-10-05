@@ -100,6 +100,8 @@
       <input type="checkbox" id="focusChk" /> Center latest</label>
     <label class="chk" title="Keep a short running summary of the conversation pinned above the feed, refreshed about once a minute while the pipeline is idle">
       <input type="checkbox" id="gistChk" checked /> Summary</label>
+    <label class="chk" title="Experimental: end a paragraph where the voice changes instead of where the text looks finished. Needs the optional speaker model (uv sync --extra speakers)">
+      <input type="checkbox" id="speakersChk" /> Speakers</label>
     <label class="chk" title="Show what the pipeline is doing — how much speech is still waiting to be cut into an utterance, how much work is queued, and how far behind the last card landed">
       <input type="checkbox" id="statsChk" /> Pipeline</label>
     <button id="summarizeBtn" class="tool-btn">Summarize</button>

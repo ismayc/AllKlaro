@@ -27,6 +27,7 @@ import httpx
 import numpy as np
 from wordfreq import zipf_frequency
 
+import speakers
 import voiceprint
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -229,6 +230,16 @@ VOICE_MARKS_ON = os.environ.get("ALLKLARO_VOICE_MARKS", "") == "1"
 VOICE_CHANGE_DIST = float(os.environ.get("ALLKLARO_VOICE_CHANGE_DIST", "0.35"))
 HISTORY_TURNS = 6                  # recent exchanges fed to the translator
 MERGE_GAP_SEC = 2.0                # resumed-within window for fragment merging
+# With "Speakers" on (off by default), a paragraph ends where the voice
+# changes instead of where the text looks finished: see speakers.py. A chunk
+# long enough to judge joins the card before it when it sounds like the same
+# person and starts a new card when it does not; a shorter chunk stays in the
+# current card. Silence this long still ends the paragraph, whoever speaks
+# next.
+SPEAKER_GAP_SEC = 10.0
+# The model runs on the CPU at about 20 ms a chunk, on its own worker so it
+# never waits behind a transcription.
+speaker_executor = ThreadPoolExecutor(max_workers=1)
 # 500, up from 300 (2026-08-09): the reference batch transcript's paragraphs
 # run to a median of 51 words, and at 300 chars the cap was the binding
 # refusal 39 times over the real hour. 500 admits a ~75-word card — the
@@ -2935,6 +2946,8 @@ async def ws_endpoint(ws: WebSocket):
     improving: set[int] = set()       # cards being re-translated on demand
     recapping = False                 # one "what did they just say?" at a time
     last_voice: dict[int, dict] = {}  # per channel: the last describable voice
+    speakers_on = False              # paragraphs follow the voice (config)
+    last_vec: dict = {}              # per channel: the last long chunk's voice
     pause_frames = END_SILENCE_FRAMES
     uid = 0
     last_partial = 0.0
@@ -2988,9 +3001,29 @@ async def ws_endpoint(ws: WebSocket):
     def auto_pair() -> tuple[str, str] | None:
         return mode_pair(mode)
 
+    async def warm_speakers():
+        """Load the speaker model off the event loop when the setting is
+        turned on, and say so when the optional install is missing: a ticked
+        box that silently does nothing is worse than an error."""
+        if await loop.run_in_executor(speaker_executor, speakers.load) is None:
+            await safe_send(ws, {
+                "type": "error",
+                "message": "Speaker paragraphs need the optional speaker "
+                           "model. Install it with: uv sync --extra speakers"})
+
+    async def voice_match(before, now) -> float | None:
+        """How much this chunk sounds like the last long one (cosine), or
+        None when there is nothing to compare or the model failed."""
+        try:
+            return speakers.similarity(
+                await before if before is not None else None, await now)
+        except Exception:
+            log.exception("speaker model failed on a chunk")
+            return None
+
     async def handle_utterance(audio: np.ndarray, my_uid: int, speaker: str,
                                spec_task=None, meta: dict | None = None,
-                               spec_timing: dict | None = None):
+                               spec_timing: dict | None = None, voice=None):
         nonlocal busy, prev, in_flight, last_done
         busy = True
         in_flight += 1
@@ -3110,10 +3143,23 @@ async def ws_endpoint(ws: WebSocket):
             # The chain's own split reason survives an absorption: a "Ja."
             # landing mid-flow says nothing about whether the main speaker
             # stopped.
+            #
+            # With "Speakers" on, the voice decides instead of the text: a
+            # chunk long enough to judge (`voice` is its similarity to the
+            # last such chunk) joins the card when it sounds like the same
+            # person and starts a new one when it does not, and a shorter
+            # chunk stays where it is. The language and length limits still
+            # hold, since a card has one direction and a bounded prompt.
             replaces = None
+            by_voice = bool(meta.get("by_voice"))
+            cos = await voice if voice is not None else None
+            new_voice = cos is not None and cos < speakers.SAME_COS
+            if cos is not None:
+                meta["voice_cos"] = round(cos, 3)
+            window = SPEAKER_GAP_SEC if by_voice else MERGE_GAP_SEC
             gap = (t0 - len(audio) / SAMPLE_RATE - prev["t_end"]) if prev else 99
             absorbed = (prev is not None and prev["speaker"] == speaker
-                        and gap < MERGE_GAP_SEC
+                        and gap < window and not new_voice
                         and len(prev["text"]) < MERGE_MAX_CHARS
                         and len(text.split()) <= ABSORB_MAX_WORDS)
             if absorbed and prev["source"] != source:
@@ -3134,16 +3180,18 @@ async def ws_endpoint(ws: WebSocket):
             if (absorbed
                     or (prev and prev["speaker"] == speaker
                         and prev["source"] == source
-                        and gap < MERGE_GAP_SEC
+                        and gap < window
                         and len(prev["text"]) < MERGE_MAX_CHARS
-                        and (not looks_finished(prev["text"])
-                             or continues_previous(text)
-                             or flowed_on(prev.get("split")))
-                        # A question hands the turn over — the next chunk is
-                        # someone's answer, not a continuation — unless casing
-                        # says otherwise. See yields_turn for the measurement.
-                        and (continues_previous(text)
-                             or not yields_turn(prev["text"])))):
+                        and (not new_voice if by_voice else
+                             ((not looks_finished(prev["text"])
+                               or continues_previous(text)
+                               or flowed_on(prev.get("split")))
+                              # A question hands the turn over — the next
+                              # chunk is someone's answer, not a continuation
+                              # — unless casing says otherwise. See
+                              # yields_turn for the measurement.
+                              and (continues_previous(text)
+                                   or not yields_turn(prev["text"])))))):
                 merge_tail = text
                 text = prev["text"] + " " + text
                 replaces = prev["uid"]
@@ -3740,6 +3788,10 @@ async def ws_endpoint(ws: WebSocket):
                         stats_on = bool(cfg["stats"])
                     if "gist" in cfg:   # running gist above the feed on/off
                         gist_on = bool(cfg["gist"])
+                    if "speakers" in cfg:  # paragraphs follow the voice
+                        speakers_on = bool(cfg["speakers"])
+                        if speakers_on and not speakers.ready():
+                            asyncio.create_task(warm_speakers())
                     if not gist and isinstance(cfg.get("gist_text"), str):
                         # Reconnect: the client is handing back the gist it is
                         # still displaying, so the next fold continues the
@@ -3917,9 +3969,22 @@ async def ws_endpoint(ws: WebSocket):
                                          "speaker": SPEAKERS[tag]})
                     if not _parakeet_unavailable:
                         asyncio.create_task(send_heard(utterance, uid))
+                    voice = None
+                    if speakers_on and speakers.ready():
+                        meta["by_voice"] = True
+                        if len(utterance) >= speakers.MIN_SEC * SAMPLE_RATE:
+                            # Queued here for the same reason as the
+                            # signature above: this is where chunks are still
+                            # in order, so "the last long chunk" is the right
+                            # one.
+                            vec = loop.run_in_executor(
+                                speaker_executor, speakers.embed, utterance)
+                            voice = asyncio.ensure_future(
+                                voice_match(last_vec.get(tag), vec))
+                            last_vec[tag] = vec
                     asyncio.create_task(
                         handle_utterance(utterance, uid, SPEAKERS[tag],
-                                         spec_task, meta, spec_timing))
+                                         spec_task, meta, spec_timing, voice))
             if any(c["vad"].in_speech for c in channels.values()):
                 asyncio.create_task(maybe_partial())
             now = loop.time()

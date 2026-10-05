@@ -14,6 +14,7 @@ const speakChk = document.getElementById("speakChk");
 const focusChk = document.getElementById("focusChk");
 const statsChk = document.getElementById("statsChk");
 const gistChk = document.getElementById("gistChk");
+const speakersChk = document.getElementById("speakersChk");
 const gistPanel = document.getElementById("gist");
 const gistText = document.getElementById("gistText");
 const gistToggle = document.getElementById("gistToggle");
@@ -82,6 +83,7 @@ function saveSettings() {
     focus: focusChk.checked,
     stats: statsChk.checked,
     gist: gistChk.checked,
+    speakers: speakersChk.checked,
     gistCollapsed: gistPanel.classList.contains("collapsed"),
     pause: pauseSlider.value,
     pinnedSource,
@@ -95,6 +97,7 @@ if (saved.focus) { focusChk.checked = true; feed.classList.add("focus"); }
 if (saved.stats) { statsChk.checked = true; pipeline.classList.remove("hidden"); }
 // Defaults on, so an absent key is not "off" the way it is for the others.
 if (saved.gist === false) gistChk.checked = false;
+if (saved.speakers) speakersChk.checked = true;
 if (saved.gistCollapsed) {
   gistPanel.classList.add("collapsed");
   gistToggle.setAttribute("aria-expanded", "false");
@@ -320,6 +323,7 @@ function sendConfig() {
                              model: modelSel.value, draft_model: draftSel.value,
                              stats: statsChk.checked,
                              gist: gistChk.checked,
+                             speakers: speakersChk.checked,
                              // The gist lives in the WebSocket session, so a
                              // reconnect would restart the summary from nothing
                              // while the old text sat on screen. The client is
@@ -1054,6 +1058,7 @@ gistToggle.onclick = () => {
   saveSettings();
 };
 
+speakersChk.onchange = () => { sendConfig(); saveSettings(); };
 gistChk.onchange = () => {
   if (!gistChk.checked) clearGist();
   sendConfig();

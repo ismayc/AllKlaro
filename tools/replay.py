@@ -191,6 +191,8 @@ async def run(args) -> int:
 
     cfg = {"type": "config", "mode": args.mode, "pause_ms": args.pause_ms,
            "stats": False}
+    if args.speakers:
+        cfg["speakers"] = True
     if args.model:
         cfg["model"] = args.model
     # An unset --draft-model used to send "", which the server reads as "draft
@@ -251,6 +253,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--pace", type=float, default=1.0,
                    help="feed speed vs realtime; >1 deliberately overloads")
     p.add_argument("--mode", default="auto-de-en")
+    p.add_argument("--speakers", action="store_true",
+                   help="paragraphs follow the voice (needs the speakers extra)")
     p.add_argument("--model", default="", help="translation model (server default)")
     p.add_argument("--draft-model", default=None,
                    help="fast first-pass model; unset picks the one the app "

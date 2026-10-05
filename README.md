@@ -47,6 +47,7 @@ by default) that sees the conversation's recent context.
 | 🔎 **Big-text view** | Tap a card's background and the translation fills the screen — made for showing the person across the table |
 | 🗺️ **Dialect-aware** | Regional markers are detected and the intended forms hinted to the translator — German (Berlinerisch/Hessisch/Wormser: "dit", "ebbes", "nää", plus Whisper mis-hearings like "nett" for "net") *and* Spanish ("chamba", "ahorita", "plegar", "guay"); extend via `dialects.txt`, one `[lang]` section per language. Entries name the dialects they belong to (`ick = ich [berlin]`), so picking a style narrows what gets marked instead of painting a neighbouring dialect's words red; untagged means "every dialect" |
 | 🫱 **Voice-change marks** *(off — measured and it does not work)* | A dashed *new voice* line between cards when the speaker changes. Convincing on synthetic voices, useless on the real recording: it marks 33.7% of same-speaker continuations against 35.1% of real turn boundaries, so one mark in three would land mid-sentence. `ALLKLARO_VOICE_MARKS=1` to see it anyway |
+| 🗣️ **Speaker paragraphs** *(experimental, off by default)* | Tick **Speakers** and a paragraph ends where the voice changes instead of where the text looks finished. A chunk of 3 s or more joins the card before it when it sounds like the same person and starts a new card when it does not; a shorter reply stays in the current card. It never names anyone. Needs the optional speaker model: `uv sync --extra speakers` (ECAPA-TDNN through speechbrain, about 20 ms a chunk on the CPU). Scored against a transcription service's speaker labels on a real 67-minute call: on chunks of 3 s or more it caught 77% of speaker changes and broke 14.5% of same-speaker continuations, where the text rules broke 61% and 34.5%. A change that arrives on a short chunk is missed by design |
 | 🎭 **German & Spanish style** | Optional dialect output: Berlinerisch, Hessisch, or Wormser Platt for German; Mexican or Barcelona Spanish — reply to your friends the way they write |
 | 🤝 **Address form** | Pin how "you" comes out — du/Sie/ihr in German, tú/usted/ustedes in Spanish — or leave it on Auto and let context decide |
 | 📚 **Glossary** | Pin names and terms in `glossary.txt` — biases recognition *and* translation |
@@ -537,6 +538,11 @@ The speed and correctness machinery, for the curious:
   parsing, relative pronouns are recognized and skipped, genitive
   prepositions accept the colloquial dative) — near-zero false positives
   by construction.
+- **Speaker model (optional)** — `uv sync --extra speakers`, then tick
+  **Speakers** in the settings. Without it the box reports that the model is
+  missing and paragraphs keep the text-and-pause rules. The model
+  (`speechbrain/spkrec-ecapa-voxceleb`) is downloaded once to
+  `~/.cache/allklaro/speaker-model`.
 - **LanguageTool (optional)** — `uv sync --extra lt` and run with
   `ALLKLARO_LT=1` to add a local LanguageTool (Java) as a second opinion:
   its grammar/agreement findings feed the same corrective re-ask,
