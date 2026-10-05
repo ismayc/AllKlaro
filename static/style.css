@@ -173,6 +173,10 @@ main {
 /* A saved voice's name: read first, so it is not muted like the channel tag. */
 .speaker.who { color: var(--text); border-color: var(--muted); letter-spacing: 0;
   cursor: pointer; }
+.speaker.who:not(.unknown) { font-size: 12px;
+  color: hsl(var(--who-hue, 0) 85% 80%);
+  border-color: hsl(var(--who-hue, 0) 55% 55%);
+  background: hsl(var(--who-hue, 0) 60% 50% / .16); }
 .speaker.who.unknown { color: var(--muted); border-style: dashed; }
 .voice-menu { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center;
   margin-right: 8px; vertical-align: 2px; }

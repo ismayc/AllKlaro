@@ -1083,9 +1083,20 @@ gistToggle.onclick = () => {
 // a wrong name is fixed and how a voice the app has never met gets one.
 let voiceNames = [];
 
+// One color per person, so a back-and-forth can be followed without reading
+// the names. Hues are chosen away from the language colors (blue, green,
+// orange); a saved voice keeps its place in the list, so its color is stable.
+const VOICE_HUES = [330, 268, 60, 186, 14, 300];
+function voiceHue(name) {
+  let i = voiceNames.indexOf(name);
+  if (i < 0) i = [...name].reduce((sum, ch) => sum + ch.codePointAt(0), 0);
+  return VOICE_HUES[i % VOICE_HUES.length];
+}
+
 function setVoiceChip(chip, name) {
   chip.textContent = name || "?";
   chip.classList.toggle("unknown", !name);
+  if (name) chip.style.setProperty("--who-hue", voiceHue(name));
   chip.title = name ? `${name}. Tap if that is someone else`
                     : "Not recognized. Tap to say who this is";
 }

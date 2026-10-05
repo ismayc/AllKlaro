@@ -52,6 +52,14 @@ VOICES_PATH = Path(os.environ.get(
 # these settings and 98.8% of the names agreed with the reference labels.
 NAME_COS = 0.4
 NAME_MARGIN = 0.05
+# Against saved voices a shorter chunk can be placed too, which a comparison
+# with one other chunk cannot do. Held out on the same call: chunks of 2.5 to
+# 3 s were named 92% of the time and every name agreed with the reference; of
+# 2 to 2.5 s, 79% and 87%; of 1.5 to 2 s, 82% and 83%. So with names on,
+# chunks down to NAME_MIN_SEC are named, on a stricter margin, and anything
+# shorter still stays in the paragraph it lands in.
+NAME_MIN_SEC = 2.0
+SHORT_NAME_MARGIN = 0.1
 # When the user says whose voice a card is, its chunks are averaged into that
 # person's profile. A profile built from hundreds of chunks would barely move,
 # so its weight is capped: each taught chunk shifts the profile by at least
@@ -92,10 +100,10 @@ def ready() -> bool:
     return _model is not None
 
 
-def embed(audio: np.ndarray) -> np.ndarray | None:
+def embed(audio: np.ndarray, min_sec: float = MIN_SEC) -> np.ndarray | None:
     """Unit-length voice vector for one chunk of 16 kHz int16 audio, or None
     when the chunk is too short to describe a voice or no model is loaded."""
-    if len(audio) < MIN_SEC * SAMPLE_RATE:
+    if len(audio) < min_sec * SAMPLE_RATE:
         return None
     model = load()
     if model is None:
@@ -173,7 +181,8 @@ def teach(name: str, vectors: list[np.ndarray]) -> list[str]:
         return list(voices)
 
 
-def identify(vec: np.ndarray | None) -> str | None:
+def identify(vec: np.ndarray | None,
+             margin: float = NAME_MARGIN) -> str | None:
     """The saved voice this chunk belongs to, or None when there are no
     profiles, it is not close enough to any, or two are too close to call."""
     names, matrix = load_profiles()
@@ -183,7 +192,7 @@ def identify(vec: np.ndarray | None) -> str | None:
     order = np.argsort(sims)
     best = float(sims[order[-1]])
     runner_up = float(sims[order[-2]]) if len(order) > 1 else -1.0
-    if best < NAME_COS or best - runner_up < NAME_MARGIN:
+    if best < NAME_COS or best - runner_up < margin:
         return None
     return names[int(order[-1])]
 

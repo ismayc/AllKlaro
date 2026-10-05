@@ -25,7 +25,7 @@ class Voices:
         self.queue = []
         self.calls = 0
 
-    def __call__(self, audio):
+    def __call__(self, audio, min_sec=None):
         self.calls += 1
         vec = self.queue.pop(0)
         if isinstance(vec, Exception):
@@ -294,6 +294,58 @@ def test_a_zero_or_nested_vector_is_skipped():
     assert speakers.load_profiles()[0] == ["Anna"]
 
 
+# The cut chunk is the speech plus about 0.9 s of lead-in and closing silence.
+MIDDLE = 12    # about 2.4 s cut: too short to compare, enough to name
+
+
+def test_a_shorter_chunk_is_named_against_saved_voices_and_breaks(
+        client, stub_transcribe, voices):
+    """A 2 to 3 s turn by someone else used to stay in the other person's
+    paragraph. With saved voices it is placed and gets its own card, and the
+    first speaker coming back starts a new card again."""
+    save_voices(Anna=[1, 0], Bert=[0, 1])
+    voices.queue = [ANNA, BERT, ANNA]
+    with named_session(client) as ws:
+        first = say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        reply = say(ws, stub_transcribe, "Das klingt aber wirklich schön.",
+                    chunks=MIDDLE)
+        third = say(ws, stub_transcribe, "Danach haben wir Kaffee getrunken.")
+    assert reply["voice"] == "Bert" and "replaces" not in reply
+    assert third["voice"] == "Anna" and "replaces" not in third
+    assert first["voice"] == "Anna"
+
+
+def test_a_shorter_chunk_needs_a_wider_margin_to_be_named(
+        client, stub_transcribe, voices):
+    save_voices(Anna=[1, 0], Bert=[0, 1])
+    lean = np.array([0.74, 0.6726])           # nearer Anna by about 0.07
+    assert speakers.identify(lean) == "Anna"
+    assert speakers.identify(lean, speakers.SHORT_NAME_MARGIN) is None
+    voices.queue = [BERT, lean]
+    with named_session(client) as ws:
+        first = say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        reply = say(ws, stub_transcribe, "Das klingt aber wirklich schön.",
+                    chunks=MIDDLE)
+    assert reply["replaces"] == first["id"] and reply["voice"] == "Bert"
+
+
+def test_without_names_a_shorter_chunk_is_not_asked_about(
+        client, stub_transcribe, voices):
+    voices.queue = [ANNA]
+    with session(client) as ws:
+        say(ws, stub_transcribe, "Wir waren gestern im Garten.")
+        say(ws, stub_transcribe, "Das klingt aber wirklich schön.",
+            chunks=MIDDLE)
+    assert voices.calls == 1
+
+
+def test_embed_takes_a_lower_floor_when_asked(monkeypatch):
+    monkeypatch.setattr(speakers, "_model", FakeModel())
+    audio = (np.ones(int(2.2 * 16000)) * 1000).astype(np.int16)
+    assert speakers.embed(audio) is None
+    assert speakers.embed(audio, speakers.NAME_MIN_SEC) is not None
+
+
 # ------------------------------------------------- the user says who it is
 
 def label(ws, card_id, name):
@@ -414,6 +466,29 @@ def test_teach_replaces_a_profile_of_another_size_and_a_broken_file():
     assert np.allclose(speakers.load_profiles()[1], [[0, 1]])
     speakers.VOICES_PATH.write_text("not json")
     assert speakers.teach("Bert", [BERT]) == ["Bert"]
+
+
+def test_each_voice_gets_its_own_stable_color():
+    """Run the page's own color function: saved voices take hues in list
+    order, away from the language colors, and an unsaved name still gets one."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    js = (Path(srv.__file__).parent / "static" / "app.js").read_text()
+    start = js.index("const VOICE_HUES")
+    snippet = js[start:js.index("function setVoiceChip")]
+    script = ('let voiceNames = ["Anna", "Bert", "Clara"];\n' + snippet +
+              'console.log(JSON.stringify([voiceHue("Anna"), voiceHue("Bert"),'
+              ' voiceHue("Clara"), voiceHue("Anna"), voiceHue("Zed")]));')
+    out = subprocess.run(["node", "-e", script], capture_output=True,
+                         text=True, check=True).stdout
+    anna, bert, clara, anna_again, zed = json.loads(out)
+    assert len({anna, bert, clara}) == 3 and anna == anna_again
+    assert isinstance(zed, int)
+    for hue in (anna, bert, clara):       # not the blue, green, or orange
+        assert all(abs(hue - lang) > 15 for lang in (212, 153, 37))
 
 
 def test_the_name_on_a_card_is_a_control():

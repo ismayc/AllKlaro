@@ -3016,17 +3016,22 @@ async def ws_endpoint(ws: WebSocket):
                 "message": "Speaker paragraphs need the optional speaker "
                            "model. Install it with: uv sync --extra speakers"})
 
-    async def voice_match(before, now, named: bool) -> dict:
-        """What the speaker model says about a long chunk: `cos`, how much it
-        sounds like the last long one, and with names on, whose saved voice it
-        (`name`) and that last one (`was`) are. Empty when the model failed."""
+    async def voice_match(before, now, named: bool, long: bool) -> dict:
+        """What the speaker model says about a chunk. For a long one: `cos`,
+        how much it sounds like the last long one, and `vec`, kept so the
+        user can say whose voice the card is. With names on: `name`, the
+        saved voice it belongs to, which a chunk somewhat shorter can also
+        get, on a stricter margin. Empty when the model failed."""
         try:
-            last = await before if before is not None else None
             vec = await now
-            heard = {"cos": speakers.similarity(last, vec), "vec": vec}
+            heard = {}
+            if long:
+                last = await before if before is not None else None
+                heard = {"cos": speakers.similarity(last, vec), "vec": vec}
             if named:
-                heard["name"] = speakers.identify(vec)
-                heard["was"] = speakers.identify(last)
+                heard["name"] = speakers.identify(
+                    vec, speakers.NAME_MARGIN if long
+                    else speakers.SHORT_NAME_MARGIN)
             return heard
         except Exception:
             log.exception("speaker model failed on a chunk")
@@ -3165,10 +3170,10 @@ async def ws_endpoint(ws: WebSocket):
             by_voice = bool(meta.get("by_voice"))
             heard = await voice if voice is not None else {}
             cos, who = heard.get("cos"), heard.get("name")
-            if who and heard.get("was"):
-                # Both chunks have a name: the names decide, so a break never
-                # contradicts the labels on the cards.
-                new_voice = who != heard["was"]
+            if who and prev and prev.get("voice"):
+                # The chunk and the card before it both have a name: the
+                # names decide, so a break never contradicts the labels.
+                new_voice = who != prev["voice"]
             else:
                 new_voice = cos is not None and cos < speakers.SAME_COS
             if cos is not None:
@@ -4029,16 +4034,22 @@ async def ws_endpoint(ws: WebSocket):
                     voice = None
                     if speakers_on and speakers.ready():
                         meta["by_voice"] = True
-                        if len(utterance) >= speakers.MIN_SEC * SAMPLE_RATE:
+                        long = len(utterance) >= speakers.MIN_SEC * SAMPLE_RATE
+                        need = (speakers.NAME_MIN_SEC if names_on
+                                else speakers.MIN_SEC)
+                        if len(utterance) >= need * SAMPLE_RATE:
                             # Queued here for the same reason as the
                             # signature above: this is where chunks are still
                             # in order, so "the last long chunk" is the right
                             # one.
                             vec = loop.run_in_executor(
-                                speaker_executor, speakers.embed, utterance)
+                                speaker_executor, speakers.embed, utterance,
+                                need)
                             voice = asyncio.ensure_future(
-                                voice_match(last_vec.get(tag), vec, names_on))
-                            last_vec[tag] = vec
+                                voice_match(last_vec.get(tag), vec, names_on,
+                                            long))
+                            if long:
+                                last_vec[tag] = vec
                     asyncio.create_task(
                         handle_utterance(utterance, uid, SPEAKERS[tag],
                                          spec_task, meta, spec_timing, voice))
