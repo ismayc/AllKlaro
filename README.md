@@ -654,6 +654,11 @@ where the card will go, and Whisper's transcript and the translation then
 fill in that same spot. A card that merges with the one before it takes over
 that card's place instead of moving to the end of the feed.
 
+**The feed follows you, not the other way round.** New text scrolls into view
+only while you are already at the newest card. Scroll up to reread something
+and the feed stays where you put it, with a **Latest ↓** button to jump back.
+Before this every arriving word pulled the view to the bottom.
+
 **The words decide the direction when they contradict Whisper.** In an auto
 mode Whisper names the language from the audio and then writes the words, and
 the two can disagree: German spoken with an English accent can be called

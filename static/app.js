@@ -1,5 +1,29 @@
 const feed = document.getElementById("feed");
 const hint = document.getElementById("hint");
+const latestBtn = document.getElementById("latestBtn");
+
+// The feed follows the newest text only while the reader is already there.
+// Every token used to force it to the bottom, so scrolling up to reread a
+// card was undone a moment later. Now a reader who has scrolled away stays
+// put, and a button offers the way back.
+const FOLLOW_SLACK_PX = 80;
+let following = true;
+function atLatest() {
+  return feed.scrollHeight - feed.scrollTop - feed.clientHeight < FOLLOW_SLACK_PX;
+}
+function followFeed() {
+  if (following) feed.scrollTop = feed.scrollHeight;
+  else latestBtn.classList.remove("hidden");
+}
+feed.addEventListener("scroll", () => {
+  following = atLatest();
+  if (following) latestBtn.classList.add("hidden");
+});
+latestBtn.onclick = () => {
+  following = true;
+  latestBtn.classList.add("hidden");
+  feed.scrollTop = feed.scrollHeight;
+};
 const micBtn = document.getElementById("micBtn");
 const micLabel = document.getElementById("micLabel");
 const modeSel = document.getElementById("mode");
@@ -391,7 +415,7 @@ function showError(msg) {
   div.className = "error-banner";
   div.textContent = msg;
   feed.appendChild(div);
-  feed.scrollTop = feed.scrollHeight;
+  followFeed();
 }
 
 function langChip(code) {
@@ -480,7 +504,7 @@ function holdPlace(id) {
     '<div class="trans"><span class="cursor">▍</span></div>');
   held.set(id, el);
   addToFeed(el);
-  feed.scrollTop = feed.scrollHeight;
+  followFeed();
 }
 
 function showHeard(id, text) {
@@ -558,7 +582,7 @@ function newCard(msg) {
   }
   card.onclick = () => showBig(msg.id); // card background still opens big-text
   if (anchor) anchor.replaceWith(card); else addToFeed(card);
-  feed.scrollTop = feed.scrollHeight;
+  followFeed();
   cards.set(msg.id, {
     id: msg.id, card, rows, source: msg.source, targets: msg.targets,
     text: msg.text, speaker: msg.speaker, voice: msg.voice,
@@ -866,7 +890,7 @@ function showPartial(text) {
     }
     partialCard.textContent = text;
     feed.appendChild(partialCard); // re-append keeps it below the newest card
-    feed.scrollTop = feed.scrollHeight;
+    followFeed();
   } else {
     partialText.textContent = text;
     partialBar.classList.remove("hidden");
@@ -900,7 +924,7 @@ function handleMessage(msg) {
     if (!c || !c.rows[msg.target]) return;
     c.rows[msg.target].text += msg.text;
     renderRow(c, msg.target);
-    feed.scrollTop = feed.scrollHeight;
+    followFeed();
   } else if (msg.type === "translation_done") {
     const c = cards.get(msg.id);
     if (!c) return;

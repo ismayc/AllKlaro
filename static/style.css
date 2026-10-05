@@ -107,6 +107,12 @@ main {
 /* Focus mode: bottom padding pushes the newest card up to ~mid-screen when
    auto-scrolled, so incoming text and its translation sit where eyes rest. */
 #feed.focus { padding-bottom: 42vh; }
+/* Shown while the reader has scrolled away from the newest text. */
+#latestBtn { position: fixed; right: 18px; bottom: 84px; z-index: 30;
+  font: inherit; font-size: 14px; font-weight: 700; color: var(--text);
+  background: var(--panel); border: 1px solid var(--muted); border-radius: 20px;
+  padding: 8px 14px; cursor: pointer; box-shadow: 0 2px 10px rgba(0, 0, 0, .4); }
+#latestBtn.hidden { display: none; }
 .card.partial {
   color: var(--muted); font-style: italic; border-style: dashed;
   font-size: .85em; line-height: 1.45;
