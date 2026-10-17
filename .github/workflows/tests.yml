@@ -17,12 +17,14 @@ jobs:
   pytest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
-      # uv and Python are both pinned so a green run here means the same
-      # thing next month. The lockfile is what actually fixes the
-      # dependency versions; these two stop the tooling around it drifting.
-      - uses: astral-sh/setup-uv@v10
+      # Both actions are pinned to exact releases, not to a moving major
+      # tag: setup-uv publishes no `v10`, only `v10.x.y`. uv and Python are
+      # pinned for the same reason, so a green run here means the same thing
+      # next month. The lockfile is what actually fixes the dependency
+      # versions; these pins stop the tooling around it drifting.
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.11.32"
           python-version: "3.12"
