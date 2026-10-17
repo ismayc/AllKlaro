@@ -1,0 +1,48 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch makes the older run's answer irrelevant.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # uv and Python are both pinned so a green run here means the same
+      # thing next month. The lockfile is what actually fixes the
+      # dependency versions; these two stop the tooling around it drifting.
+      - uses: astral-sh/setup-uv@v10
+        with:
+          version: "0.11.32"
+          python-version: "3.12"
+          enable-cache: true
+
+      # `speakers` is optional to the app but not to the suite: the two
+      # voice-embedding tests in test_speakers.py import torch and fail
+      # rather than skip without it. `lt` is deliberately left out — the
+      # tests stub `language_tool_python`, and LanguageTool is the one
+      # dependency this project keeps opt-in precisely because it wants Java.
+      - name: Install dependencies
+        run: uv sync --frozen --extra speakers --group dev
+
+      # mlx installs on Linux but cannot load libmlx.so off Apple Silicon.
+      # That is fine and not worth working around: server.py imports mlx and
+      # mlx_whisper lazily inside the functions that use them, and conftest
+      # stubs both, so nothing in this suite touches the real models. The
+      # tests that do need Apple Silicon, a running Ollama, or the private
+      # recordings stay behind RUN_INTEGRATION=1 and skip here. Those are
+      # the ~35 skips below, and they are the reason this job is a floor
+      # rather than full coverage.
+      - name: Run the test suite
+        run: uv run --frozen pytest -q
