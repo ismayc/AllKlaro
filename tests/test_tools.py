@@ -366,8 +366,8 @@ def test_fetch_models_handles_a_tls_url(monkeypatch):
     monkeypatch.setattr(replay.urllib.request, "urlopen",
                         lambda url, timeout=None: (seen.update(url=url),
                                                    FakeResponse())[1])
-    replay.fetch_models("wss://host.tail0e51a2.ts.net/ws")
-    assert seen["url"] == "https://host.tail0e51a2.ts.net/api/models"
+    replay.fetch_models("wss://host.example.ts.net/ws")
+    assert seen["url"] == "https://host.example.ts.net/api/models"
 
 
 def test_choose_draft_resolves_when_the_flag_is_unset(monkeypatch, capsys):
