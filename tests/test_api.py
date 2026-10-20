@@ -319,3 +319,22 @@ def test_api_translate_spanish_flavor(client, fake_ollama):
                                         "mode": "en-es",
                                         "es_flavor": "barcelona"})
     assert "Barcelona" in fake_ollama["chat"]["messages"][0]["content"]
+
+
+# ---------------------------------------------------------------- hub link
+
+
+def test_hub_returns_the_url_from_the_configured_file(client, tmp_path, monkeypatch):
+    f = tmp_path / "url"
+    f.write_text("https://hub.example/\n")
+    monkeypatch.setenv("ALLKLARO_HUB_FILE", str(f))
+    assert client.get("/api/hub").json() == {"url": "https://hub.example/"}
+
+
+def test_hub_is_null_when_file_is_missing_empty_or_not_http(client, tmp_path, monkeypatch):
+    f = tmp_path / "url"
+    monkeypatch.setenv("ALLKLARO_HUB_FILE", str(f))
+    assert client.get("/api/hub").json() == {"url": None}   # missing
+    for body in ("", "\n", "javascript:alert(1)", "hub.example", "ftp://hub.example"):
+        f.write_text(body)
+        assert client.get("/api/hub").json() == {"url": None}, body

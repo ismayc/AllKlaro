@@ -88,6 +88,10 @@ the server, and opens the page. (If macOS balks, right-click → Open once, or
 model (~2 MB) download once. Watch the terminal for `Whisper ready.` — after
 that, startup takes seconds and everything runs offline.
 
+Optional: if `~/.config/tailnet-hub/url` holds a single `http(s)://` URL, the
+header shows a small "All tailnet pages" link to it. Without the file, no link
+appears.
+
 Press **Start**, allow the microphone, and talk. Each pause finalizes an
 utterance; the green level meter shows whether audio is arriving — if it
 never moves, the wrong input device is selected.

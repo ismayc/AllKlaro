@@ -1773,6 +1773,28 @@ async def models():
             "sizes": {m["name"]: m.get("size", 0) for m in kept}}
 
 
+HUB_FILE_DEFAULT = Path.home() / ".config" / "tailnet-hub" / "url"
+
+
+@app.get("/api/hub")
+async def hub():
+    """Link to the owner's tailnet page index, read from a file outside the repo.
+
+    The hostname is private and this repo is public, so the URL lives only in
+    ~/.config/tailnet-hub/url (ALLKLARO_HUB_FILE overrides the path for tests).
+    Anything missing, empty, or not http(s) gives {"url": null}: no link.
+    """
+    path = Path(os.environ.get("ALLKLARO_HUB_FILE") or HUB_FILE_DEFAULT)
+    try:
+        lines = path.read_text().strip().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return {"url": None}
+    url = lines[0].strip() if lines else ""
+    if not re.match(r"https?://\S+$", url):
+        return {"url": None}
+    return {"url": url}
+
+
 def build_markdown(items: list[dict], summary: str = "") -> str:
     """Render a finished conversation as Markdown for export."""
     lines = ["# Conversation transcript", ""]

@@ -443,3 +443,9 @@ def test_home_screen_web_app_is_configured():
 def test_spanish_speech_uses_latin_american_voice():
     assert '"es-MX"' in JS
     assert '"es-ES"' not in JS
+
+
+def test_hub_link_is_hidden_until_the_server_supplies_an_http_url():
+    assert re.search(r'<a id="hubLink"[^>]*\bhidden\b', HTML)
+    assert 'fetch("/api/hub")' in JS
+    assert "link.href = url" in JS and "https?:" in JS

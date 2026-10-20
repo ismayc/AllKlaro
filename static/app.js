@@ -285,6 +285,18 @@ function resolvePair(saved, models, sizes, def) {
   return { model, draft };
 }
 
+// Link to the owner's tailnet page index. The URL is served from a local file
+// outside the repo; with none configured the link stays hidden.
+async function loadHubLink() {
+  try {
+    const { url } = await (await fetch("/api/hub")).json();
+    if (typeof url !== "string" || !/^https?:\/\//i.test(url)) return;
+    const link = document.getElementById("hubLink");
+    link.href = url;
+    link.hidden = false;
+  } catch { /* the link is optional */ }
+}
+
 async function loadModels() {
   try {
     const r = await fetch("/api/models");
@@ -1460,4 +1472,5 @@ typeForm.onsubmit = async (e) => {
   typeInput.value = "";
 };
 
+loadHubLink();
 Promise.all([loadModels(), loadDevices()]).then(() => setStatus("ok", "ready"));
